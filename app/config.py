@@ -25,8 +25,15 @@ class Settings(BaseSettings):
     IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR: bool = True
 
     # LSEG Provider
+    LSEG_APP_KEY: str = "stub-key"  # Refinitiv App Key
+    LSEG_USERNAME: str = ""  # Refinitiv platform username
+    LSEG_PASSWORD: str = ""  # Refinitiv platform password
     LSEG_BASE_URL: str = "https://api.lseg.com/v1"
-    LSEG_API_KEY: str = "stub-key"
+
+    # LSEG Performance & Validation
+    LSEG_RATE_LIMIT_PER_SEC: int = 10  # Max API requests per second to Refinitiv
+    LSEG_CACHE_TTL_SECONDS: int = 5  # Cache quote data for X seconds (0 = disabled)
+    LSEG_STRICT_VALIDATION: bool = False  # If True, raise error on missing fields; if False, return None
 
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0

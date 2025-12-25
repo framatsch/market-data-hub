@@ -53,6 +53,19 @@ Configuration is handled via environment variables (see `app/config.py`).
 | `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider for price data |
 | `DEFAULT_COMPANY_PROVIDER` | `lseg` | Default provider for company data |
 
+### Refinitiv (LSEG) Entitlements
+
+To access Refinitiv/LSEG data, you need valid credentials from the LSEG Workspace platform:
+
+- **`LSEG_APP_KEY`**: Your application API key obtained from the LSEG Developer Portal
+- **`LSEG_USERNAME`**: Your LSEG Workspace username (typically an email address)
+- **`LSEG_PASSWORD`**: Your LSEG Workspace password
+
+These credentials must be set as environment variables before starting the service. Without valid credentials, any requests to LSEG-backed endpoints will fail with authentication errors.
+
+**Note**: LSEG data access requires an active subscription with appropriate entitlements for the data types you wish to retrieve (equity quotes, fundamentals, historical data, etc.).
+
+
 ## API Examples
 
 ### Health Check

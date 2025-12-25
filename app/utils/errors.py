@@ -33,6 +33,10 @@ class DataNotFoundError(AppError):
     def __init__(self, entity: str, identifier: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(f"{entity} with id '{identifier}' not found.", "DATA_NOT_FOUND", details)
 
+class DataValidationError(AppError):
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, "DATA_VALIDATION_ERROR", details)
+
 class ErrorDetail(BaseModel):
     code: str
     message: str

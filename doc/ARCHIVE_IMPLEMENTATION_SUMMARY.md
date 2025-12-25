@@ -1,3 +1,10 @@
+````markdown
+# Implementierungs-Zusammenfassung: Market Data Subscription Handling (Archiv)
+
+Hinweis: Diese Datei wurde archiviert, um Duplikate mit ARCHITECTURE_OVERVIEW zu vermeiden. Inhalt beibehalten.
+
+## Originalinhalt
+
 # Implementierungs-Zusammenfassung: Market Data Subscription Handling
 
 ## 🎯 Ziel
@@ -173,3 +180,5 @@ Falls noch nicht geschehen:
 2. Subscription Error Logs überprüfen
 3. Metrics für Fallback-Rate sammeln
 4. Level 2 Features erweitern (z.B. Order Book Tiefe)
+
+````
