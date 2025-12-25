@@ -111,6 +111,31 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
             return Decimal(str(val))
         return None
 
+    def _extract_greeks(self, ticker) -> dict:
+        """Extract Greeks from ticker.modelGreeks if available."""
+        greeks = {
+            "implied_volatility": None,
+            "delta": None,
+            "gamma": None,
+            "vega": None,
+            "theta": None
+        }
+
+        if ticker.modelGreeks:
+            mg = ticker.modelGreeks
+            if self._is_valid(mg.impliedVol):
+                greeks["implied_volatility"] = Decimal(str(mg.impliedVol))
+            if self._is_valid(mg.delta):
+                greeks["delta"] = Decimal(str(mg.delta))
+            if self._is_valid(mg.gamma):
+                greeks["gamma"] = Decimal(str(mg.gamma))
+            if self._is_valid(mg.vega):
+                greeks["vega"] = Decimal(str(mg.vega))
+            if self._is_valid(mg.theta):
+                greeks["theta"] = Decimal(str(mg.theta))
+
+        return greeks
+
     async def _ensure_connection(self):
         """Ensure we have an active connection to IBKR."""
         if self.ib.isConnected():
@@ -386,6 +411,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
             options_data = []
             for t in tickers:
                 c = t.contract
+                greeks = self._extract_greeks(t)
                 options_data.append(OptionQuote(
                     symbol=c.localSymbol, # e.g. AAPL  230616C00150000
                     underlying_symbol=symbol,
@@ -398,6 +424,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
                     bid=self._to_decimal(t.bid) if t.bid != -1 else None,
                     ask=self._to_decimal(t.ask) if t.ask != -1 else None,
                     volume=int(t.volume) if self._is_valid(t.volume) else 0,
+                    implied_volatility=greeks["implied_volatility"],
+                    delta=greeks["delta"],
+                    gamma=greeks["gamma"],
+                    vega=greeks["vega"],
+                    theta=greeks["theta"],
                     provider="ibkr"
                 ))
             logger.info(f"Retrieved {len(options_data)} options for {symbol}")
@@ -453,6 +484,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
             if not ticker:
                 raise DataNotFoundError(f"No market data for option {option_id}")
 
+            greeks = self._extract_greeks(ticker)
+
             return OptionQuote(
                 symbol=contract.localSymbol,
                 underlying_symbol=symbol,
@@ -465,6 +498,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
                 bid=self._to_decimal(ticker.bid) if ticker.bid != -1 else None,
                 ask=self._to_decimal(ticker.ask) if ticker.ask != -1 else None,
                 volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
+                implied_volatility=greeks["implied_volatility"],
+                delta=greeks["delta"],
+                gamma=greeks["gamma"],
+                vega=greeks["vega"],
+                theta=greeks["theta"],
                 provider="ibkr"
             )
 
