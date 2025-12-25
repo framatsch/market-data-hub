@@ -1,0 +1,502 @@
+import asyncio
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from typing import List, Optional, Literal
+
+import ib_async
+from ib_async import IB, Stock, Option, Contract
+from ib_async.objects import BarData
+
+from app.config import settings
+from app.models.price import PriceBar, PriceQuote
+from app.models.options import OptionChain, OptionQuote
+from app.providers.base import BasePriceProvider, BaseOptionsProvider
+from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
+import math
+from app.utils.logging import logger
+
+# Ensure event loop compatibility
+# ib_async.util.patchAsyncio()
+
+class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
+    """Implementation for IBKR provider using ib_async."""
+
+    async def _get_tickers_snapshot(self, contracts: List[Contract], skip_on_error: bool = True) -> List[object]:
+        """
+        Request market data snapshots for given contracts and wait for data.
+        If skip_on_error is True, ignores subscription errors and returns available data.
+        For options, uses streaming mode for better data quality.
+        """
+        logger.debug(f"Requesting market data snapshot for {len(contracts)} contracts")
+        tickers = []
+        failed_contracts = []
+
+        # Determine if we're dealing with options
+        is_option = any(c.secType == 'OPT' for c in contracts)
+        snapshot_mode = not is_option  # Use streaming for options, snapshot for stocks
+
+        logger.debug(f"Using {'streaming' if not snapshot_mode else 'snapshot'} mode for {len(contracts)} contracts")
+
+        for c in contracts:
+            try:
+                ticker = self.ib.reqMktData(c, '', snapshot_mode, False)
+                tickers.append(ticker)
+            except Exception as e:
+                error_msg = str(e)
+                contract_info = f"{c.symbol} {c.strike if hasattr(c, 'strike') else 'N/A'}"
+
+                if skip_on_error and self._handle_subscription_error(error_msg, contract_info):
+                    logger.warning(f"Skipping contract due to subscription error: {c}")
+                    failed_contracts.append(c)
+                else:
+                    raise
+
+        # Wait for data (longer for options)
+        timeout = 10.0 if is_option else 4.0
+        start_wait = datetime.now()
+
+        while (datetime.now() - start_wait).total_seconds() < timeout:
+            # For options, check for bid/ask or close price
+            if is_option:
+                # Check for any valid market data indicator
+                valid_count = sum(1 for t in tickers if
+                    (self._is_valid(t.bid) and t.bid != -1) or
+                    (self._is_valid(t.ask) and t.ask != -1) or
+                    self._is_valid(t.last) or
+                    self._is_valid(t.close))
+
+                if valid_count > 0:
+                    logger.debug(f"Got data for {valid_count}/{len(tickers)} option contracts")
+
+                if valid_count >= max(1, len(tickers) * 0.5):  # At least 50% have data
+                    break
+            else:
+                if all(t.time or t.last or t.close for t in tickers):
+                    break
+            await asyncio.sleep(0.5)
+
+        # Cancel streaming subscriptions if we used them
+        if not snapshot_mode:
+            logger.debug(f"Cancelling {len(tickers)} streaming subscriptions")
+            for t in tickers:
+                self.ib.cancelMktData(t.contract)
+
+        if failed_contracts:
+            logger.warning(f"Failed to get data for {len(failed_contracts)} contracts due to subscription issues")
+
+        valid_tickers = [t for t in tickers if t.time or t.last or t.close or self._is_valid(t.bid)]
+        logger.debug(f"Snapshot complete. Got data for {len(valid_tickers)}/{len(tickers)} contracts")
+        return tickers
+
+    def __init__(self):
+        self.ib = IB()
+        self.host = settings.IBKR_HOST
+        self.port = settings.IBKR_PORT
+        self.client_id = settings.IBKR_CLIENT_ID
+        self.connect_on_request = settings.IBKR_CONNECT_ON_REQUEST
+        self.market_data_type = settings.IBKR_MARKET_DATA_TYPE
+        self.fallback_on_subscription_error = settings.IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR
+
+        # Keep track if we are currently connected implementation-wise
+        self._connected = False
+
+        # Track subscription errors
+        self._subscription_errors = []
+
+    def _is_valid(self, val) -> bool:
+        return val is not None and not (isinstance(val, float) and math.isnan(val))
+
+    def _to_decimal(self, val) -> Optional[Decimal]:
+        if self._is_valid(val):
+            return Decimal(str(val))
+        return None
+
+    async def _ensure_connection(self):
+        """Ensure we have an active connection to IBKR."""
+        if self.ib.isConnected():
+            return
+
+        try:
+            logger.info(f"Connecting to IBKR at {self.host}:{self.port} (Client ID: {self.client_id})")
+            await self.ib.connectAsync(self.host, self.port, self.client_id)
+            self.ib.reqMarketDataType(self.market_data_type)
+
+            # Install error handler to catch subscription warnings
+            self.ib.errorEvent += self._on_ib_error
+
+            self._connected = True
+        except Exception as e:
+            logger.error(f"Failed to connect to IBKR: {e}")
+            raise ProviderConnectionError(f"Could not connect to IBKR: {str(e)}")
+        else:
+            logger.debug("Successfully connected to IBKR")
+
+    def _on_ib_error(self, reqId, errorCode, errorString, contract):
+        """
+        Handle IBKR errors/warnings.
+        Error 10091 is a warning about market data subscriptions but data still comes through.
+        """
+        if errorCode == 10091:
+            # Subscription warning - data may still be available
+            logger.debug(f"Market data subscription warning (Error 10091): {errorString}")
+            # Don't raise, just log
+        elif errorCode < 2000:  # Errors (vs warnings which are >= 2000)
+            logger.error(f"IBKR Error {errorCode} for reqId {reqId}: {errorString}")
+        else:
+            logger.debug(f"IBKR Info {errorCode}: {errorString}")
+
+    def _handle_subscription_error(self, error_msg: str, contract_info: str = "") -> bool:
+        """
+        Handle subscription/permission errors gracefully.
+        Returns True if we should continue with fallback, False if we should raise.
+        """
+        if "subscription" in error_msg.lower() or "10091" in error_msg:
+            self._subscription_errors.append({
+                "contract": contract_info,
+                "error": error_msg,
+                "timestamp": datetime.now()
+            })
+            logger.warning(f"Subscription error detected: {error_msg}. Contract: {contract_info}")
+            return self.fallback_on_subscription_error
+        return False
+
+    async def _set_market_data_type(self, market_data_type: int = None):
+        """
+        Change market data type dynamically.
+        1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen
+        """
+        try:
+            mdt = market_data_type or self.market_data_type
+            self.ib.reqMarketDataType(mdt)
+            logger.info(f"Market data type set to {mdt}")
+        except Exception as e:
+            logger.error(f"Failed to set market data type: {e}")
+
+    async def _disconnect(self):
+        """Disconnect if configured to do so."""
+        if self.connect_on_request and self.ib.isConnected():
+            self.ib.disconnect()
+            self._connected = False
+            logger.debug("Disconnected from IBKR")
+
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime) -> List[PriceBar]:
+        try:
+            await self._ensure_connection()
+
+            contract = Stock(symbol, 'SMART', 'USD')
+
+            # Map interval to IBKR bar size
+            bar_size = self._map_interval(interval)
+
+            # Calculate duration string
+            duration_str = self._calculate_duration(start, end)
+
+            logger.info(f"Fetching historical prices for {symbol} ({interval}) from {start} to {end}")
+
+            # Request data
+            # whatToShow='TRADES' gives OHLCV
+            bars: List[BarData] = await self.ib.reqHistoricalDataAsync(
+                contract,
+                endDateTime=end,
+                durationStr=duration_str,
+                barSizeSetting=bar_size,
+                whatToShow='TRADES',
+                useRTH=True,
+                formatDate=1  # Flow date as string
+            )
+
+            if not bars:
+                # Fallback or check errors?
+                # Usually empty list implies no data
+                return []
+
+            result = []
+            for b in bars:
+                # IBKR bars data: date, open, high, low, close, volume...
+                # Date is usually naive or localized.
+                # If '1 day' bars, date is date object. If intraday, datetime.
+
+                bar_start = b.date
+                if isinstance(bar_start, date) and not isinstance(bar_start, datetime):
+                    bar_start = datetime.combine(bar_start, datetime.min.time())
+
+                # Assume end is start + interval (approx)
+                # We won't be perfectly precise on 'end' without parsing interval,
+                # but PriceBar needs it.
+                bar_end = bar_start # Placeholder, or calculate
+
+                result.append(PriceBar(
+                    symbol=symbol,
+                    start=bar_start,
+                    end=bar_end, # Simplification
+                    open=Decimal(str(b.open)),
+                    high=Decimal(str(b.high)),
+                    low=Decimal(str(b.low)),
+                    close=Decimal(str(b.close)),
+                    volume=int(b.volume),
+                    provider="ibkr"
+                ))
+
+            logger.info(f"Retrieved {len(result)} bars for {symbol}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting historical prices for {symbol}: {e}")
+            raise ProviderError(f"IBKR error: {e}")
+        finally:
+            await self._disconnect()
+
+    async def get_last_price(self, symbol: str) -> PriceQuote:
+        try:
+            await self._ensure_connection()
+            contract = Stock(symbol, 'SMART', 'USD')
+
+            # Qualify contract to get conId etc specific to SMART
+            await self.ib.qualifyContractsAsync(contract)
+            logger.debug(f"Qualified contract for {symbol}: {contract}")
+
+            # Request snapshot using helper
+            tickers = await self._get_tickers_snapshot([contract])
+
+            # Should have data
+            if not tickers:
+                 raise DataNotFoundError(f"No market data for {symbol}")
+            ticker = tickers[0]
+
+            # Use last price, or close, or mid...
+            # If market is closed, look for 'close' or 'last'.
+            # snapshot=True usually returns available data.
+            logger.debug(f"Raw ticker for {symbol}: {ticker}")
+            price = ticker.last if self._is_valid(ticker.last) else ticker.close
+            if not self._is_valid(price):
+                 price = ticker.close
+
+            if not self._is_valid(price):
+                # Fallback to historical data
+                logger.info(f"Market data snapshot failed for {symbol}, falling back to historical data")
+                # Look back a few days to ensure we find the last trading day
+                end_dt = datetime.now()
+                start_dt = end_dt - timedelta(days=7)
+                try:
+                    bars = await self.get_historical_prices(symbol, "1d", start_dt, end_dt)
+                    if bars:
+                        last_bar = bars[-1]
+                        price = last_bar.close
+                        logger.info(f"Found historical close price for {symbol}: {price}")
+                    else:
+                        price = 0.0
+                except Exception as ex:
+                    logger.warning(f"Fallback to historical data failed: {ex}")
+                    price = 0.0
+
+            quote = PriceQuote(
+                symbol=symbol,
+                price=Decimal(str(price)),
+                currency=contract.currency,
+                timestamp=ticker.time if ticker.time else datetime.now(),
+                provider="ibkr",
+                bid=self._to_decimal(ticker.bid),
+                ask=self._to_decimal(ticker.ask),
+                volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0
+            )
+            logger.info(f"Got quote for {symbol}: {quote}")
+            return quote
+
+        except Exception as e:
+            logger.error(f"Error getting last price for {symbol}: {e}")
+            raise ProviderError(f"IBKR error: {e}")
+        finally:
+            await self._disconnect()
+
+    async def get_option_chain(
+        self,
+        symbol: str,
+        expiry: date,
+        min_strike: Optional[Decimal] = None,
+        max_strike: Optional[Decimal] = None,
+        right: Optional[Literal["call", "put"]] = None,
+        include_level2: bool = False
+    ) -> OptionChain:
+        try:
+            logger.info(f"Fetching option chain for {symbol} expiry {expiry} (include_level2={include_level2})")
+            await self._ensure_connection()
+
+            # Set market data type for Level 2 if requested
+            if include_level2:
+                await self._set_market_data_type(1)  # Live for Level 2
+
+            # 1. Qualify underlying
+            underlying = Stock(symbol, 'SMART', 'USD')
+            await self.ib.qualifyContractsAsync(underlying)
+
+            # 2. Get params
+            chains = await self.ib.reqSecDefOptParamsAsync(underlying.symbol, '', underlying.secType, underlying.conId)
+
+            if not chains:
+                raise DataNotFoundError(f"No option chain found for {symbol}")
+
+            # Filter for specific expiry
+            exp_str = expiry.strftime('%Y%m%d')
+
+            relevant_strikes = set()
+
+            # Accumulate all strikes that exist for this expiry across exchanges
+            for c in chains:
+                if exp_str in c.expirations:
+                    relevant_strikes.update(c.strikes)
+
+            if not relevant_strikes:
+                all_expiries = sorted(list(set(e for c in chains for e in c.expirations)))
+                logger.warning(f"No options found for {symbol} at expiry {exp_str}. Available: {all_expiries[:5]}... ({len(all_expiries)} total)")
+                return OptionChain(underlying_symbol=symbol, expiry=expiry, options=[], provider="ibkr")
+
+            # Filter strikes
+            sorted_strikes = sorted(list(relevant_strikes))
+            if min_strike:
+                 sorted_strikes = [k for k in sorted_strikes if Decimal(str(k)) >= min_strike]
+            if max_strike:
+                 sorted_strikes = [k for k in sorted_strikes if Decimal(str(k)) <= max_strike]
+
+            # 3. Create Contract objects for all strikes (Call and Put)
+            contracts = []
+            for k in sorted_strikes:
+                if right is None or right == "call":
+                    contracts.append(Option(symbol, exp_str, k, 'C', 'SMART'))
+                if right is None or right == "put":
+                    contracts.append(Option(symbol, exp_str, k, 'P', 'SMART'))
+
+            # 4. Request market data for them?
+            # Doing snapshot for ALL might be slow.
+            # Let's try to qualify them first (gets conIds)
+            # Qualify in batches or one by one? Bulk is better.
+            # However, if some are invalid, qualifyContractsAsync might fail or leave them without conId.
+            # We must filter out those without conId before requesting data to avoid hashing errors.
+            await self.ib.qualifyContractsAsync(*contracts)
+
+            valid_contracts = [c for c in contracts if c.conId > 0]
+            if len(valid_contracts) < len(contracts):
+                logger.warning(f"Optimization: Filtered {len(contracts) - len(valid_contracts)} invalid option contracts")
+
+            if not valid_contracts:
+                 logger.warning("No valid option contracts found after qualification")
+                 return OptionChain(underlying_symbol=symbol, expiry=expiry, options=[], provider="ibkr")
+
+            tickers = await self._get_tickers_snapshot(valid_contracts)
+
+            options_data = []
+            for t in tickers:
+                c = t.contract
+                options_data.append(OptionQuote(
+                    symbol=c.localSymbol, # e.g. AAPL  230616C00150000
+                    underlying_symbol=symbol,
+                    strike=Decimal(str(c.strike)),
+                    expiry=expiry,
+                    type="call" if c.right == 'C' else "put",
+                    # Try last, then close as fallback
+                    price=self._to_decimal(t.last) or self._to_decimal(t.close) or Decimal("0.0"),
+                    # Only include bid/ask if valid (not -1)
+                    bid=self._to_decimal(t.bid) if t.bid != -1 else None,
+                    ask=self._to_decimal(t.ask) if t.ask != -1 else None,
+                    volume=int(t.volume) if self._is_valid(t.volume) else 0,
+                    provider="ibkr"
+                ))
+            logger.info(f"Retrieved {len(options_data)} options for {symbol}")
+            return OptionChain(
+                underlying_symbol=symbol,
+                expiry=expiry,
+                options=options_data,
+                provider="ibkr"
+            )
+
+        except Exception as e:
+            logger.error(f"Error getting option chain for {symbol}: {e}")
+            raise ProviderError(f"IBKR error: {e}")
+        finally:
+            await self._disconnect()
+
+    async def get_option_quote(self, symbol: str, option_id: str, include_level2: bool = False) -> OptionQuote:
+        """
+        Get a specific option quote.
+
+        Args:
+            symbol: Underlying symbol
+            option_id: The contract localSymbol or unique identifier
+            include_level2: If True, attempts to request Level 2 data
+        """
+        try:
+            logger.info(f"Fetching option quote for {symbol} id {option_id} (include_level2={include_level2})")
+            await self._ensure_connection()
+
+            # Set market data type for Level 2 if requested
+            if include_level2:
+                await self._set_market_data_type(1)  # Live for Level 2
+
+            # We need to define contract. If we have localSymbol, we can use it.
+            # But we also need exchange etc.
+            contract = Contract()
+            contract.symbol = symbol # Underlying? No, for Option, symbol is underlying.
+            contract.secType = 'OPT'
+            contract.localSymbol = option_id # Try this
+            contract.exchange = 'SMART'
+            contract.currency = 'USD'
+
+            await self.ib.qualifyContractsAsync(contract)
+
+            if not contract.conId:
+                 # Try searching by parsing?
+                 # Maybe option_id is more descriptive?
+                 raise DataNotFoundError(f"Could not resolve option contract {option_id}")
+
+            tickers = await self._get_tickers_snapshot([contract], skip_on_error=True)
+            ticker = tickers[0] if tickers else None
+
+            if not ticker:
+                raise DataNotFoundError(f"No market data for option {option_id}")
+
+            return OptionQuote(
+                symbol=contract.localSymbol,
+                underlying_symbol=symbol,
+                strike=Decimal(str(contract.strike)),
+                expiry=datetime.strptime(contract.lastTradeDateOrContractMonth, '%Y%m%d').date(),
+                type="call" if contract.right == 'C' else "put",
+                # Try last, then close as fallback for price
+                price=self._to_decimal(ticker.last) or self._to_decimal(ticker.close) or Decimal("0.0"),
+                # Only include bid/ask if valid (not -1)
+                bid=self._to_decimal(ticker.bid) if ticker.bid != -1 else None,
+                ask=self._to_decimal(ticker.ask) if ticker.ask != -1 else None,
+                volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
+                provider="ibkr"
+            )
+
+        except Exception as e:
+            logger.error(f"Error getting option quote {option_id}: {e}")
+            raise ProviderError(f"IBKR error: {e}")
+        finally:
+            await self._disconnect()
+
+    def _map_interval(self, interval: str) -> str:
+        # Common mappings
+        if interval == "1m": return "1 min"
+        if interval == "2m": return "2 mins"
+        if interval == "5m": return "5 mins"
+        if interval == "15m": return "15 mins"
+        if interval == "30m": return "30 mins"
+        if interval == "1h": return "1 hour"
+        if interval == "1d": return "1 day"
+        if interval == "1w": return "1 week"
+        return "1 day" # Default
+
+    def _calculate_duration(self, start: datetime, end: datetime) -> str:
+        diff = end - start
+        if diff.days >= 365:
+            years = diff.days // 365
+            return f"{years + 1} Y" # Approx
+        if diff.days >= 30:
+            months = diff.days // 30
+            return f"{months + 1} M"
+        if diff.days >= 1:
+            return f"{diff.days + 1} D"
+
+        # Less than 1 day
+        seconds = diff.total_seconds()
+        return f"{int(seconds) + 60} S"

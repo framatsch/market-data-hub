@@ -1,0 +1,12 @@
+.env
+*.pyc
+__pycache__/
+.vscode/
+.env.local
+.env.*.local
+.idea/
+.DS_Store
+coverage/
+htmlcov/
+poetry.lock
+.pytest_cache/
