@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     IBKR_ACCOUNT_ID: str = "DU123456"
     IBKR_ENV: Literal["live", "paper"] = "paper"
     # 1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen
-    IBKR_MARKET_DATA_TYPE: int = 1  # 1=Live (default), better compatibility for Options/Stock data
+    IBKR_MARKET_DATA_TYPE: int = 3  # 3=Delayed (free, no subscription required), 1=Live (requires subscription)
     IBKR_CONNECT_ON_REQUEST: bool = False
     # Handle subscription errors gracefully
     IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR: bool = True

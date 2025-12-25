@@ -1,11 +1,7 @@
 import refinitiv.data as rd
 from refinitiv.data.content import historical_pricing, search
-import datetime
 from dotenv import load_dotenv
 import os
-
-
-
 
 
 def convert_to_ric(ticker):
@@ -13,7 +9,7 @@ def convert_to_ric(ticker):
         response = search.Definition(
             view=search.Views.EQUITY_QUOTES,
             query=ticker,
-            # Wir suchen exakt nach dem Ticker-Symbol
+            # Search exactly for the ticker symbol
             filter=f"TickerSymbol eq '{ticker}'",
             select="RIC, DisplayName, TickerSymbol, ExchCode",
             top=1
@@ -22,9 +18,9 @@ def convert_to_ric(ticker):
         if not response.data.df.empty:
             return response.data.df.iloc[0]['RIC']
         else:
-            return "Kein RIC gefunden"
+            return "No RIC found"
     except Exception as e:
-        return f"Fehler: {e}"
+        return f"Error: {e}"
 
 
 try:
@@ -40,32 +36,30 @@ try:
 
     session.open()
     rd.session.set_default(session)
-    print("Status: Verbindung zur LSEG Plattform erfolgreich!")
+    print("Status: Connection to LSEG platform successful!")
 
+    instrument = convert_to_ric("AAPL")  # Example ticker for Apple Inc.
+    print(f"Resolved instrument: {instrument}")
 
-    instrument = convert_to_ric("AAPL")  # Beispiel ISIN für Rigel Pharmaceuticals plc
-    print(f"Aufgelöstes Instrument: {instrument}")
-
-    print(f"\nFrage historische Daten für {instrument} ab...")
+    print(f"\nFetching historical data for {instrument}...")
 
     response = historical_pricing.summaries.Definition(
         universe=instrument,
         interval=historical_pricing.Intervals.DAILY,
-        count=1 # Holt den aktuellsten verfügbaren Tag
+        count=1  # Fetches the most recent available day
     ).get_data()
 
     if response.data.df is not None and not response.data.df.empty:
         df = response.data.df
-        # Wir lassen uns die relevanten Spalten anzeigen
-        # Typische Spalten sind 'TRDPRC_1' (Preis) oder 'CLOSE'
-        print("\nLetzter verfügbarer Handelstag:")
+        # Display the relevant columns
+        # Typical columns are 'TRDPRC_1' (price) or 'CLOSE'
+        print("\nLast available trading day:")
         print(df)
         #print(df[['Date', 'CLOSE']])
     else:
-        print("Keine Daten für dieses Instrument gefunden.")
+        print("No data found for this instrument.")
 
     session.close()
 
 except Exception as e:
-    print(f"Fehler: {e}")
-
+    print(f"Error: {e}")

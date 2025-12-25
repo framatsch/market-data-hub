@@ -134,12 +134,12 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
     def _on_ib_error(self, reqId, errorCode, errorString, contract):
         """
         Handle IBKR errors/warnings.
-        Error 10091 is a warning about market data subscriptions but data still comes through.
+        Error 10089/10091 are subscription warnings but data still comes through.
         """
-        if errorCode == 10091:
-            # Subscription warning - data may still be available
-            logger.debug(f"Market data subscription warning (Error 10091): {errorString}")
-            # Don't raise, just log
+        if errorCode in (10089, 10091):
+            # Subscription warnings - data is still available (delayed or from model)
+            logger.debug(f"Market data subscription warning (Error {errorCode}): {errorString[:50]}...")
+            # Don't raise, just log silently
         elif errorCode < 2000:  # Errors (vs warnings which are >= 2000)
             logger.error(f"IBKR Error {errorCode} for reqId {reqId}: {errorString}")
         else:
