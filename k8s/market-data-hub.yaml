@@ -1,0 +1,160 @@
+---
+# Market Data Hub - Kubernetes Deployment Manifest
+# This file contains all resources needed to deploy to Kubernetes
+#
+# Prerequisites:
+# 1. Create namespace: kubectl create namespace market-data-hub
+# 2. Create secrets: kubectl create secret generic market-data-hub-secrets \
+#      --from-literal=lseg_app_key=$LSEG_APP_KEY \
+#      --from-literal=lseg_username=$LSEG_USERNAME \
+#      --from-literal=lseg_password=$LSEG_PASSWORD \
+#      -n market-data-hub
+# 3. Apply this file: kubectl apply -f deploy/kubernetes.yaml -n market-data-hub
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: market-data-hub-config
+  labels:
+    app: market-data-hub
+data:
+  ibkr_host: "localhost"
+  ibkr_port: "4002"
+  ibkr_client_id: "815"
+  ibkr_market_data_type: "2"
+  app_env: "prod"
+  log_level: "INFO"
+  default_price_provider: "ibkr"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-data-hub
+  labels:
+    app: market-data-hub
+spec:
+  replicas: 1  # 1 for dev, 2-3 for production
+  selector:
+    matchLabels:
+      app: market-data-hub
+  template:
+    metadata:
+      labels:
+        app: market-data-hub
+    spec:
+      containers:
+      - name: app
+        image: ghcr.io/yourusername/market-data-hub:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8001
+          name: sse
+        env:
+        # IBKR Configuration from ConfigMap
+        - name: IBKR_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: ibkr_host
+        - name: IBKR_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: ibkr_port
+        - name: IBKR_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: ibkr_client_id
+        - name: IBKR_MARKET_DATA_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: ibkr_market_data_type
+        # LSEG Credentials from Secret
+        - name: LSEG_APP_KEY
+          valueFrom:
+            secretKeyRef:
+              name: market-data-hub-secrets
+              key: lseg_app_key
+        - name: LSEG_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: market-data-hub-secrets
+              key: lseg_username
+        - name: LSEG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: market-data-hub-secrets
+              key: lseg_password
+        # Application Settings from ConfigMap
+        - name: APP_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: app_env
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: log_level
+        - name: DEFAULT_PRICE_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: default_price_provider
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 0
+          periodSeconds: 1
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-data-hub
+  labels:
+    app: market-data-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: sse
+  selector:
+    app: market-data-hub

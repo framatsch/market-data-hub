@@ -1,8 +1,8 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies if needed (e.g. curl for healthcheck)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Copy project files
@@ -10,12 +10,14 @@ COPY pyproject.toml .
 # Install dependencies
 RUN pip install --no-cache-dir .
 
-COPY app app/
+COPY app/ ./app/
 
 # Create non-root user
 RUN useradd -m appuser
 USER appuser
 
-EXPOSE 8000
+# Expose HTTP and MCP SSE ports
+EXPOSE 8000 8001
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default to HTTP mode, can be overridden to "mcp" or "both"
+CMD ["python", "-m", "app.main", "http"]

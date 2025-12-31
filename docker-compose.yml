@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  market-data-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: market-data-hub:latest
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    environment:
+      IBKR_HOST: ${IBKR_HOST:-localhost}
+      IBKR_PORT: ${IBKR_PORT:-4002}
+      IBKR_CLIENT_ID: ${IBKR_CLIENT_ID:-815}
+      IBKR_MARKET_DATA_TYPE: ${IBKR_MARKET_DATA_TYPE:-2}
+      LSEG_APP_KEY: ${LSEG_APP_KEY}
+      LSEG_USERNAME: ${LSEG_USERNAME}
+      LSEG_PASSWORD: ${LSEG_PASSWORD}
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
+    command: python -m app.main http
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - .:/app
+    networks:
+      - market-data-hub
+
+networks:
+  market-data-hub:
+    driver: bridge
