@@ -27,7 +27,7 @@ async def test_frozen_data():
 
     try:
         await ib.connectAsync(settings.IBKR_HOST, settings.IBKR_PORT, settings.IBKR_CLIENT_ID)
-        print(f"✅ Connected to IBKR\n")
+        print("✅ Connected to IBKR\n")
 
         # Set to Type 2 (FROZEN)
         print("Setting Market Data Type to 2 (FROZEN)...")
@@ -47,11 +47,11 @@ async def test_frozen_data():
 
             def format_value(val, label=""):
                 if val is None:
-                    return f"❌ None"
+                    return "❌ None"
                 if isinstance(val, float) and math.isnan(val):
-                    return f"❌ NaN"
+                    return "❌ NaN"
                 if val == -1:
-                    return f"❌ Not available"
+                    return "❌ Not available"
                 if val > 0:
                     return f"✅ ${val:.2f}"
                 return f"? {val}"
@@ -78,11 +78,11 @@ async def test_frozen_data():
 
             def format_value(val, label=""):
                 if val is None:
-                    return f"❌ None"
+                    return "❌ None"
                 if isinstance(val, float) and math.isnan(val):
-                    return f"❌ NaN"
+                    return "❌ NaN"
                 if val == -1:
-                    return f"❌ Not available"
+                    return "❌ Not available"
                 if val > 0:
                     return f"✅ ${val:.2f}"
                 return f"? {val}"
@@ -95,11 +95,11 @@ async def test_frozen_data():
 
             if ticker.modelGreeks:
                 mg = ticker.modelGreeks
-                print(f"\n  Greeks available:")
+                print("\n  Greeks available:")
                 print(f"    IV:    {mg.impliedVol if mg.impliedVol else 'N/A'}")
                 print(f"    Delta: {mg.delta if mg.delta else 'N/A'}")
             else:
-                print(f"\n  Greeks: ❌ Not available")
+                print("\n  Greeks: ❌ Not available")
 
             ib.cancelMktData(opt)
 

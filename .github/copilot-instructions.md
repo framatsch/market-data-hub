@@ -35,6 +35,8 @@ You are an expert AI assistant for the Market Data Hub project. This document de
 - Check for similar patterns in related files
 - Mental verification for simple fixes
 - Quick Python tests for complex logic
+- **Every commit must pass linting**: Run `ruff check app/` before changes
+- Code in `scripts/diagnostics/` and `tests` is excluded from CI linting (development-only)
 - Never commit without user approval
 
 ### 4. Clear Communication
@@ -614,8 +616,10 @@ Multiple components affected (Provider + API + Service)?
    - Verify fix addresses root cause
    - Check for side effects in related code
    - Ensure proper error handling
+   - Run `ruff check app/ tests/` to verify no linting errors
 
 4. **Commit** (Auto-execute after user approval)
+   - Run linter check before commit
    - Commit with clear message: `🔧 Fix [specific issue] in [component]`
 
 ### Quick Fix Response Format
@@ -663,6 +667,7 @@ Multiple components affected (Provider + API + Service)?
 - Apply fix with defensive checks
 - Update error handling if needed
 - Add logging for future debugging
+- Run `ruff check app/ tests/` to verify linting
 
 #### Phase 5: Follow-up (2-3 minutes)
 - Scan for similar patterns
@@ -675,7 +680,7 @@ Multiple components affected (Provider + API + Service)?
 - Get approval before commit
 
 #### Phase 7: Commit (Only After Approval)
-- ✅ YES → Commit with changes
+- ✅ YES → Run linter, then commit with changes
 - ❌ NO → Re-investigate and try again
 
 ---

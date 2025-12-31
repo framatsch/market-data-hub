@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from app.dependencies import PriceServiceDep
 from app.models.price import PriceBar, PriceQuote

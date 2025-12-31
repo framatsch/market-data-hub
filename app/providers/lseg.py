@@ -91,7 +91,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider):
                 signon_control=True
             ).get_session()
 
-            logger.info(f"Session definition created, opening session...")
+            logger.info("Session definition created, opening session...")
             session.open()
 
             logger.info("Session opened, setting as default...")

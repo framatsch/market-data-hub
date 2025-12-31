@@ -1,9 +1,8 @@
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional, Literal
 
-import ib_async
 from ib_async import IB, Stock, Option, Contract
 from ib_async.objects import BarData
 
@@ -514,15 +513,23 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
 
     def _map_interval(self, interval: str) -> str:
         # Common mappings
-        if interval == "1m": return "1 min"
-        if interval == "2m": return "2 mins"
-        if interval == "5m": return "5 mins"
-        if interval == "15m": return "15 mins"
-        if interval == "30m": return "30 mins"
-        if interval == "1h": return "1 hour"
-        if interval == "1d": return "1 day"
-        if interval == "1w": return "1 week"
-        return "1 day" # Default
+        if interval == "1m":
+            return "1 min"
+        if interval == "2m":
+            return "2 mins"
+        if interval == "5m":
+            return "5 mins"
+        if interval == "15m":
+            return "15 mins"
+        if interval == "30m":
+            return "30 mins"
+        if interval == "1h":
+            return "1 hour"
+        if interval == "1d":
+            return "1 day"
+        if interval == "1w":
+            return "1 week"
+        return "1 day"  # Default
 
     def _calculate_duration(self, start: datetime, end: datetime) -> str:
         diff = end - start

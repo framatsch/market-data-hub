@@ -1,4 +1,4 @@
-from typing import Dict, Type, Optional, cast
+from typing import Dict, Optional, cast
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider
 from app.providers.ibkr import IBKRProvider

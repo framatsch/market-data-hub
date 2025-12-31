@@ -209,11 +209,11 @@ class TestSessionManagement:
 
     def test_session_persists(self, lseg_provider):
         """Test session persists across multiple calls."""
-        session1 = lseg_provider._get_session()
+        lseg_provider._get_session()
         timestamp1 = lseg_provider._session_created_at
 
         # Second call should reuse session
-        session2 = lseg_provider._get_session()
+        lseg_provider._get_session()
         timestamp2 = lseg_provider._session_created_at
 
         assert timestamp1 == timestamp2  # Should be same session

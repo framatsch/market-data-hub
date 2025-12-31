@@ -2,11 +2,10 @@
 
 import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, patch, MagicMock
-from decimal import Decimal
+from unittest.mock import Mock, patch
 
 from app.providers.lseg import LSEGProvider
-from app.utils.errors import DataNotFoundError, ProviderConnectionError
+from app.utils.errors import ProviderConnectionError
 
 
 class TestRICCaching:

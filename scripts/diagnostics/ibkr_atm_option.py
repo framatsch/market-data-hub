@@ -4,7 +4,6 @@ Run: python scripts/diagnostics/ibkr_atm_option.py
 """
 
 import asyncio
-import os
 import logging
 from datetime import date
 
@@ -41,7 +40,7 @@ async def main():
     if chain.options:
         atm_call = min([o for o in chain.options if o.type == "call"],
                        key=lambda x: abs(float(x.strike) - current_price))
-        print(f"\n📊 Closest ATM Call Option:")
+        print("\n📊 Closest ATM Call Option:")
         print(f"   Symbol: {atm_call.symbol}")
         print(f"   Strike: ${atm_call.strike}")
         print(f"   Price: ${atm_call.price if atm_call.price else 'N/A'}")
@@ -58,7 +57,7 @@ async def main():
     if chain_l2.options:
         atm_call_l2 = min([o for o in chain_l2.options if o.type == "call"],
                           key=lambda x: abs(float(x.strike) - current_price))
-        print(f"\n📊 ATM Call Option WITH Level 2:")
+        print("\n📊 ATM Call Option WITH Level 2:")
         print(f"   Symbol: {atm_call_l2.symbol}")
         print(f"   Strike: ${atm_call_l2.strike}")
         print(f"   Price: ${atm_call_l2.price if atm_call_l2.price else 'N/A'}")

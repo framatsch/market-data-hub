@@ -4,10 +4,7 @@ Debug script to explore Refinitiv EQUITY_DERIVATIVE APIs for options.
 Run this to discover available fields, expirations, and strikes.
 """
 
-import os
 import sys
-from datetime import datetime, date
-from decimal import Decimal
 
 # Add project to path
 sys.path.insert(0, '/home/fscheffold/private/market-data-hub')
@@ -80,7 +77,7 @@ try:
         if response.data.df is not None and not response.data.df.empty:
             print(f"✅ Found {len(response.data.df)} derivative instruments")
             print(f"\nColumns available: {list(response.data.df.columns)}")
-            print(f"\nFirst 10 rows:")
+            print("\nFirst 10 rows:")
             print(response.data.df.head(10).to_string())
         else:
             print("❌ No results from EQUITY_DERIVATIVE_INSTRUMENTS search")
@@ -104,7 +101,7 @@ try:
         if response.data.df is not None and not response.data.df.empty:
             print(f"✅ Found {len(response.data.df)} quotes")
             print(f"\nColumns available: {list(response.data.df.columns)}")
-            print(f"\nFirst 5 rows:")
+            print("\nFirst 5 rows:")
             print(response.data.df.head(5).to_string())
         else:
             print("❌ No results from EQUITY_DERIVATIVE_QUOTES search")
@@ -145,7 +142,7 @@ try:
         if response.data.df is not None and not response.data.df.empty:
             print(f"✅ Chain expansion found {len(response.data.df)} contracts")
             print(f"\nColumns: {list(response.data.df.columns)}")
-            print(f"\nFirst 5 rows:")
+            print("\nFirst 5 rows:")
             print(response.data.df.head(5).to_string())
         else:
             print("❌ No results from chain_expansion")

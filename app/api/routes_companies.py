@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from app.dependencies import CompanyServiceDep
 from app.models.company import CompanyProfile, CompanySummary

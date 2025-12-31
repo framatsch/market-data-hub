@@ -32,7 +32,7 @@ jobs:
           pip install ruff
 
       - name: Lint
-        run: ruff check .
+        run: ruff check app/
 
       - name: Run tests
         run: pytest --maxfail=1 --disable-warnings

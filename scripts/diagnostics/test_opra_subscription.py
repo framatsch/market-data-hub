@@ -28,7 +28,7 @@ async def test_market_data_type(data_type: int, name: str):
         await asyncio.sleep(0.5)  # Let the type change take effect
 
         # Test Stock
-        print(f"\n  Stock (AAPL):")
+        print("\n  Stock (AAPL):")
         stock = Stock("AAPL", "SMART", "USD")
         qualified = await ib.qualifyContractsAsync(stock)
         if qualified:
@@ -52,7 +52,7 @@ async def test_market_data_type(data_type: int, name: str):
             ib.cancelMktData(stock)
 
         # Test Option
-        print(f"\n  Option (AAPL Call 275):")
+        print("\n  Option (AAPL Call 275):")
         opt = Option("AAPL", "20260116", 275, "C", "SMART")
         qualified = await ib.qualifyContractsAsync(opt)
         if qualified:

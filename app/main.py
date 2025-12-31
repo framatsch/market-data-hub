@@ -10,7 +10,6 @@ from fastmcp import FastMCP
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
-from app.utils.logging import logger
 from app.api import routes_meta, routes_prices, routes_companies, routes_options, routes_ws
 
 mcp_logger = logging.getLogger(__name__)

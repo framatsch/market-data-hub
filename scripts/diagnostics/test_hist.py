@@ -11,12 +11,12 @@ async def test():
         start = end - timedelta(days=30)
 
         bars = await provider.get_historical_prices("AAPL", "1d", start, end)
-        print(f"✅ get_historical_prices('AAPL', '1d', 30 days):")
+        print("✅ get_historical_prices('AAPL', '1d', 30 days):")
         print(f"   Bars returned: {len(bars)}")
         if bars:
-            print(f"\n   First bar:")
+            print("\n   First bar:")
             print(f"     {bars[0]}")
-            print(f"\n   Last bar:")
+            print("\n   Last bar:")
             print(f"     {bars[-1]}")
         else:
             print("   ERROR: Empty result!")

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Test Refinitiv (LSEG) API for options data capabilities."""
 
-import os
 import sys
 import logging
 
@@ -23,12 +22,12 @@ def test_lseg_options():
     print("="*70)
     
     # Check imports
-    print(f"\n✅ refinitiv.data SDK imported")
+    print("\n✅ refinitiv.data SDK imported")
     print(f"   App Key: {settings.LSEG_APP_KEY[:30]}...")
     print(f"   Username: {settings.LSEG_USERNAME}")
     
     # Initialize session
-    print(f"\nInitializing Refinitiv session...")
+    print("\nInitializing Refinitiv session...")
     session = rd.session.platform.Definition(
         app_key=settings.LSEG_APP_KEY,
         grant=rd.session.platform.GrantPassword(
@@ -128,7 +127,7 @@ def test_lseg_options():
                 print(f"  {col:20s} = {value}")
             print()
         else:
-            print(f"⚠️  No quote data available\n")
+            print("⚠️  No quote data available\n")
     except Exception as e:
         print(f"❌ Quote data failed: {e}\n")
     
@@ -155,7 +154,7 @@ def test_lseg_options():
     
     try:
         views = search.Views
-        print(f"✅ Available Views:")
+        print("✅ Available Views:")
         view_names = [v for v in dir(views) if not v.startswith('_')]
         for i, view_name in enumerate(view_names, 1):
             print(f"  {i}. {view_name}")
@@ -171,7 +170,7 @@ def test_lseg_options():
     try:
         from refinitiv.data import content
         modules = [m for m in dir(content) if not m.startswith('_')]
-        print(f"✅ Available content modules:")
+        print("✅ Available content modules:")
         for m in modules:
             print(f"  - {m}")
         print()

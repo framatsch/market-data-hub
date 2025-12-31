@@ -1,13 +1,11 @@
 import asyncio
 import httpx
-import sys
-from datetime import datetime, timedelta, date
 
 BASE_URL = "http://localhost:8000"
 
 async def test_ibkr_http():
     print(f"--- IBKR HTTP Backend Test (Target: {BASE_URL}) ---")
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Check Health (Optional, usually /meta/health or similar if exists, skipping for now)
 
@@ -27,15 +25,11 @@ async def test_ibkr_http():
         # 2. Historical Prices
         print(f"\n[2] Testing Historical Prices for {symbol} (last 5 days)...")
         try:
-            end = datetime.now()
-            start = end - timedelta(days=5)
-            # Format dates as ISO strings if needed by API? 
+            # Format dates as ISO strings if needed by API?
             # API takes Query params, usually standard ISO string works for FastAPI datetime
             params = {
                 "provider": "ibkr",
                 "interval": "1d",
-                # "start": start.isoformat(), 
-                # "end": end.isoformat() 
                 # Note: If start/end skipped, defaults are used. Let's rely on defaults or simple params.
             }
             resp = await client.get(f"{BASE_URL}/prices/{symbol}/history", params=params)
@@ -62,23 +56,23 @@ async def test_ibkr_http():
                 chain = data.get("data", {})
                 options = chain.get("options", [])
                 print(f"SUCCESS: Got {len(options)} options")
-                
+
                 # 4. Specific Quote
                 if options:
-                    
+
                     # Choose one
                     opt = options[0]
                     # Option ID should be symbol in the list
                     opt_id = opt.get("symbol")
                     print(f"\n[4] Testing Specific Quote for {opt_id}...")
-                    
-                    # Note: opt_id might contain spaces or special chars, URL encode if needed, 
+
+                    # Note: opt_id might contain spaces or special chars, URL encode if needed,
                     # but httpx handles params. Path param needs care?
                     # Route is /options/{symbol}/quote/{option_id}
                     # If option_id has spaces "AAPL  ...", valid URL encoding is needed.
                     # httpx should handle it if we construct url carefully or let user handle it.
                     # However, path param injection...
-                    
+
                     resp_q = await client.get(f"{BASE_URL}/options/{symbol}/quote/{opt_id}", params={"provider": "ibkr"})
                     if resp_q.status_code == 200:
                         print("SUCCESS:", resp_q.json())
