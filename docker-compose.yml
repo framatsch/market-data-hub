@@ -20,9 +20,12 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
-    command: python -m app.main http
+    command: python -m app.main both
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [
+        "CMD-SHELL",
+        "curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1"
+      ]
       interval: 10s
       timeout: 5s
       retries: 3

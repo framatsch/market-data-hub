@@ -5,10 +5,14 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
+# Copy uv from official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 # Copy project files
-COPY pyproject.toml .
-# Install dependencies
-RUN pip install --no-cache-dir .
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies with uv (production only, no dev/test deps)
+RUN uv sync --frozen --no-dev
 
 COPY app/ ./app/
 
@@ -19,5 +23,5 @@ USER appuser
 # Expose HTTP and MCP SSE ports
 EXPOSE 8000 8001
 
-# Default to HTTP mode, can be overridden to "mcp" or "both"
-CMD ["python", "-m", "app.main", "http"]
+# Run both HTTP (8000) and MCP (8001) servers
+CMD ["uv", "run", "python", "-m", "app.main", "both"]

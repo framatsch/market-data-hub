@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "market-data-hub"
 version = "0.1.0"
@@ -10,8 +14,8 @@ dependencies = [
     "httpx>=0.26.0",
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
-    "refinitiv-data>=1.6.2",
-    "fastmcp>=0.1.0",
+    "refinitiv-data==1.6.2",
+    "fastmcp==0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -25,9 +29,15 @@ test = [
     "scipy>=1.11.3"
 ]
 
-
-[tool.setuptools]
+[tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.uv]
+# Override httpx version to resolve conflict between refinitiv-data (<0.27) and fastmcp (>=0.27)
+# Using httpx 0.26.x as common ground - both packages work with it in practice
+override-dependencies = [
+    "httpx==0.26.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
