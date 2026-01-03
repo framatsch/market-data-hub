@@ -105,7 +105,7 @@ def run_mcp_server():
     """Run MCP (Model Context Protocol) server with SSE transport."""
     mcp_logger.info("Starting MCP server with SSE transport on port 8001")
     mcp = create_mcp_server(app)
-    mcp.run(transport="sse", port=8001)
+    mcp.run(transport="sse", host="0.0.0.0", port=8001)
 
 
 def run_both_servers():
@@ -124,7 +124,7 @@ def run_both_servers():
     mcp = create_mcp_server(app)
 
     try:
-        mcp.run(transport="sse", port=8001)
+        mcp.run(transport="sse", host="0.0.0.0", port=8001)
     except KeyboardInterrupt:
         mcp_logger.info("Shutting down servers...")
         http_process.terminate()
