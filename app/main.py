@@ -7,6 +7,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
@@ -86,6 +88,11 @@ def create_mcp_server(app: FastAPI) -> FastMCP:
     """
     mcp = FastMCP.from_fastapi(app=app)
     mcp_logger.info("MCP server created with SSE transport")
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_check(request: Request) -> PlainTextResponse:
+        return PlainTextResponse("OK")
+
     return mcp
 
 
