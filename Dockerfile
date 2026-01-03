@@ -8,17 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 # Copy uv from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
+# Create non-root user first
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Copy project files
-COPY pyproject.toml uv.lock ./
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 
 # Install dependencies with uv (production only, no dev/test deps)
 RUN uv sync --frozen --no-dev
 
-COPY app/ ./app/
-
-# Create non-root user
-RUN useradd -m appuser
-USER appuser
+COPY --chown=appuser:appuser app/ ./app/
 
 # Expose HTTP and MCP SSE ports
 EXPOSE 8000 8001
