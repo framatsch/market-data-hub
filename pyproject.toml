@@ -15,7 +15,7 @@ dependencies = [
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
     "refinitiv-data==1.6.2",
-    "fastmcp==0.1.0",
+    "fastmcp>=2.0.0,<3",
 ]
 
 [project.optional-dependencies]
