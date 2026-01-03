@@ -72,10 +72,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
+            # Tag as 'latest' on main branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Tag with version on release tags (e.g., v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
+            # Tag with major.minor on release tags (e.g., v1.0.0 -> 1.0)
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            # Tag with major on release tags (e.g., v1.0.0 -> 1)
 
       - name: Build and push
         uses: docker/build-push-action@v5
