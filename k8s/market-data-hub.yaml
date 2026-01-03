@@ -46,7 +46,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: ghcr.io/yourusername/market-data-hub:latest
+        image: ghcr.io/scheffold/market-data-hub:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
