@@ -1,21 +1,21 @@
 import logging
-import sys
-import subprocess
+import threading
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import PlainTextResponse
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
 from app.api import routes_meta, routes_prices, routes_companies, routes_options, routes_ws
+from app.logging_config import setup_logging
 
 mcp_logger = logging.getLogger(__name__)
 
+# Setup custom logging
+setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,12 +25,31 @@ async def lifespan(app: FastAPI):
     mcp_logger.info(f"Shutting down {settings.APP_NAME}")
 
 
+
+
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="Real-time market data aggregation from IBKR and LSEG",
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Routers
+app.include_router(routes_meta.router)
+app.include_router(routes_prices.router)
+app.include_router(routes_companies.router)
+app.include_router(routes_options.router)
+app.include_router(routes_ws.router)
+
+# Create MCP server
+mcp = FastMCP("Market Data Hub MCP")
+
+# Add example MCP tools
+@mcp.tool()
+def get_api_health() -> dict:
+    """Get the health status of the Market Data Hub API."""
+    return {"status": "OK", "message": "Market Data Hub is running"}
 
 # Exception Handlers
 @app.exception_handler(AppError)
@@ -65,93 +84,30 @@ async def general_error_handler(request: Request, exc: Exception):
     )
 
 
-# Routers
-app.include_router(routes_meta.router)
-app.include_router(routes_prices.router)
-app.include_router(routes_companies.router)
-app.include_router(routes_options.router)
-app.include_router(routes_ws.router)
-
-
-def create_mcp_server(app: FastAPI) -> FastMCP:
-    """
-    Create MCP server from FastAPI application.
-
-    Uses SSE (Server-Sent Events) transport for remote client access.
-    Exposes all FastAPI endpoints as MCP resources.
-
-    Args:
-        app: FastAPI application instance
-
-    Returns:
-        FastMCP server instance ready to run
-    """
-    mcp = FastMCP.from_fastapi(app=app)
-    mcp_logger.info("MCP server created with SSE transport")
-
-    @mcp.custom_route("/health", methods=["GET"])
-    async def health_check(request: Request) -> PlainTextResponse:
-        return PlainTextResponse("OK")
-
-    return mcp
-
-
-def run_http_server(host: str = "0.0.0.0", port: int = 8000):
-    """Run FastAPI HTTP server."""
-    mcp_logger.info(f"Starting HTTP server on {host}:{port}")
-    uvicorn.run(
-        "app.main:app",
-        host=host,
-        port=port,
-        reload=settings.app_env == "dev",
-        log_level=settings.log_level.lower()
-    )
-
-
-def run_mcp_server():
-    """Run MCP (Model Context Protocol) server with SSE transport."""
-    mcp_logger.info("Starting MCP server with SSE transport on port 8001")
-    mcp = create_mcp_server(app)
-    mcp.run(transport="sse", host="0.0.0.0", port=8001)
-
-
-def run_both_servers():
-    """
-    Run both HTTP and MCP servers in parallel.
-
-    Note: This requires async task management or process forking.
-    For production, use orchestration (Docker Compose, Kubernetes) instead.
-    """
-    # Start HTTP server in background
-    http_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    )
-
-    # Start MCP server in foreground
-    mcp = create_mcp_server(app)
-
-    try:
-        mcp.run(transport="sse", host="0.0.0.0", port=8001)
-    except KeyboardInterrupt:
-        mcp_logger.info("Shutting down servers...")
-        http_process.terminate()
-        http_process.wait()
-
-
 if __name__ == "__main__":
-    # Parse CLI arguments
-    mode = "http"  # default
+    """
+    Run both HTTP API and MCP servers in parallel.
 
-    if len(sys.argv) > 1:
-        mode = sys.argv[1].lower()
+    - HTTP API: http://0.0.0.0:8000/
+    - MCP SSE:  http://0.0.0.0:8001/sse
+    """
+    import os
+    is_docker = os.path.exists('/.dockerenv')
 
-    if mode == "http":
-        run_http_server()
-    elif mode == "mcp":
-        run_mcp_server()
-    elif mode == "both":
-        run_both_servers()
-    else:
-        mcp_logger.error(f"Unknown mode: {mode}")
-        mcp_logger.info("Usage: python -m app.main [http|mcp|both]")
-        sys.exit(1)
+    # Start HTTP server in background thread
+    def run_http():
+        mcp_logger.info("Starting HTTP API server on port 8000")
+        uvicorn.run(
+            "app.main:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=False if is_docker else (settings.APP_ENV == "dev"),
+            log_level=settings.LOG_LEVEL.lower()
+        )
+
+    http_thread = threading.Thread(target=run_http, daemon=True)
+    http_thread.start()
+
+    # Run MCP server in main thread
+    mcp_logger.info("Starting MCP SSE server on port 8001")
+    mcp.run(transport="sse", host="0.0.0.0", port=8001)

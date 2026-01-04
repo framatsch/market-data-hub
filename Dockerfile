@@ -20,8 +20,8 @@ RUN uv sync --frozen --no-dev
 
 COPY --chown=appuser:appuser app/ ./app/
 
-# Expose HTTP and MCP SSE ports
+# Expose HTTP API (8000) and MCP SSE (8001) ports
 EXPOSE 8000 8001
 
-# Run both HTTP (8000) and MCP (8001) servers
-CMD ["uv", "run", "python", "-m", "app.main", "both"]
+# Run both servers
+CMD ["uv", "run", "python", "-m", "app.main"]
