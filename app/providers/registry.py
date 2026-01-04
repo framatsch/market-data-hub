@@ -2,8 +2,8 @@ from typing import Dict, Optional, cast
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
-from app.providers.lseg import LSEGProvider
 from app.providers.mock_news import MockNewsProvider
+from app.providers.finnhub import FinnhubProvider
 from app.utils.errors import InvalidProviderError
 
 class ProviderRegistry:
@@ -14,8 +14,8 @@ class ProviderRegistry:
     def _initialize_providers(self):
         # In a real app, we might lazily load these or load based on config
         self._providers["ibkr"] = IBKRProvider()
-        self._providers["lseg"] = LSEGProvider()
         self._providers["mock"] = MockNewsProvider()
+        self._providers["finnhub"] = FinnhubProvider()
 
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
         name = name or settings.DEFAULT_PRICE_PROVIDER

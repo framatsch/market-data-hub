@@ -8,6 +8,7 @@ from app.services.options_service import OptionsService
 from app.providers.base import BaseNewsProvider
 from app.providers.registry import get_provider
 from app.utils.errors import InvalidProviderError
+from app.providers.finnhub import FinnhubProvider
 
 @lru_cache
 def get_price_service() -> PriceService:
@@ -26,12 +27,12 @@ CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 
 
-def get_news_provider(provider: str = "lseg") -> BaseNewsProvider:
+def get_news_provider(provider: str = "finnhub") -> BaseNewsProvider:
     """
     Get news provider instance.
 
     Args:
-        provider: Provider name ("lseg" or "ibkr")
+        provider: Provider name ("finnhub", "lseg", "ibkr", "mock")
 
     Returns:
         BaseNewsProvider instance
@@ -44,5 +45,11 @@ def get_news_provider(provider: str = "lseg") -> BaseNewsProvider:
     except InvalidProviderError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid news provider: {provider}. Available: lseg, ibkr"
+            detail=f"Invalid news provider: {provider}. Available: finnhub, lseg, ibkr, mock"
         )
+
+
+def get_company_provider() -> FinnhubProvider:
+    """Return the provider used for company/news data (use Finnhub only)."""
+    # Always use Finnhub for news/company data (LSEG removed)
+    return FinnhubProvider()

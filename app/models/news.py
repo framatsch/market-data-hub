@@ -1,7 +1,7 @@
 """News article models."""
 
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +17,11 @@ class NewsArticle(BaseModel):
     full_text: Optional[str] = Field(None, description="Full article text if available")
     category: Optional[str] = Field(
         None, description="Category: earnings, merger, product, legal, etc."
+    )
+    # Extra fields (Finnhub specific)
+    image: Optional[str] = Field(None, description="Image URL (Finnhub)")
+    sentiment: Optional[Dict[str, float]] = Field(
+        None, description="Sentiment scores: {positive, negative, neutral} (Finnhub)"
     )
 
 

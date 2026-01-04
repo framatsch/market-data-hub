@@ -1,0 +1,360 @@
+"""
+Finnhub News Provider - Real-time company news with sentiment analysis
+https://finnhub.io/docs/api/company-news
+"""
+
+import httpx
+import asyncio
+import logging
+import time
+import re
+import json
+from datetime import datetime, date, timezone, timedelta
+from typing import List, Optional
+from decimal import Decimal
+from collections import deque
+
+from app.config import settings
+from app.models.news import NewsArticle
+from app.providers.base import BaseNewsProvider
+from app.utils.errors import DataNotFoundError, ProviderError, ProviderConnectionError
+
+logger = logging.getLogger(__name__)
+
+
+class FinnhubProvider(BaseNewsProvider):
+    """Finnhub provider for company news with sentiment analysis.
+
+    Features:
+    - Company news endpoint (symbol + date range)
+    - Sentiment analysis (positive, negative, neutral)
+    - Token bucket rate limiting (60 calls/min)
+    - Async HTTP requests
+    - Automatic category detection from headlines
+    """
+
+    def __init__(self):
+        if not settings.FINNHUB_API_KEY or settings.FINNHUB_API_KEY == "stub-key":
+            logger.warning("Finnhub API key not configured - provider will not work")
+
+        # Token Bucket for Rate Limiting (60 calls per minute)
+        self._rate_limit_per_min = settings.FINNHUB_RATE_LIMIT_PER_MIN
+        self._request_times: deque = deque(maxlen=self._rate_limit_per_min)
+        self._last_rate_limit_error: Optional[datetime] = None
+
+        # HTTP client
+        self._client: Optional[httpx.AsyncClient] = None
+
+        # Category keywords for sentiment-based categorization
+        self._category_keywords = {
+            "earnings": [
+                r"\bearnings?\b", r"\beps\b", r"\brev(enue)?\b", r"\bguidance\b",
+                r"\bprofit\b", r"\bloss\b", r"\bmargin\b", r"\bshares?\b",
+                r"\bdividend\b", r"\bq[1-4]\s*result", r"\bfiscal\b"
+            ],
+            "merger": [
+                r"\b(m&a|merger|acquisition|acquires?|acquired|deal)\b",
+                r"\btakeover\b", r"\bipo\b", r"\bspac\b", r"\bmarket cap\b",
+                r"\b(buyout|buy[- ]?out)\b", r"\bcombination\b"
+            ],
+            "product": [
+                r"\b(launch|release|announce|unveiled?|new\s+product)\b",
+                r"\b(app|service|feature|update|version)\b", r"\bsoftware\b",
+                r"\bhardware\b", r"\bdevice\b", r"\bplatform\b"
+            ],
+            "legal": [
+                r"\b(lawsuit|sued|settlement|conviction|guilty)\b",
+                r"\b(regulatory|fda|sec|antitrust|investigation)\b",
+                r"\b(fine|penalty|compliance|illegal)\b", r"\blegal\b"
+            ]
+        }
+
+        logger.info("FinnhubProvider initialized")
+
+    # ========================================================================
+    # HTTP Client Management
+    # ========================================================================
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create async HTTP client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=settings.FINNHUB_BASE_URL,
+                timeout=settings.PROVIDER_REQUEST_TIMEOUT
+            )
+        return self._client
+
+    async def _close_client(self):
+        """Close HTTP client."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    # ========================================================================
+    # Rate Limiting (Token Bucket)
+    # ========================================================================
+
+    async def _check_rate_limit(self) -> bool:
+        """Check and enforce rate limit (60 calls/min).
+
+        Returns:
+            True if within rate limit, False if exceeded
+        """
+        now = time.time()
+
+        # Remove timestamps older than 1 minute
+        while self._request_times and now - self._request_times[0] > 60.0:
+            self._request_times.popleft()
+
+        # Check if at rate limit
+        if len(self._request_times) >= self._rate_limit_per_min:
+            self._last_rate_limit_error = datetime.now(timezone.utc)
+            logger.warning(
+                f"Finnhub rate limit reached ({self._rate_limit_per_min}/min). "
+                f"Next available at {self._request_times[0] + 60:.1f}s"
+            )
+            return False
+
+        # Record this request
+        self._request_times.append(now)
+        return True
+
+    # ========================================================================
+    # Category Detection
+    # ========================================================================
+
+    def _detect_category(self, headline: str, summary: Optional[str] = None, sentiment: Optional[dict] = None) -> Optional[str]:
+        """Detect article category from headline/summary.
+
+        Priority:
+        1. Keyword matching in headline + summary
+        2. Sentiment score as proxy (if no keywords found)
+        3. None (neutral/unknown)
+        """
+        text = f"{headline} {summary or ''}".lower()
+
+        # Try keyword matching first
+        for category, keywords in self._category_keywords.items():
+            for pattern in keywords:
+                if re.search(pattern, text, re.IGNORECASE):
+                    logger.debug(f"Category '{category}' detected for: {headline[:50]}")
+                    return category
+
+        # Fallback: use sentiment as proxy
+        if sentiment:
+            scores = sentiment
+            if isinstance(scores, dict):
+                positive = scores.get("positive", 0)
+                negative = scores.get("negative", 0)
+                neutral = scores.get("neutral", 0)
+
+                # Strong negative sentiment → legal/regulatory issues
+                if negative > 0.6:
+                    logger.debug(f"Category 'legal' detected from negative sentiment for: {headline[:50]}")
+                    return "legal"
+
+                # Strong positive sentiment → product/earnings
+                if positive > 0.6 and "launch" in text or "announce" in text:
+                    return "product"
+
+        return None
+
+    # ========================================================================
+    # Sentiment Parsing
+    # ========================================================================
+
+    def _parse_sentiment(self, sentiment_obj: Optional[dict]) -> dict:
+        """Parse sentiment object into normalized format.
+
+        Finnhub returns:
+        {
+            "positive": 0.8,
+            "negative": 0.1,
+            "neutral": 0.1
+        }
+        """
+        if not sentiment_obj or not isinstance(sentiment_obj, dict):
+            return {"positive": 0.0, "negative": 0.0, "neutral": 1.0}
+
+        return {
+            "positive": float(sentiment_obj.get("positive", 0.0)),
+            "negative": float(sentiment_obj.get("negative", 0.0)),
+            "neutral": float(sentiment_obj.get("neutral", 1.0))
+        }
+
+    # ========================================================================
+    # API Methods
+    # ========================================================================
+
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: Optional[str] = None
+    ) -> List[NewsArticle]:
+        """Get company news from Finnhub.
+
+        Args:
+            symbol: Stock symbol (e.g., 'AAPL')
+            from_date: Start date for news search
+            to_date: End date for news search
+            limit: Number of articles to return (max 100)
+            offset: Number of articles to skip
+            language: Language filter (default: 'en')
+            category: Category filter (earnings, product, merger, legal)
+
+        Returns:
+            List of NewsArticle objects
+
+        Raises:
+            DataNotFoundError: Symbol not found
+            ProviderError: API error or rate limit exceeded
+        """
+        try:
+            # Rate limit check
+            if not await self._check_rate_limit():
+                error_msg = f"Finnhub rate limit exceeded (60/min)"
+                if settings.FINNHUB_FALLBACK_ON_RATE_LIMIT:
+                    logger.warning(f"{error_msg} - using fallback strategy")
+                    raise ProviderError(error_msg)
+                else:
+                    # Return 429 error
+                    raise ProviderError(error_msg)
+
+            # Get HTTP client
+            client = await self._get_client()
+
+            # Validate limit
+            limit = min(max(limit, 1), 100)
+
+            # Make API request
+            logger.debug(
+                f"Fetching Finnhub news for {symbol} "
+                f"from {from_date.isoformat()} to {to_date.isoformat()}"
+            )
+
+            response = await client.get(
+                "/company-news",
+                params={
+                    "symbol": symbol.upper(),
+                    "from": from_date.isoformat(),
+                    "to": to_date.isoformat(),
+                    "token": settings.FINNHUB_API_KEY
+                }
+            )
+
+            # Handle response
+            if response.status_code == 404:
+                raise DataNotFoundError("Symbol", symbol)
+            elif response.status_code == 429:
+                raise ProviderError(
+                    "Finnhub rate limit exceeded",
+                    details={"status_code": 429, "retry_after": response.headers.get("Retry-After")}
+                )
+            elif response.status_code != 200:
+                raise ProviderError(
+                    f"Finnhub API error: {response.status_code}",
+                    details={"status_code": response.status_code, "response": response.text}
+                )
+
+            # Parse response
+            data = response.json()
+            if not isinstance(data, list):
+                logger.warning(f"Unexpected Finnhub response type: {type(data)}")
+                return []
+
+            # Convert to NewsArticle list
+            articles = []
+            for idx, item in enumerate(data):
+                try:
+                    # Extract fields
+                    article_id = f"finnhub:{item.get('id', f'{symbol}_{idx}')}"
+                    headline = item.get("headline", "")
+                    summary = item.get("summary", "")
+                    image = item.get("image", "")
+                    source = item.get("source", "Finnhub")
+                    url = item.get("url", "")
+                    datetime_ts = item.get("datetime", None)
+
+                    # Parse timestamp
+                    if isinstance(datetime_ts, int):
+                        published_at = datetime.fromtimestamp(datetime_ts, tz=timezone.utc)
+                    else:
+                        published_at = datetime.now(timezone.utc)
+
+                    # Parse sentiment
+                    sentiment = self._parse_sentiment(item.get("sentiment", {}))
+
+                    # Detect category
+                    detected_category = self._detect_category(headline, summary, sentiment)
+
+                    # Apply category filter
+                    if category and detected_category != category:
+                        continue
+
+                    # Create article
+                    articles.append(NewsArticle(
+                        article_id=article_id,
+                        title=headline,
+                        summary=summary,
+                        published_at=published_at,
+                        source=source,
+                        url=url,
+                        full_text=None,  # Finnhub doesn't provide full text
+                        category=detected_category,
+                        # Extra fields
+                        image=image,
+                        sentiment=sentiment
+                    ))
+
+                except Exception as e:
+                    logger.warning(f"Failed to parse article {idx}: {e}")
+                    continue
+
+            # Apply pagination manually (Finnhub doesn't support limit/offset directly)
+            if offset > 0:
+                articles = articles[offset:]
+            articles = articles[:limit]
+
+            logger.info(f"Retrieved {len(articles)} articles for {symbol} from Finnhub")
+            return articles
+
+        except DataNotFoundError:
+            raise
+        except ProviderError:
+            raise
+        except httpx.TimeoutException:
+            raise ProviderConnectionError(
+                f"Finnhub request timeout after {settings.PROVIDER_REQUEST_TIMEOUT}s",
+                details={"symbol": symbol}
+            )
+        except Exception as e:
+            logger.error(f"Finnhub error for {symbol}: {e}")
+            raise ProviderError(
+                f"Failed to fetch news from Finnhub: {str(e)}",
+                details={"symbol": symbol, "error_type": type(e).__name__}
+            )
+
+    # ========================================================================
+    # Cleanup
+    # ========================================================================
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self._close_client()
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        try:
+            if self._client is not None:
+                asyncio.create_task(self._close_client())
+        except Exception:
+            pass

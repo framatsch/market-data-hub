@@ -20,22 +20,23 @@ async def list_providers():
     - price: "ibkr" (primary), "lseg" (secondary)
     - company: "lseg" (primary), "ibkr" (basic lookup only)
     - options: "ibkr" (primary), "lseg" (secondary)
-    - news: "lseg" (primary), "ibkr" (secondary), "mock" (testing)
+    - news: "finnhub" (primary, 60 calls/min), "lseg" (secondary), "ibkr" (basic), "mock" (testing)
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     Note: Mock provider provides test data for development and testing.
+    Note: Finnhub provides real-time news with sentiment analysis. Free tier: 60 calls/min.
     """
     return ResponseEnvelope(data={
         "defaults": {
             "price": settings.DEFAULT_PRICE_PROVIDER,
             "company": settings.DEFAULT_COMPANY_PROVIDER,
             "options": settings.DEFAULT_OPTIONS_PROVIDER,
-            "news": "lseg"
+            "news": "finnhub"
         },
         "available": {
             "price": ["ibkr", "lseg"],
             "company": ["lseg", "ibkr"],
             "options": ["ibkr", "lseg"],
-            "news": ["lseg", "ibkr", "mock"]
+            "news": ["finnhub", "lseg", "ibkr", "mock"]
         }
     })

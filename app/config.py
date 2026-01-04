@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # Provider Defaults
     DEFAULT_PRICE_PROVIDER: str = "ibkr"
-    DEFAULT_COMPANY_PROVIDER: str = "lseg"
+    DEFAULT_COMPANY_PROVIDER: str = "finnhub"
     DEFAULT_OPTIONS_PROVIDER: str = "ibkr"
 
     # IBKR Provider
@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     LSEG_RATE_LIMIT_PER_SEC: int = 10  # Max API requests per second to Refinitiv
     LSEG_CACHE_TTL_SECONDS: int = 5  # Cache quote data for X seconds (0 = disabled)
     LSEG_STRICT_VALIDATION: bool = False  # If True, raise error on missing fields; if False, return None
+
+    # Finnhub Provider
+    FINNHUB_API_KEY: str = "stub-key"  # Finnhub API Key
+    FINNHUB_BASE_URL: str = "https://finnhub.io/api/v1"
+    FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
+    FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
 
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0
