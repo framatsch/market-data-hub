@@ -1,6 +1,6 @@
 from typing import Dict, Optional, cast
 from app.config import settings
-from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider
+from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
 from app.providers.lseg import LSEGProvider
 from app.utils.errors import InvalidProviderError
@@ -36,8 +36,42 @@ class ProviderRegistry:
             raise InvalidProviderError(name)
         return cast(BaseOptionsProvider, provider)
 
+    def get_news_provider(self, name: Optional[str] = None) -> BaseNewsProvider:
+        name = name or "lseg"  # Default to LSEG for news
+        provider = self._providers.get(name)
+        if not provider or not isinstance(provider, BaseNewsProvider):
+            raise InvalidProviderError(name)
+        return cast(BaseNewsProvider, provider)
+
 # Global registry instance
 registry = ProviderRegistry()
 
 def get_registry() -> ProviderRegistry:
     return registry
+
+def get_provider(provider_type: str, name: Optional[str] = None):
+    """
+    Get a provider instance by type and name.
+
+    Args:
+        provider_type: Type of provider ("price", "company", "options", "news")
+        name: Provider name (e.g., "lseg", "ibkr")
+
+    Returns:
+        Provider instance
+
+    Raises:
+        InvalidProviderError: If provider type or name is invalid
+    """
+    reg = get_registry()
+
+    if provider_type == "price":
+        return reg.get_price_provider(name)
+    elif provider_type == "company":
+        return reg.get_company_provider(name)
+    elif provider_type == "options":
+        return reg.get_options_provider(name)
+    elif provider_type == "news":
+        return reg.get_news_provider(name)
+    else:
+        raise InvalidProviderError(f"Unknown provider type: {provider_type}")
