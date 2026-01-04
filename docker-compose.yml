@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   market-data-hub:
     build:
@@ -20,18 +18,16 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
-    command: python -m app.main both
+    # command is inherited from Dockerfile (uv run python -m app.main)
     healthcheck:
       test: [
         "CMD-SHELL",
-        "curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1"
+        "curl -f http://localhost:8000/health || exit 1"
       ]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
-    volumes:
-      - .:/app
     networks:
       - market-data-hub
 
