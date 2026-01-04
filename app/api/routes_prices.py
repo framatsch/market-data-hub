@@ -1,10 +1,9 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Optional
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import PriceServiceDep
-from app.models.price import PriceBar, PriceQuote
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
 

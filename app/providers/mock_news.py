@@ -147,7 +147,6 @@ class MockNewsProvider(BaseNewsProvider):
                 articles.append(article)
 
             # Apply pagination
-            total_articles = len(articles)
             articles = articles[offset : offset + limit]
 
             logger.info(f"Mock provider: returned {len(articles)} articles for {symbol}")

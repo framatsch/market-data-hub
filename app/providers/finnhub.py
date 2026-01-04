@@ -8,10 +8,8 @@ import asyncio
 import logging
 import time
 import re
-import json
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date, timezone
 from typing import List, Optional
-from decimal import Decimal
 from collections import deque
 
 from app.config import settings
@@ -146,7 +144,7 @@ class FinnhubProvider(BaseNewsProvider):
             if isinstance(scores, dict):
                 positive = scores.get("positive", 0)
                 negative = scores.get("negative", 0)
-                neutral = scores.get("neutral", 0)
+                _ = scores.get("neutral", 0)  # Not currently used in category detection
 
                 # Strong negative sentiment → legal/regulatory issues
                 if negative > 0.6:
@@ -217,7 +215,7 @@ class FinnhubProvider(BaseNewsProvider):
         try:
             # Rate limit check
             if not await self._check_rate_limit():
-                error_msg = f"Finnhub rate limit exceeded (60/min)"
+                error_msg = "Finnhub rate limit exceeded (60/min)"
                 if settings.FINNHUB_FALLBACK_ON_RATE_LIMIT:
                     logger.warning(f"{error_msg} - using fallback strategy")
                     raise ProviderError(error_msg)

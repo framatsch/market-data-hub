@@ -5,7 +5,6 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import OptionsServiceDep
-from app.models.options import OptionChain, OptionQuote
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
 

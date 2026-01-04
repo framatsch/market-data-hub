@@ -1,7 +1,7 @@
 """News article models."""
 
 from datetime import datetime, date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
 
 
