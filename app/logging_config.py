@@ -7,19 +7,18 @@ access_logger = logging.getLogger("uvicorn.access")
 
 
 class HealthCheckFilter(logging.Filter):
-    """Filter to suppress or reduce logging for health check endpoints."""
+    """Filter to suppress health check endpoint logs unless in DEBUG mode."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         """
         Filter health check requests.
-        - Return False to suppress the log
-        - Return True to allow the log
+        - Returns False to suppress the log (don't show it)
+        - Returns True to allow the log
         """
         # Check if this is a health check request
         if "/health" in record.getMessage():
-            # Only log health checks at DEBUG level
-            record.levelno = logging.DEBUG
-            record.levelname = "DEBUG"
+            # Only show health checks if logger is at DEBUG level
+            return access_logger.level <= logging.DEBUG
         return True
 
 
