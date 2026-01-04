@@ -11,7 +11,8 @@ from app.config import settings
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.price import PriceQuote, PriceBar
 from app.models.options import OptionChain, OptionQuote
-from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider
+from app.models.news import NewsArticle
+from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider, BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, DataValidationError, ProviderError
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ except ImportError:
 T = TypeVar('T')
 
 
-class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider):
+class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider, BaseNewsProvider):
     """Refinitiv (LSEG) provider for stock prices, company data, and options."""
 
     def __init__(self):
@@ -978,3 +979,97 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider):
         except Exception as e:
             logger.error(f"Error getting option quote for {option_id}: {e}")
             raise ProviderError(f"LSEG error: {e}")
+
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: Optional[str] = None
+    ) -> List[NewsArticle]:
+        """Get news articles for a company from LSEG."""
+        try:
+            # 1. Convert ticker to RIC
+            ric = self._ticker_to_ric(symbol)
+            if not ric:
+                raise DataNotFoundError("Ticker", symbol)
+
+            # 2. Fetch news headlines using Refinitiv Data Library
+            response = rd.news.headlines.Definition(
+                query=f"R:{ric}",
+                count=limit + offset,  # Fetch more for offset
+                date_from=from_date.isoformat(),
+                date_to=to_date.isoformat()
+            ).get_data()
+
+            # 3. Check response validity
+            if not response or response.data.df is None or response.data.df.empty:
+                return []
+
+            df = response.data.df
+
+            # 4. Apply offset and limit
+            if offset > 0:
+                df = df.iloc[offset:]
+            df = df.head(limit)
+
+            # 5. Parse articles from DataFrame
+            articles = []
+            for _, row in df.iterrows():
+                # Extract basic fields
+                article_id = f"lseg:{row.get('storyId', '')}"
+                title = row.get('headline', 'No title')
+                published_at = pd.to_datetime(row.get('versionCreated'))
+                source = row.get('sourceCode', 'LSEG')
+                url = row.get('storyUrl', '')
+
+                # 6. Map LSEG subjects to categories
+                subjects = row.get('subjects', [])
+                category_map = {
+                    'EARN': 'earnings',
+                    'M&A': 'merger',
+                    'PROD': 'product',
+                    'REG': 'legal'
+                }
+                article_category = None
+                if isinstance(subjects, list):
+                    for subj in subjects:
+                        if subj in category_map:
+                            article_category = category_map[subj]
+                            break
+
+                # 7. Apply category filter
+                if category and article_category != category:
+                    continue
+
+                # 8. Attempt to fetch full text (optional)
+                full_text = None
+                try:
+                    story_response = rd.news.get_story(story_id=row.get('storyId'))
+                    if story_response and story_response.data:
+                        full_text = story_response.data.story
+                except Exception:
+                    pass  # Full text is optional
+
+                # 9. Create article object
+                articles.append(NewsArticle(
+                    article_id=article_id,
+                    title=title,
+                    summary=row.get('firstParagraph', title),
+                    published_at=published_at,
+                    source=source,
+                    url=url,
+                    full_text=full_text,
+                    category=article_category
+                ))
+
+            return articles
+
+        except DataNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"LSEG news error for {symbol}: {e}")
+            raise ProviderError(f"Failed to fetch news from LSEG: {str(e)}")
