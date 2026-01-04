@@ -998,18 +998,17 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider, 
                 raise DataNotFoundError("Ticker", symbol)
 
             # 2. Fetch news headlines using Refinitiv Data Library
-            response = rd.news.headlines.Definition(
+            # Use rd.news.get_headlines() with RIC query
+            df = rd.news.get_headlines(
                 query=f"R:{ric}",
-                count=limit + offset,  # Fetch more for offset
-                date_from=from_date.isoformat(),
-                date_to=to_date.isoformat()
-            ).get_data()
+                count=limit + offset,
+                start=f"{from_date.isoformat()}T00:00:00",
+                end=f"{to_date.isoformat()}T23:59:59"
+            )
 
             # 3. Check response validity
-            if not response or response.data.df is None or response.data.df.empty:
+            if df is None or df.empty:
                 return []
-
-            df = response.data.df
 
             # 4. Apply offset and limit
             if offset > 0:
@@ -1045,16 +1044,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider, 
                 if category and article_category != category:
                     continue
 
-                # 8. Attempt to fetch full text (optional)
-                full_text = None
-                try:
-                    story_response = rd.news.get_story(story_id=row.get('storyId'))
-                    if story_response and story_response.data:
-                        full_text = story_response.data.story
-                except Exception:
-                    pass  # Full text is optional
-
-                # 9. Create article object
+                # 8. Create article object (full_text is optional for LSEG)
                 articles.append(NewsArticle(
                     article_id=article_id,
                     title=title,
@@ -1062,7 +1052,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseOptionsProvider, 
                     published_at=published_at,
                     source=source,
                     url=url,
-                    full_text=full_text,
+                    full_text=None,  # Full text requires separate API call
                     category=article_category
                 ))
 
