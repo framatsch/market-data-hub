@@ -7,14 +7,14 @@ from fastapi.responses import StreamingResponse
 from app.dependencies import CompanyServiceDep, get_news_provider
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import ResponseEnvelope
-from app.models.news import NewsResponse, NewsMetadata, NewsArticle
+from app.models.news import NewsResponse, NewsMetadata
 from app.utils.csv_export import to_csv
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
 @router.get("/search", response_model=ResponseEnvelope[List[CompanySummary]])
 async def search_companies(
-    q: str, 
+    q: str,
     service: CompanyServiceDep,
     provider: Optional[str] = None
 ):
@@ -24,7 +24,7 @@ async def search_companies(
 
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
 async def get_company_profile(
-    symbol: str, 
+    symbol: str,
     service: CompanyServiceDep,
     provider: Optional[str] = None
 ):
