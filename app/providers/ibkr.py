@@ -9,7 +9,8 @@ from ib_async.objects import BarData
 from app.config import settings
 from app.models.price import PriceBar, PriceQuote
 from app.models.options import OptionChain, OptionQuote
-from app.providers.base import BasePriceProvider, BaseOptionsProvider
+from app.models.company import CompanyProfile, CompanySummary
+from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
 import math
 from app.utils.logging import logger
@@ -17,7 +18,7 @@ from app.utils.logging import logger
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
 
-class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
+class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider):
     """Implementation for IBKR provider using ib_async."""
 
     async def _get_tickers_snapshot(self, contracts: List[Contract], skip_on_error: bool = True) -> List[object]:
@@ -545,3 +546,68 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider):
         # Less than 1 day
         seconds = diff.total_seconds()
         return f"{int(seconds) + 60} S"
+    # ==================== Company Data Methods ====================
+
+    async def get_company_profile(self, symbol: str) -> CompanyProfile:
+        """
+        Fetch company profile from IBKR.
+        Note: IBKR provides limited company data. This includes basic contract information.
+        For detailed fundamentals, use LSEG provider.
+        """
+        await self._ensure_connection()
+
+        try:
+            contract = Stock(symbol, "SMART", "USD")
+            qualified = await self.ib.qualifyContractsAsync(contract)
+
+            if not qualified or not qualified[0]:
+                raise DataNotFoundError("Company", symbol,
+                    details={"reason": "Contract could not be qualified"})
+
+            qualified_contract = qualified[0]
+
+            return CompanyProfile(
+                symbol=symbol,
+                name=qualified_contract.longName or symbol,
+                exchange=qualified_contract.exchange or "UNKNOWN",
+                currency=qualified_contract.currency or "USD",
+                provider="ibkr"
+            )
+
+        except DataNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching company profile for {symbol} from IBKR: {e}")
+            raise ProviderError(f"IBKR company lookup failed for {symbol}",
+                details={"error": str(e)})
+
+    async def search_companies(self, query: str) -> List[CompanySummary]:
+        """
+        Search for companies in IBKR.
+        Note: IBKR does not provide a search API. This attempts to qualify the query as a symbol.
+        For full company search, use LSEG provider.
+        """
+        await self._ensure_connection()
+
+        try:
+            # Try to treat query as a symbol
+            contract = Stock(query.upper(), "SMART", "USD")
+            qualified = await self.ib.qualifyContractsAsync(contract)
+
+            if not qualified or not qualified[0]:
+                return []
+
+            qualified_contract = qualified[0]
+
+            return [
+                CompanySummary(
+                    symbol=query.upper(),
+                    name=qualified_contract.longName or query.upper(),
+                    exchange=qualified_contract.exchange or "UNKNOWN",
+                    provider="ibkr"
+                )
+            ]
+
+        except Exception as e:
+            logger.warning(f"Error searching companies in IBKR for '{query}': {e}")
+            return []
