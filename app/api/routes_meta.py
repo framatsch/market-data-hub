@@ -20,6 +20,7 @@ async def list_providers():
     - price: "ibkr" (primary), "lseg" (secondary)
     - company: "lseg" (primary), "ibkr" (basic lookup only)
     - options: "ibkr" (primary), "lseg" (secondary)
+    - news: "lseg" (primary), "ibkr" (secondary)
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     """
@@ -28,10 +29,12 @@ async def list_providers():
             "price": settings.DEFAULT_PRICE_PROVIDER,
             "company": settings.DEFAULT_COMPANY_PROVIDER,
             "options": settings.DEFAULT_OPTIONS_PROVIDER,
+            "news": "lseg"
         },
         "available": {
             "price": ["ibkr", "lseg"],
             "company": ["lseg", "ibkr"],
-            "options": ["ibkr", "lseg"]
+            "options": ["ibkr", "lseg"],
+            "news": ["lseg", "ibkr"]
         }
     })
