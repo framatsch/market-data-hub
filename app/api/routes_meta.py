@@ -14,7 +14,13 @@ async def health_check():
 
 @router.get("/providers", response_model=ResponseEnvelope[dict])
 async def list_providers():
-    """Lists available providers and defaults."""
+    """Lists available providers and defaults.
+
+    Available Providers:
+    - price: "ibkr" (primary), "lseg" (secondary)
+    - company: "lseg" (primary)
+    - options: "ibkr" (primary), "lseg" (secondary)
+    """
     return ResponseEnvelope(data={
         "defaults": {
             "price": settings.DEFAULT_PRICE_PROVIDER,
@@ -22,8 +28,8 @@ async def list_providers():
             "options": settings.DEFAULT_OPTIONS_PROVIDER,
         },
         "available": {
-            "price": ["ibkr"],
+            "price": ["ibkr", "lseg"],
             "company": ["lseg"],
-            "options": ["ibkr"]
+            "options": ["ibkr", "lseg"]
         }
     })
