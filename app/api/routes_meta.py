@@ -20,9 +20,10 @@ async def list_providers():
     - price: "ibkr" (primary), "lseg" (secondary)
     - company: "lseg" (primary), "ibkr" (basic lookup only)
     - options: "ibkr" (primary), "lseg" (secondary)
-    - news: "lseg" (primary), "ibkr" (secondary)
+    - news: "lseg" (primary), "ibkr" (secondary), "mock" (testing)
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
+    Note: Mock provider provides test data for development and testing.
     """
     return ResponseEnvelope(data={
         "defaults": {
@@ -35,6 +36,6 @@ async def list_providers():
             "price": ["ibkr", "lseg"],
             "company": ["lseg", "ibkr"],
             "options": ["ibkr", "lseg"],
-            "news": ["lseg", "ibkr"]
+            "news": ["lseg", "ibkr", "mock"]
         }
     })
