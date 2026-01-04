@@ -10,7 +10,8 @@ from app.config import settings
 from app.models.price import PriceBar, PriceQuote
 from app.models.options import OptionChain, OptionQuote
 from app.models.company import CompanyProfile, CompanySummary
-from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider
+from app.models.news import NewsArticle
+from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
 import math
 from app.utils.logging import logger
@@ -18,7 +19,7 @@ from app.utils.logging import logger
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
 
-class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider):
+class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, BaseNewsProvider):
     """Implementation for IBKR provider using ib_async."""
 
     async def _get_tickers_snapshot(self, contracts: List[Contract], skip_on_error: bool = True) -> List[object]:
@@ -610,4 +611,86 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider):
 
         except Exception as e:
             logger.warning(f"Error searching companies in IBKR for '{query}': {e}")
+            return []
+
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: Optional[str] = None
+    ) -> List[NewsArticle]:
+        """Get news articles for a company from IBKR."""
+        await self._ensure_connection()
+
+        try:
+            # 1. Create and qualify contract
+            contract = Stock(symbol, 'SMART', 'USD')
+            qualified = await self.ib.qualifyContractsAsync(contract)
+            if not qualified:
+                raise DataNotFoundError("Contract", symbol)
+
+            contract = qualified[0]
+
+            # 2. Request historical news from IBKR
+            news_items = await self.ib.reqHistoricalNewsAsync(
+                conId=contract.conId,
+                providerCodes='',  # All news providers
+                startDateTime=f"{from_date.isoformat()} 00:00:00",
+                endDateTime=f"{to_date.isoformat()} 23:59:59",
+                totalResults=limit + offset
+            )
+
+            if not news_items:
+                return []
+
+            # 3. Apply offset and limit
+            news_items = news_items[offset:offset + limit]
+
+            # 4. Parse news items
+            articles = []
+            for item in news_items:
+                article_id = f"ibkr:{item.articleId}"
+
+                # Parse timestamp
+                published_at = datetime.fromtimestamp(item.time, tz=datetime.now().astimezone().tzinfo)
+
+                # 5. Detect category from headline (IBKR doesn't provide explicit categories)
+                title_lower = item.headline.lower()
+                article_category = None
+                if 'earnings' in title_lower or 'profit' in title_lower or 'revenue' in title_lower:
+                    article_category = 'earnings'
+                elif 'merger' in title_lower or 'acquisition' in title_lower or 'buyout' in title_lower:
+                    article_category = 'merger'
+                elif 'product' in title_lower or 'launch' in title_lower or 'release' in title_lower:
+                    article_category = 'product'
+                elif 'lawsuit' in title_lower or 'regulation' in title_lower or 'sec' in title_lower:
+                    article_category = 'legal'
+
+                # 6. Apply category filter
+                if category and article_category != category:
+                    continue
+
+                # 7. Create article object
+                articles.append(NewsArticle(
+                    article_id=article_id,
+                    title=item.headline,
+                    summary=item.headline,  # IBKR doesn't provide separate summary
+                    published_at=published_at,
+                    source=item.providerCode,
+                    url='',  # IBKR doesn't provide direct URLs
+                    full_text=None,  # Not available in historical news
+                    category=article_category
+                ))
+
+            return articles
+
+        except DataNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"IBKR news error for {symbol}: {e}")
+            raise ProviderError(f"Failed to fetch news from IBKR: {str(e)}")
             return []
