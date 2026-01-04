@@ -6,6 +6,7 @@ from typing import List, Literal, Optional
 from app.models.price import PriceBar, PriceQuote
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.options import OptionChain, OptionQuote
+from app.models.news import NewsArticle
 
 class BasePriceProvider(ABC):
     @abstractmethod
@@ -46,4 +47,40 @@ class BaseOptionsProvider(ABC):
     @abstractmethod
     async def get_option_quote(self, symbol: str, option_id: str, include_level2: bool = False) -> OptionQuote:
         """Fetch specific option quote."""
+        pass
+
+
+class BaseNewsProvider(ABC):
+    """Abstract base class for news data providers."""
+
+    @abstractmethod
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: Optional[str] = None
+    ) -> List[NewsArticle]:
+        """
+        Get news articles for a company.
+
+        Args:
+            symbol: Stock symbol
+            from_date: Start date for news
+            to_date: End date for news
+            limit: Maximum number of articles to return
+            offset: Pagination offset
+            language: ISO 639-1 language code (e.g., "en", "de")
+            category: Optional category filter (earnings, merger, product, etc.)
+
+        Returns:
+            List of news articles (sorted newest first)
+
+        Raises:
+            DataNotFoundError: If symbol not found
+            ProviderError: If news retrieval fails
+        """
         pass
