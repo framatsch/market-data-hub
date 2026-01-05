@@ -37,8 +37,8 @@ async def get_option_chain(
     - Errors will be logged but won't prevent data retrieval
     """
     if not expiry:
-        # Default to a future date
-        expiry = date.today() + timedelta(days=30)
+        # Default to today
+        expiry = date.today()
     chain = await service.get_option_chain(
         symbol,
         expiry,
