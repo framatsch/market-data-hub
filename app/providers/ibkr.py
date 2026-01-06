@@ -477,6 +477,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             for t in tickers:
                 c = t.contract
                 greeks = self._extract_greeks(t)
+                # open_interest is only reliable for Level 1 (Live) data
+                open_interest_val = int(t.openInterest) if (self._is_valid(t.openInterest) and self._requested_market_data_type == 1) else None
                 options_data.append(OptionQuote(
                     symbol=c.localSymbol, # e.g. AAPL  230616C00150000
                     underlying_symbol=symbol,
@@ -489,6 +491,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                     bid=self._to_decimal(t.bid) if t.bid != -1 else None,
                     ask=self._to_decimal(t.ask) if t.ask != -1 else None,
                     volume=int(t.volume) if self._is_valid(t.volume) else 0,
+                    open_interest=open_interest_val,
                     implied_volatility=greeks["implied_volatility"],
                     delta=greeks["delta"],
                     gamma=greeks["gamma"],
@@ -510,22 +513,22 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         finally:
             await self._disconnect()
 
-    async def get_option_quote(self, symbol: str, option_id: str, include_level2: bool = False) -> OptionQuote:
+    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
         """
         Get a specific option quote.
 
         Args:
             symbol: Underlying symbol
             option_id: The contract localSymbol or unique identifier
-            include_level2: If True, attempts to request Level 2 data
+            market_data_type: Market data type (1=Live, 2=Frozen, 3=Delayed, default from config)
         """
         try:
-            logger.info(f"Fetching option quote for {symbol} id {option_id} (include_level2={include_level2})")
+            logger.info(f"Fetching option quote for {symbol} id {option_id} (market_data_type={market_data_type})")
             await self._ensure_connection()
 
-            # Set market data type for Level 2 if requested
-            if include_level2:
-                await self._set_market_data_type(1)  # Live for Level 2
+            # Set market data type if explicitly requested
+            if market_data_type is not None:
+                await self._set_market_data_type(market_data_type)
 
             # We need to define contract. If we have localSymbol, we can use it.
             # But we also need exchange etc.
@@ -551,6 +554,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             greeks = self._extract_greeks(ticker)
 
+            # open_interest is only reliable for Level 1 (Live) data
+            open_interest_val = int(ticker.openInterest) if (self._is_valid(ticker.openInterest) and self._requested_market_data_type == 1) else None
+
             return OptionQuote(
                 symbol=contract.localSymbol,
                 underlying_symbol=symbol,
@@ -563,6 +569,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 bid=self._to_decimal(ticker.bid) if ticker.bid != -1 else None,
                 ask=self._to_decimal(ticker.ask) if ticker.ask != -1 else None,
                 volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
+                open_interest=open_interest_val,
                 implied_volatility=greeks["implied_volatility"],
                 delta=greeks["delta"],
                 gamma=greeks["gamma"],
