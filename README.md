@@ -54,6 +54,29 @@ docker-compose down
 
 See [Kubernetes Deployment](#kubernetes-deployment) section below.
 
+## Provider Matrix
+
+**Recommended provider for each data type:**
+
+| Data Type | Primary Provider | Fallback | Reason |
+|-----------|-----------------|----------|--------|
+| **Stock Prices** | IBKR | LSEG | IBKR provides real-time market data |
+| **Options** | **IBKR ONLY** | - | LSEG lacks `trapi.data.pricing.read` scope for Greeks |
+| **Company Data** | LSEG | Finnhub | LSEG has comprehensive fundamentals |
+| **News** | LSEG | Finnhub | LSEG provides institutional-grade news |
+
+### ⚠️ LSEG Options Limitation
+
+**LSEG does NOT support options data.** The current LSEG subscription lacks the required `trapi.data.pricing.read` API scope for real-time option pricing and Greeks.
+
+**Attempted workaround (removed):** Previous implementation included Black-Scholes fallback calculations, but these proved unreliable (30-50% error for American options) and production-unsuitable.
+
+**Solution:** Use IBKR exclusively for options data. IBKR provides:
+- ✅ Real-time Greeks (Delta, Gamma, Vega, Theta, IV)
+- ✅ Server-calculated values (not theoretical models)
+- ✅ Support for American options
+- ✅ Market microstructure (Bid/Ask spreads, Open Interest)
+
 ## Configuration
 
 Configuration via environment variables (see `.env.example`):

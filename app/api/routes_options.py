@@ -1,6 +1,6 @@
 from decimal import Decimal
 from typing import Literal, Optional
-from datetime import date, timedelta
+from datetime import date
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 

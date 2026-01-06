@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Provider Defaults
     DEFAULT_PRICE_PROVIDER: str = "ibkr"
     DEFAULT_COMPANY_PROVIDER: str = "finnhub"
-    DEFAULT_OPTIONS_PROVIDER: str = "ibkr"
+    DEFAULT_OPTIONS_PROVIDER: str = "ibkr"  # LSEG does NOT support options (missing trapi.data.pricing.read scope)
 
     # IBKR Provider
     IBKR_HOST: str = "127.0.0.1"
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR: bool = True
 
     # LSEG Provider
+    # ⚠️  LSEG subscription does NOT include 'trapi.data.pricing.read' scope
+    # → Cannot provide real-time Greeks for options
+    # → Use LSEG only for: Stock prices, Company data, News
+    # → Use IBKR for: Options data and Greeks
     LSEG_APP_KEY: str = "stub-key"  # Refinitiv App Key
     LSEG_USERNAME: str = ""  # Refinitiv platform username
     LSEG_PASSWORD: str = ""  # Refinitiv platform password
