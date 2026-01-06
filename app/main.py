@@ -1,5 +1,6 @@
 import logging
 import threading
+import warnings
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -13,6 +14,10 @@ from app.api import routes_meta, routes_prices, routes_companies, routes_options
 from app.logging_config import setup_logging
 
 mcp_logger = logging.getLogger(__name__)
+
+# Suppress known deprecation warnings from upstream libraries (uvicorn/websockets migration in progress)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets.legacy")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn.protocols.websockets")
 
 # Setup custom logging
 setup_logging()
