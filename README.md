@@ -1,6 +1,13 @@
+<div align="center">
+
+![# Market Data Hub Logo](logo.svg)
+
 # Market Data Hub
 
-Market Data Hub is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
+</div>
+
+
+Market Data Hub (MDH) is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
 
 **What It Does**
 - Aggregates real-time and delayed market data from IBKR and LSEG
