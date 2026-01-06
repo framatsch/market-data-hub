@@ -26,3 +26,8 @@ def setup_logging():
     """Setup custom logging configuration."""
     # Add the health check filter to the access logger
     access_logger.addFilter(HealthCheckFilter())
+
+    # Suppress ib_async.wrapper ERROR logs for subscription errors (10089/10091)
+    # These are handled by our custom error handler and logged at appropriate level
+    ib_wrapper_logger = logging.getLogger("ib_async.wrapper")
+    ib_wrapper_logger.setLevel(logging.CRITICAL)  # Only show critical errors, not 10091 subscription warnings

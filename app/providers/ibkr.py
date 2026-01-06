@@ -48,7 +48,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
                 if skip_on_error and self._handle_subscription_error(error_msg, contract_info):
                     # Only log warning for Level 1, debug for Level 2/3
-                    if self._requested_market_data_type == 1:
+                    if self._get_effective_market_data_type() == 1:
                         logger.warning(f"Skipping contract due to subscription error: {c}")
                     else:
                         logger.debug(f"Skipping contract (subscription info): {c}")
@@ -99,7 +99,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         if failed_contracts:
             # Only log warning for Level 1, debug for Level 2/3
-            if self._requested_market_data_type == 1:
+            if self._get_effective_market_data_type() == 1:
                 logger.warning(f"Failed to get data for {len(failed_contracts)} contracts due to subscription issues")
             else:
                 logger.debug(f"Skipped {len(failed_contracts)} contracts (subscription not available for delayed data)")
@@ -137,6 +137,10 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return Decimal(str(val))
         return None
 
+    def _get_effective_market_data_type(self) -> int:
+        """Get the effective market data type being used (explicit request or default)."""
+        return self._requested_market_data_type if self._requested_market_data_type is not None else self.market_data_type
+
     def _extract_greeks(self, ticker) -> dict:
         """Extract Greeks from ticker.modelGreeks if available."""
         greeks = {
@@ -170,10 +174,14 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         try:
             logger.info(f"Connecting to IBKR at {self.host}:{self.port} (Client ID: {self.client_id})")
             await self.ib.connectAsync(self.host, self.port, self.client_id)
-            self.ib.reqMarketDataType(self.market_data_type)
+            # Don't set market data type here - will be set via _set_market_data_type if explicitly requested
+            # or via default in _set_market_data_type when called
 
             # Install error handler to catch subscription warnings
             self.ib.errorEvent += self._on_ib_error
+
+            # Set default market data type
+            await self._set_market_data_type(None)
 
             self._connected = True
         except Exception as e:
@@ -190,8 +198,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         - For Level 2/3 (Frozen/Delayed): Gracefully degrade to available data
         """
         if errorCode in (10089, 10091):
-            # Check if Level 1 was explicitly requested
-            if self._requested_market_data_type == 1:
+            # Check if Level 1 is being used (explicitly requested or default)
+            effective_type = self._get_effective_market_data_type()
+            if effective_type == 1:
                 # Level 1 requires subscription - set flag to fail later
                 error_msg = f"Level 1 (Live) market data requires subscription. {errorString}"
                 logger.error(error_msg)
@@ -205,7 +214,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             else:
                 # Level 2/3: Subscription warnings are expected, data still available
                 # Only log at DEBUG level to reduce noise
-                logger.debug(f"Market data subscription info (Error {errorCode}): {errorString}")
+                logger.debug(f"Market data subscription info (Error {errorCode}, Level {effective_type}): {errorString}")
         elif errorCode < 2000:  # Errors (vs warnings which are >= 2000)
             logger.error(f"IBKR Error {errorCode} for reqId {reqId}: {errorString}")
         else:
@@ -234,12 +243,13 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         """
         Change market data type dynamically.
         1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen
+        If market_data_type is None, uses default from config.
         """
         try:
-            mdt = market_data_type or self.market_data_type
-            self._requested_market_data_type = market_data_type  # Track explicit request
+            mdt = market_data_type if market_data_type is not None else self.market_data_type
+            self._requested_market_data_type = market_data_type  # Track explicit request (None means default)
             self.ib.reqMarketDataType(mdt)
-            logger.info(f"Market data type set to {mdt} (requested: {market_data_type})")
+            logger.info(f"Market data type set to {mdt} (explicitly requested: {market_data_type}, effective: {mdt})")
         except Exception as e:
             logger.error(f"Failed to set market data type: {e}")
 
@@ -318,6 +328,26 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             await self._disconnect()
 
     async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
+        """
+        Get the latest price quote for a stock.
+
+        Args:
+            symbol: Stock ticker symbol
+            market_data_type: 1=Live (Level 2), 2=Frozen (OPRA), 3=Delayed (default)
+
+        Returns:
+            PriceQuote with:
+            - For Level 1 (Live): bid, ask, volume from real-time market data (requires subscription)
+            - For Level 2/3 (Frozen/Delayed): Falls back to historical daily close price
+              - price: Close from last trading day
+              - bid/ask: NOT available (requires subscription for live bid/ask)
+              - volume: NOT available in historical fallback
+
+        Note:
+            - Level 2/3 for stocks do not provide real-time bid/ask without subscription
+            - When snapshot fails, system falls back to most recent daily close price
+            - This fallback behavior is logged with date and close value
+        """
         try:
             await self._ensure_connection()
             # Reset subscription errors from previous calls (e.g., from options queries)
@@ -341,7 +371,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             ticker = tickers[0]
 
             # For Level 1: if any subscription error was recorded, abort with provider not available
-            if self._requested_market_data_type == 1 and self._subscription_errors:
+            if self._get_effective_market_data_type() == 1 and self._subscription_errors:
                 details = self._subscription_errors[-1]
                 # Reset flag for subsequent calls
                 self._level1_subscription_error = False
@@ -362,7 +392,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             if not self._is_valid(price):
                 # If Level 1 requested, abort instead of fallback
-                if self._requested_market_data_type == 1:
+                if self._get_effective_market_data_type() == 1:
                     details = self._subscription_errors[-1] if self._subscription_errors else {"reason": "snapshot not available"}
                     # Reset flags for subsequent calls
                     self._level1_subscription_error = False
@@ -373,7 +403,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                         details=details
                     )
                 # Otherwise, fallback to historical data
-                logger.info(f"Market data snapshot failed for {symbol}, falling back to historical data")
+                effective_type = self._get_effective_market_data_type()
+                logger.info(f"Snapshot not available for {symbol} (market_data_type={effective_type}), falling back to historical daily data")
                 end_dt = datetime.now()
                 start_dt = end_dt - timedelta(days=7)
                 try:
@@ -381,9 +412,17 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                     if bars:
                         last_bar = bars[-1]
                         price = last_bar.close
-                        logger.info(f"Found historical close price for {symbol}: {price}")
+                        # Log detailed fallback info: date and close price
+                        logger.info(
+                            f"Using historical fallback for {symbol}: "
+                            f"Date={last_bar.start.strftime('%Y-%m-%d')}, "
+                            f"Close={last_bar.close}, "
+                            f"Volume={last_bar.volume} "
+                            f"(Note: bid/ask not available for Level 2/3 stocks without subscription)"
+                        )
                     else:
                         price = 0.0
+                        logger.warning(f"No historical data available for {symbol}")
                 except Exception as ex:
                     logger.warning(f"Fallback to historical data failed: {ex}")
                     price = 0.0
@@ -404,7 +443,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         except Exception as e:
             logger.error(f"Error getting last price for {symbol}: {e}")
             # If Level 1 was requested and subscription error occurred, signal provider not available
-            if self._requested_market_data_type == 1:
+            if self._get_effective_market_data_type() == 1:
                 raise ProviderError(f"IBKR error: {e}", code="PROVIDER_NOT_AVAILABLE")
             raise ProviderError(f"IBKR error: {e}")
         finally:
@@ -489,8 +528,14 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             for t in tickers:
                 c = t.contract
                 greeks = self._extract_greeks(t)
-                # open_interest: populate whenever available from IBKR
-                open_interest_val = int(t.openInterest) if self._is_valid(t.openInterest) else None
+                # open_interest: Use callOpenInterest or putOpenInterest based on contract right
+                # Note: openInterest doesn't exist on Ticker, must use call/put specific fields
+                if c.right == 'C' and self._is_valid(t.callOpenInterest):
+                    open_interest_val = int(t.callOpenInterest)
+                elif c.right == 'P' and self._is_valid(t.putOpenInterest):
+                    open_interest_val = int(t.putOpenInterest)
+                else:
+                    open_interest_val = None
                 options_data.append(OptionQuote(
                     symbol=c.localSymbol, # e.g. AAPL  230616C00150000
                     underlying_symbol=symbol,
@@ -566,8 +611,13 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             greeks = self._extract_greeks(ticker)
 
-            # open_interest: populate whenever available from IBKR
-            open_interest_val = int(ticker.openInterest) if self._is_valid(ticker.openInterest) else None
+            # open_interest: Use callOpenInterest or putOpenInterest based on contract right
+            if contract.right == 'C' and self._is_valid(ticker.callOpenInterest):
+                open_interest_val = int(ticker.callOpenInterest)
+            elif contract.right == 'P' and self._is_valid(ticker.putOpenInterest):
+                open_interest_val = int(ticker.putOpenInterest)
+            else:
+                open_interest_val = None
 
             return OptionQuote(
                 symbol=contract.localSymbol,
