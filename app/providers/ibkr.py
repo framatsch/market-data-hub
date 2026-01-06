@@ -308,6 +308,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
     async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
         try:
             await self._ensure_connection()
+            # Reset subscription errors from previous calls (e.g., from options queries)
+            self._subscription_errors.clear()
+            self._level1_subscription_error = False
             # Set market data type if explicitly requested (1=Live,2=Frozen,3=Delayed)
             if market_data_type is not None:
                 await self._set_market_data_type(market_data_type)
