@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-   width="512"
-   height="512"
-   viewBox="0 0 512 512"
+   width="200"
+   height="200"
+   viewBox="0 0 200 200"
    version="1.1"
    id="svg15"
    sodipodi:docname="logo.svg"
@@ -20,15 +20,15 @@
      inkscape:pageopacity="0"
      inkscape:pagecheckerboard="1"
      inkscape:deskcolor="#505050"
-     inkscape:zoom="0.8046875"
-     inkscape:cx="127.37864"
-     inkscape:cy="155.33981"
+     inkscape:zoom="1.609375"
+     inkscape:cx="112.46602"
+     inkscape:cy="68.970874"
      inkscape:window-width="1920"
      inkscape:window-height="1017"
      inkscape:window-x="-8"
      inkscape:window-y="32"
      inkscape:window-maximized="1"
-     inkscape:current-layer="g12" />
+     inkscape:current-layer="svg15" />
   <defs
      id="defs4">
     <filter
@@ -79,28 +79,57 @@
            id="feMergeNode4" />
       </feMerge>
     </filter>
+    <filter
+       id="cyanGlow"
+       x="-0.073026316"
+       y="-0.063068049"
+       width="1.1460526"
+       height="1.1261361">
+      <feGaussianBlur
+         in="SourceGraphic"
+         stdDeviation="4"
+         result="blur"
+         id="feGaussianBlur1-0" />
+      <feMerge
+         id="feMerge2-9">
+        <feMergeNode
+           in="blur"
+           id="feMergeNode1-4" />
+        <feMergeNode
+           in="SourceGraphic"
+           id="feMergeNode2-8" />
+      </feMerge>
+    </filter>
   </defs>
   <rect
-     width="512"
-     height="512"
-     fill="#0A0B10"
-     rx="80"
-     ry="80"
-     id="rect4" />
-  <polygon
-     points="256,50 436,150 436,362 256,462 76,362 76,150"
-     fill="none"
-     stroke="#00FFFF"
-     stroke-width="12"
-     filter="url(#neonGlow)"
-     stroke-linejoin="round"
-     id="polygon4" />
+     width="200"
+     height="200"
+     fill="#0a0b10"
+     rx="0"
+     ry="0"
+     id="rect4"
+     x="0"
+     y="0"
+     style="stroke-width:0.390625" />
+  <g
+     filter="url(#cyanGlow)"
+     id="g6"
+     transform="translate(99.969947,100.65885)">
+    <polygon
+       points="-76,-44 0,-88 76,-44 76,44 0,88 -76,44 "
+       fill="none"
+       stroke="#00ffff"
+       stroke-width="3"
+       stroke-linejoin="round"
+       id="polygon6" />
+  </g>
   <g
      filter="url(#whiteGlow)"
-     stroke="white"
+     stroke="#ffffff"
      stroke-width="4"
-     fill="white"
-     id="g12">
+     fill="#ffffff"
+     id="g12"
+     transform="scale(0.390625)">
     <path
        d="M 256,61.805825 V 180"
        opacity="0.6"
@@ -149,31 +178,32 @@
   </g>
   <g
      filter="url(#whiteGlow)"
-     id="g15">
+     id="g15"
+     transform="scale(0.390625)">
     <circle
        cx="256"
        cy="256"
        r="65"
        fill="none"
-       stroke="white"
+       stroke="#ffffff"
        stroke-width="3"
        id="circle13" />
     <circle
        cx="256"
        cy="256"
        r="50"
-       fill="white"
+       fill="#ffffff"
        opacity="0.1"
        id="circle14" />
     <circle
        cx="256"
        cy="256"
        r="12"
-       fill="white"
+       fill="#ffffff"
        id="circle15" />
     <path
-       d="M 256,225 L 256,240 M 256,272 L 256,287 M 228,240 L 242,248 M 270,264 L 284,272 M 228,272 L 242,264 M 270,248 L 284,240"
-       stroke="white"
+       d="m 256,225 v 15 m 0,32 v 15 m -28,-47 14,8 m 28,16 14,8 m -56,0 14,-8 m 28,-16 14,-8"
+       stroke="#ffffff"
        stroke-width="5"
        stroke-linecap="round"
        id="path15" />
