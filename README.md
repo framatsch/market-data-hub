@@ -1,6 +1,48 @@
 # Market Data Hub
 
-A FastAPI-based data service that aggregates market and company data from multiple external providers (IBKR, LSEG) in a clean, provider-agnostic REST/WebSocket API with MCP (Model Context Protocol) support.
+Market Data Hub is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
+
+**What It Does**
+- Aggregates real-time and delayed market data from IBKR and LSEG
+- Provides options chains and quotes (IBKR), equity prices (IBKR and LSEG), company profiles, and news
+- Exposes a clean, provider-agnostic API surface with strong Pydantic models
+- Runs reliably in Docker and Kubernetes; supports managed IBKR Gateway
+
+**Why It Exists**
+- Broker and data APIs differ wildly; this hub standardizes responses, typing (Decimal for financials), and error handling
+- Lets you choose the provider per request (or set sensible defaults) while keeping identical response formats
+- Gracefully degrades when certain entitlements are missing (e.g., IBKR Level 2), and documents when behavior differs across providers
+
+**Key Capabilities**
+- Prices: latest quotes and historical bars
+- Options: chains and quotes with Greeks (IBKR only)
+- Companies: profiles, basic search (LSEG)
+- News: institutional-grade headlines (LSEG) and alternative news (Finnhub)
+
+**Providers & Data Types**
+- IBKR: real-time equities and options; supports `market_data_type` (1=Live/Level 2, 2=Frozen, 3=Delayed)
+- LSEG: equity prices via daily summaries; ignores `market_data_type`; not suitable for options Greeks
+- Finnhub: supplemental news and company data for fallback scenarios
+
+**Behavior Highlights**
+- `market_data_type` defaults to 3 (Delayed) for IBKR, minimizing subscription requirements
+- If you request IBKR Level 1 (Live) without entitlements, the API returns HTTP 503 with a clear error code (`PROVIDER_NOT_AVAILABLE`)
+- LSEG returns the latest daily summary and logs an informational message when `market_data_type` is provided (and ignored)
+
+**How It Works**
+- API Layer (FastAPI) → Service Layer → Provider Layer (IBKR/LSEG/Finnhub)
+- Strong Pydantic models ensure type-safety (Decimal for prices, Optional fields for missing data)
+- Async-first with `ib_async` for IBKR; synchronous session management for LSEG SDK
+
+**Quick Examples**
+- Last price (IBKR, delayed by default):
+  - curl "http://localhost:8000/prices/IWM/last?provider=ibkr&market_data_type=3"
+- Last price (LSEG, daily summary):
+  - curl "http://localhost:8000/prices/IWM/last?provider=lseg"
+- Option chain (IBKR only):
+  - curl "http://localhost:8000/options/IWM/chain?expiry=2026-01-13&min_strike=227&max_strike=277&market_data_type=3"
+
+See below for setup, configuration, and deployment.
 
 ## Quick Start
 
@@ -86,7 +128,7 @@ Configuration via environment variables (see `.env.example`):
 | `IBKR_HOST` | `localhost` | Interactive Brokers Gateway/TWS host |
 | `IBKR_PORT` | `4002` | Gateway: 4002, TWS Paper: 7497, TWS Live: 7496 |
 | `IBKR_CLIENT_ID` | `815` | Unique client ID for connection |
-| `IBKR_MARKET_DATA_TYPE` | `2` | 1=Live, 2=Frozen, 3=Delayed |
+| `IBKR_MARKET_DATA_TYPE` | `3` | 1=Live, 2=Frozen, 3=Delayed (default; free) |
 | `LSEG_APP_KEY` | *(required)* | LSEG application API key |
 | `LSEG_USERNAME` | *(required)* | LSEG Workspace username (email) |
 | `LSEG_PASSWORD` | *(required)* | LSEG Workspace password |
@@ -148,8 +190,12 @@ curl http://localhost:8000/health
 
 ### Get Last Price
 ```bash
-curl "http://localhost:8000/prices/AAPL/last?provider=ibkr"
+curl "http://localhost:8000/prices/AAPL/last?provider=ibkr&market_data_type=3"
 ```
+
+Provider behavior for `/prices/{symbol}/last`:
+- IBKR: honors `market_data_type` (1=Live, 2=Frozen, 3=Delayed). Level 1 requires subscription; if unavailable, returns HTTP 503.
+- LSEG: ignores `market_data_type` and returns the latest daily summary via Refinitiv `historical_pricing.summaries`.
 
 ### Get Company Profile
 ```bash

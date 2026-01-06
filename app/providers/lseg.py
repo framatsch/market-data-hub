@@ -324,8 +324,18 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Price Provider Methods (BasePriceProvider)
     # ========================================================================
 
-    async def get_last_price(self, symbol: str) -> PriceQuote:
-        """Get current price quote for a symbol."""
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
+        """Get current price quote for a symbol.
+
+        Note: LSEG uses historical pricing summaries (daily) and does not support
+        IBKR-style market data types. The `market_data_type` parameter is accepted
+        for interface compatibility but is ignored.
+        """
+        # Log only if caller passed a market_data_type to make behavior explicit
+        if market_data_type is not None:
+            logger.info(
+                f"LSEGProvider: market_data_type={market_data_type} is ignored; using historical summaries (daily)."
+            )
         # Check cache first
         cached = self._get_cached_quote(symbol)
         if cached:

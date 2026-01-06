@@ -18,23 +18,23 @@ async def get_option_chain(
     min_strike: Optional[Decimal] = Query(None, description="Minimum strike price to include"),
     max_strike: Optional[Decimal] = Query(None, description="Maximum strike price to include"),
     right: Optional[Literal["call", "put"]] = Query(None, description="Filter by option type (call or put)"),
-    include_level2: bool = Query(False, description="Include Level 2 market data (requires subscription)"),
+    market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
     provider: Optional[str] = None,
     format: str = "json"
 ):
     """Get option chain for a symbol and expiry.
 
     Query Parameters:
-    - expiry: Option expiration date (default: 30 days from today)
+    - expiry: Option expiration date (default: today)
     - min_strike: Filter by minimum strike price
     - max_strike: Filter by maximum strike price
     - right: Filter by option type ("call" or "put")
-    - include_level2: Include Level 2 market data (requires subscription)
+    - market_data_type: 1=Live (requires Level 2 subscription), 2=Frozen (OPRA), 3=Delayed (default, free)
     - format: "json" (default) or "csv"
 
     Note:
-    - If include_level2=true and you don't have Level 2 subscription, the API will gracefully fallback to Level 1
-    - Errors will be logged but won't prevent data retrieval
+    - If market_data_type is not specified, uses default from config (currently 3=Delayed)
+    - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
     if not expiry:
         # Default to today
@@ -46,7 +46,7 @@ async def get_option_chain(
         min_strike=min_strike,
         max_strike=max_strike,
         right=right,
-        include_level2=include_level2
+        market_data_type=market_data_type
     )
 
     if format.lower() == "csv":
@@ -64,21 +64,21 @@ async def get_option_quote(
     symbol: str,
     option_id: str,
     service: OptionsServiceDep,
-    include_level2: bool = Query(False, description="Include Level 2 market data (requires subscription)"),
+    market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
     provider: Optional[str] = None,
     format: str = "json"
 ):
     """Get a specific option quote.
 
     Query Parameters:
-    - include_level2: Include Level 2 market data (requires subscription)
+    - market_data_type: 1=Live (requires Level 2 subscription), 2=Frozen (OPRA), 3=Delayed (default, free)
     - format: "json" (default) or "csv"
 
     Note:
-    - If include_level2=true and you don't have Level 2 subscription, the API will gracefully fallback to Level 1
-    - Errors will be logged but won't prevent data retrieval
+    - If market_data_type is not specified, uses default from config (currently 3=Delayed)
+    - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
-    quote = await service.get_option_quote(symbol, option_id, provider, include_level2=include_level2)
+    quote = await service.get_option_quote(symbol, option_id, provider, market_data_type=market_data_type)
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(quote, f"{option_id}_quote.csv")

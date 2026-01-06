@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import PriceServiceDep
@@ -13,16 +13,28 @@ router = APIRouter(prefix="/prices", tags=["Prices"])
 async def get_last_price(
     symbol: str,
     service: PriceServiceDep,
-    provider: Optional[str] = None,
+    provider: Optional[str] = Query(
+        None,
+        description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type and returns latest daily summary"
+    ),
+    market_data_type: Optional[int] = Query(
+        None,
+        description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter."
+    ),
     format: str = "json"
 ):
     """
     Get the latest price quote for a symbol.
 
     Query Parameters:
+    - market_data_type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)
     - format: "json" (default) or "csv"
+
+    Provider notes:
+    - IBKR: honors `market_data_type`; Level 1 requires subscription and will return 503 if unavailable
+    - LSEG: ignores `market_data_type` and returns latest daily summary (historical_pricing)
     """
-    quote = await service.get_latest_price(symbol, provider)
+    quote = await service.get_latest_price(symbol, provider, market_data_type)
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(quote, f"{symbol}_last_price.csv")

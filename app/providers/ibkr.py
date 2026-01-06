@@ -82,6 +82,17 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             for t in tickers:
                 self.ib.cancelMktData(t.contract)
 
+        # Check if Level 1 subscription error occurred
+        if self._level1_subscription_error:
+            error_details = self._subscription_errors[-1] if self._subscription_errors else {}
+            self._level1_subscription_error = False  # Reset flag
+            raise ProviderError(
+                "Level 1 (Live) market data requires additional subscription. "
+                "Please check 'Market Data Connections' in TWS/Gateway settings or use market_data_type=2 or 3.",
+                details=error_details,
+                code="PROVIDER_NOT_AVAILABLE"
+            )
+
         if failed_contracts:
             logger.warning(f"Failed to get data for {len(failed_contracts)} contracts due to subscription issues")
 
@@ -103,6 +114,12 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         # Track subscription errors
         self._subscription_errors = []
+
+        # Track explicitly requested market data type (None = using default)
+        self._requested_market_data_type = None
+
+        # Track if Level 1 subscription error occurred (for strict failure)
+        self._level1_subscription_error = False
 
     def _is_valid(self, val) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
@@ -160,12 +177,27 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
     def _on_ib_error(self, reqId, errorCode, errorString, contract):
         """
         Handle IBKR errors/warnings.
-        Error 10089/10091 are subscription warnings but data still comes through.
+        Error 10089/10091 are subscription warnings.
+        - For Level 1 (Live): Set flag to raise exception later
+        - For Level 2/3 (Frozen/Delayed): Gracefully degrade to available data
         """
         if errorCode in (10089, 10091):
-            # Subscription warnings - data is still available (delayed or from model)
-            logger.debug(f"Market data subscription warning (Error {errorCode}): {errorString[:50]}...")
-            # Don't raise, just log silently
+            # Check if Level 1 was explicitly requested
+            if self._requested_market_data_type == 1:
+                # Level 1 requires subscription - set flag to fail later
+                error_msg = f"Level 1 (Live) market data requires subscription. {errorString}"
+                logger.error(error_msg)
+                self._level1_subscription_error = True
+                # Store details for later exception
+                self._subscription_errors.append({
+                    "error_code": errorCode,
+                    "error_string": errorString,
+                    "contract": str(contract)
+                })
+            else:
+                # Level 2/3: Subscription warnings are expected, data still available
+                # Only log at DEBUG level to reduce noise
+                logger.debug(f"Market data subscription info (Error {errorCode}): {errorString}")
         elif errorCode < 2000:  # Errors (vs warnings which are >= 2000)
             logger.error(f"IBKR Error {errorCode} for reqId {reqId}: {errorString}")
         else:
@@ -193,8 +225,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         """
         try:
             mdt = market_data_type or self.market_data_type
+            self._requested_market_data_type = market_data_type  # Track explicit request
             self.ib.reqMarketDataType(mdt)
-            logger.info(f"Market data type set to {mdt}")
+            logger.info(f"Market data type set to {mdt} (requested: {market_data_type})")
         except Exception as e:
             logger.error(f"Failed to set market data type: {e}")
 
@@ -272,9 +305,12 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         finally:
             await self._disconnect()
 
-    async def get_last_price(self, symbol: str) -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
         try:
             await self._ensure_connection()
+            # Set market data type if explicitly requested (1=Live,2=Frozen,3=Delayed)
+            if market_data_type is not None:
+                await self._set_market_data_type(market_data_type)
             contract = Stock(symbol, 'SMART', 'USD')
 
             # Qualify contract to get conId etc specific to SMART
@@ -289,6 +325,18 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                  raise DataNotFoundError(f"No market data for {symbol}")
             ticker = tickers[0]
 
+            # For Level 1: if any subscription error was recorded, abort with provider not available
+            if self._requested_market_data_type == 1 and self._subscription_errors:
+                details = self._subscription_errors[-1]
+                # Reset flag for subsequent calls
+                self._level1_subscription_error = False
+                self._subscription_errors.clear()
+                raise ProviderError(
+                    "Level 1 (Live) market data requires additional subscription.",
+                    code="PROVIDER_NOT_AVAILABLE",
+                    details=details
+                )
+
             # Use last price, or close, or mid...
             # If market is closed, look for 'close' or 'last'.
             # snapshot=True usually returns available data.
@@ -298,9 +346,19 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                  price = ticker.close
 
             if not self._is_valid(price):
-                # Fallback to historical data
+                # If Level 1 requested, abort instead of fallback
+                if self._requested_market_data_type == 1:
+                    details = self._subscription_errors[-1] if self._subscription_errors else {"reason": "snapshot not available"}
+                    # Reset flags for subsequent calls
+                    self._level1_subscription_error = False
+                    self._subscription_errors.clear()
+                    raise ProviderError(
+                        "Level 1 (Live) market data requires additional subscription.",
+                        code="PROVIDER_NOT_AVAILABLE",
+                        details=details
+                    )
+                # Otherwise, fallback to historical data
                 logger.info(f"Market data snapshot failed for {symbol}, falling back to historical data")
-                # Look back a few days to ensure we find the last trading day
                 end_dt = datetime.now()
                 start_dt = end_dt - timedelta(days=7)
                 try:
@@ -330,6 +388,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         except Exception as e:
             logger.error(f"Error getting last price for {symbol}: {e}")
+            # If Level 1 was requested and subscription error occurred, signal provider not available
+            if self._requested_market_data_type == 1:
+                raise ProviderError(f"IBKR error: {e}", code="PROVIDER_NOT_AVAILABLE")
             raise ProviderError(f"IBKR error: {e}")
         finally:
             await self._disconnect()
@@ -341,15 +402,15 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         min_strike: Optional[Decimal] = None,
         max_strike: Optional[Decimal] = None,
         right: Optional[Literal["call", "put"]] = None,
-        include_level2: bool = False
+        market_data_type: Optional[int] = None
     ) -> OptionChain:
         try:
-            logger.info(f"Fetching option chain for {symbol} expiry {expiry} (include_level2={include_level2})")
+            logger.info(f"Fetching option chain for {symbol} expiry {expiry} (market_data_type={market_data_type})")
             await self._ensure_connection()
 
-            # Set market data type for Level 2 if requested
-            if include_level2:
-                await self._set_market_data_type(1)  # Live for Level 2
+            # Set market data type if explicitly requested
+            if market_data_type is not None:
+                await self._set_market_data_type(market_data_type)
 
             # 1. Qualify underlying
             underlying = Stock(symbol, 'SMART', 'USD')

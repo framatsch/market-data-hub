@@ -15,7 +15,7 @@ class BasePriceProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_last_price(self, symbol: str) -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
         """Fetch latest price quote."""
         pass
 
@@ -39,13 +39,13 @@ class BaseOptionsProvider(ABC):
         min_strike: Optional[Decimal] = None,
         max_strike: Optional[Decimal] = None,
         right: Optional[Literal["call", "put"]] = None,
-        include_level2: bool = False
+        market_data_type: Optional[int] = None
     ) -> OptionChain:
         """Fetch option chain for a given expiry."""
         pass
 
     @abstractmethod
-    async def get_option_quote(self, symbol: str, option_id: str, include_level2: bool = False) -> OptionQuote:
+    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
         """Fetch specific option quote."""
         pass
 

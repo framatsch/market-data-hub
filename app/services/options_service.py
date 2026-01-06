@@ -17,7 +17,7 @@ class OptionsService:
         min_strike: Optional[Decimal] = None,
         max_strike: Optional[Decimal] = None,
         right: Optional[Literal["call", "put"]] = None,
-        include_level2: bool = False
+        market_data_type: Optional[int] = None
     ) -> OptionChain:
         provider = self.registry.get_options_provider(provider_name)
         return await provider.get_option_chain(
@@ -25,7 +25,7 @@ class OptionsService:
             min_strike=min_strike,
             max_strike=max_strike,
             right=right,
-            include_level2=include_level2
+            market_data_type=market_data_type
         )
 
     async def get_option_quote(
@@ -33,9 +33,9 @@ class OptionsService:
         symbol: str,
         option_id: str,
         provider_name: Optional[str] = None,
-        include_level2: bool = False
+        market_data_type: Optional[int] = None
     ) -> OptionQuote:
         provider = self.registry.get_options_provider(provider_name)
-        return await provider.get_option_quote(symbol, option_id, include_level2=include_level2)
+        return await provider.get_option_quote(symbol, option_id, market_data_type=market_data_type)
 
 options_service = OptionsService()

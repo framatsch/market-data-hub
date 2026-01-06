@@ -8,16 +8,16 @@ class PriceService:
     def __init__(self, registry=None):
         self.registry = registry or get_registry()
 
-    async def get_latest_price(self, symbol: str, provider_name: Optional[str] = None) -> PriceQuote:
+    async def get_latest_price(self, symbol: str, provider_name: Optional[str] = None, market_data_type: Optional[int] = None) -> PriceQuote:
         provider = self.registry.get_price_provider(provider_name)
-        return await provider.get_last_price(symbol)
+        return await provider.get_last_price(symbol, market_data_type)
 
     async def get_historical_prices(
-        self, 
-        symbol: str, 
-        interval: str, 
-        start: datetime, 
-        end: datetime, 
+        self,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
         provider_name: Optional[str] = None
     ) -> List[PriceBar]:
         provider = self.registry.get_price_provider(provider_name)
