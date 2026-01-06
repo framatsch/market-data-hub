@@ -47,7 +47,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 contract_info = f"{c.symbol} {c.strike if hasattr(c, 'strike') else 'N/A'}"
 
                 if skip_on_error and self._handle_subscription_error(error_msg, contract_info):
-                    logger.warning(f"Skipping contract due to subscription error: {c}")
+                    # Only log warning for Level 1, debug for Level 2/3
+                    if self._requested_market_data_type == 1:
+                        logger.warning(f"Skipping contract due to subscription error: {c}")
+                    else:
+                        logger.debug(f"Skipping contract (subscription info): {c}")
                     failed_contracts.append(c)
                 else:
                     raise
@@ -94,7 +98,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             )
 
         if failed_contracts:
-            logger.warning(f"Failed to get data for {len(failed_contracts)} contracts due to subscription issues")
+            # Only log warning for Level 1, debug for Level 2/3
+            if self._requested_market_data_type == 1:
+                logger.warning(f"Failed to get data for {len(failed_contracts)} contracts due to subscription issues")
+            else:
+                logger.debug(f"Skipped {len(failed_contracts)} contracts (subscription not available for delayed data)")
 
         valid_tickers = [t for t in tickers if t.time or t.last or t.close or self._is_valid(t.bid)]
         logger.debug(f"Snapshot complete. Got data for {len(valid_tickers)}/{len(tickers)} contracts")
@@ -214,7 +222,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 "error": error_msg,
                 "timestamp": datetime.now()
             })
-            logger.warning(f"Subscription error detected: {error_msg}. Contract: {contract_info}")
+            # Log level based on market data type: ERROR for Level 1, DEBUG for Level 2/3
+            if self._requested_market_data_type == 1:
+                logger.error(f"Subscription error (Level 1): {error_msg}. Contract: {contract_info}")
+            else:
+                logger.debug(f"Subscription info (Level {self._requested_market_data_type or self.market_data_type}): {error_msg}. Contract: {contract_info}")
             return self.fallback_on_subscription_error
         return False
 
@@ -477,8 +489,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             for t in tickers:
                 c = t.contract
                 greeks = self._extract_greeks(t)
-                # open_interest is only reliable for Level 1 (Live) data
-                open_interest_val = int(t.openInterest) if (self._is_valid(t.openInterest) and self._requested_market_data_type == 1) else None
+                # open_interest: populate whenever available from IBKR
+                open_interest_val = int(t.openInterest) if self._is_valid(t.openInterest) else None
                 options_data.append(OptionQuote(
                     symbol=c.localSymbol, # e.g. AAPL  230616C00150000
                     underlying_symbol=symbol,
@@ -554,8 +566,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             greeks = self._extract_greeks(ticker)
 
-            # open_interest is only reliable for Level 1 (Live) data
-            open_interest_val = int(ticker.openInterest) if (self._is_valid(ticker.openInterest) and self._requested_market_data_type == 1) else None
+            # open_interest: populate whenever available from IBKR
+            open_interest_val = int(ticker.openInterest) if self._is_valid(ticker.openInterest) else None
 
             return OptionQuote(
                 symbol=contract.localSymbol,
