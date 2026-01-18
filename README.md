@@ -139,6 +139,9 @@ Configuration via environment variables (see `.env.example`):
 | `LSEG_APP_KEY` | *(required)* | LSEG application API key |
 | `LSEG_USERNAME` | *(required)* | LSEG Workspace username (email) |
 | `LSEG_PASSWORD` | *(required)* | LSEG Workspace password |
+| `FINNHUB_API_KEY` | `stub-key` | Finnhub API key (get from finnhub.io/dashboard) |
+| `FINNHUB_RATE_LIMIT_PER_MIN` | `60` | API rate limit (60 for free tier) |
+| `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
 | `APP_ENV` | `dev` | Environment: dev, test, prod |
 | `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
 | `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg |
@@ -158,6 +161,24 @@ To access Refinitiv/LSEG data, obtain credentials from [LSEG Developer Portal](h
    ```
 
 **Note**: Data access requires active LSEG subscription with appropriate entitlements for the data types you retrieve.
+
+### Finnhub Credentials Setup
+
+To access company news and data from Finnhub (fallback provider), obtain an API key from [Finnhub.io](https://finnhub.io/):
+
+1. Sign up for a free account at [finnhub.io/register](https://finnhub.io/register)
+2. Get your API key from the [Dashboard](https://finnhub.io/dashboard)
+3. Set the API key in `.env`:
+   ```bash
+   FINNHUB_API_KEY=your-api-key-here
+   ```
+
+**Rate Limits**:
+- Free tier: 60 API calls per minute
+- Premium: 300-600 calls/min depending on plan
+- Rate limit handling: Automatically falls back to mock provider when limit exceeded (configurable via `FINNHUB_FALLBACK_ON_RATE_LIMIT`)
+
+See [NEWS_API_GUIDE.md](./NEWS_API_GUIDE.md) for detailed news API usage and testing.
 
 ## Running Modes
 

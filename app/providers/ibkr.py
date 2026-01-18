@@ -253,6 +253,106 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         except Exception as e:
             logger.error(f"Failed to set market data type: {e}")
 
+    async def _get_trading_hours(self, contract: Contract) -> Optional[str]:
+        """
+        Get trading hours string for a contract via reqContractDetails.
+        Format: "NYSESTD;0930-1600" or "NYSESTD;0930-1600:CLOSED;20220101-20220102"
+        Returns None on error.
+        """
+        try:
+            await self._ensure_connection()
+            details = await self.ib.reqContractDetailsAsync(contract)
+            if details and len(details) > 0:
+                trading_hours = details[0].contractDetails.tradingHours
+                logger.debug(f"Trading hours for {contract.symbol}: {trading_hours}")
+                return trading_hours
+            logger.debug(f"No contract details available for {contract.symbol}")
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to get trading hours for {contract.symbol}: {e}")
+            return None
+
+    def _is_market_open(self, trading_hours: Optional[str]) -> bool:
+        """
+        Determine if market is currently open based on trading_hours string.
+
+        Format examples:
+        - "NYSESTD;0930-1600" (simple format)
+        - "NYSESTD;0930-1600:CLOSED;20220101-20220102" (with closed dates)
+
+        Logic:
+        1. If no trading hours: assume unknown (return None)
+        2. Check if today is in CLOSED dates
+        3. Check if current server time is within trading interval
+
+        Returns:
+            True if market is open, False if closed, None if unknown
+        """
+        if not trading_hours:
+            logger.debug("No trading hours information available")
+            return None
+
+        try:
+            # Get current time in market timezone (US/Eastern for NYSE)
+            now = datetime.now()
+            current_date_str = now.strftime("%Y%m%d")
+            current_time_str = now.strftime("%H%M")
+
+            # Parse trading hours string
+            parts = trading_hours.split(":")
+            if len(parts) < 2:
+                logger.debug(f"Invalid trading hours format: {trading_hours}")
+                return None
+
+            # Extract trading times (e.g., "0930-1600")
+            trading_times = parts[1]
+
+            # Check for CLOSED dates
+            for part in parts:
+                if "CLOSED" in part:
+                    # Format: "CLOSED;20220101-20220102"
+                    closed_dates = part.split(";")
+                    if len(closed_dates) > 1:
+                        # Check if current date is in any closed date range
+                        date_ranges = closed_dates[1].split(",")
+                        for date_range in date_ranges:
+                            if "-" in date_range:
+                                start_date, end_date = date_range.split("-")
+                                if start_date <= current_date_str <= end_date:
+                                    logger.debug(f"Market closed on {current_date_str} (in range {date_range})")
+                                    return False
+
+            # Check if current time is within trading interval
+            if "-" in trading_times:
+                start_time, end_time = trading_times.split("-")
+                is_within = start_time <= current_time_str < end_time
+                logger.debug(f"Current time {current_time_str} within {start_time}-{end_time}: {is_within}")
+                return is_within
+
+            logger.debug(f"Could not parse trading interval from: {trading_times}")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Error parsing trading hours '{trading_hours}': {e}")
+            return None
+
+    async def _get_market_open_status(self, contract: Contract) -> Optional[bool]:
+        """
+        Get current market open status for a contract.
+        Fetches trading hours and determines if market is currently open.
+
+        Returns:
+            True if market is open, False if closed, None if unable to determine
+        """
+        try:
+            trading_hours = await self._get_trading_hours(contract)
+            if trading_hours:
+                return self._is_market_open(trading_hours)
+            return None
+        except Exception as e:
+            logger.debug(f"Error determining market open status: {e}")
+            return None
+
     async def _disconnect(self):
         """Disconnect if configured to do so."""
         if self.connect_on_request and self.ib.isConnected():
@@ -435,7 +535,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 provider="ibkr",
                 bid=self._to_decimal(ticker.bid),
                 ask=self._to_decimal(ticker.ask),
-                volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0
+                volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
+                is_market_open=await self._get_market_open_status(contract)
             )
             logger.info(f"Got quote for {symbol}: {quote}")
             return quote

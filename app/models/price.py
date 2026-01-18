@@ -12,6 +12,7 @@ class PriceQuote(BaseModel):
     bid: Optional[Decimal] = None
     ask: Optional[Decimal] = None
     volume: Optional[int] = None
+    is_market_open: Optional[bool] = None
 
 class PriceBar(BaseModel):
     symbol: str
