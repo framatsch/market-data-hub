@@ -178,7 +178,7 @@ To access company news and data from Finnhub (fallback provider), obtain an API 
 - Premium: 300-600 calls/min depending on plan
 - Rate limit handling: Automatically falls back to mock provider when limit exceeded (configurable via `FINNHUB_FALLBACK_ON_RATE_LIMIT`)
 
-See [NEWS_API_GUIDE.md](./NEWS_API_GUIDE.md) for detailed news API usage and testing.
+See [doc/news-api-guide.md](doc/news-api-guide.md) for detailed news API usage and testing.
 
 ## Running Modes
 
@@ -330,7 +330,7 @@ All deployment resources are in the `deploy/` directory:
 | `secret-template.yaml` | Template showing Secret structure (never commit with real values) |
 | `.env.example` | Environment variables template |
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment documentation.
+See [doc/deployment.md](doc/deployment.md) for detailed deployment documentation.
 
 ## Development
 

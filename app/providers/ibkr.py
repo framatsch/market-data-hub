@@ -1,7 +1,8 @@
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional, Literal
+from zoneinfo import ZoneInfo
 
 from ib_async import IB, Stock, Option, Contract
 from ib_async.objects import BarData
@@ -253,37 +254,53 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         except Exception as e:
             logger.error(f"Failed to set market data type: {e}")
 
-    async def _get_trading_hours(self, contract: Contract) -> Optional[str]:
+    async def _get_trading_hours(self, contract: Contract) -> Optional[tuple[str, str]]:
         """
-        Get trading hours string for a contract via reqContractDetails.
-        Format: "NYSESTD;0930-1600" or "NYSESTD;0930-1600:CLOSED;20220101-20220102"
-        Returns None on error.
+        Get trading hours string and timezone for a contract via reqContractDetails.
+
+        Format examples:
+        - "20260122:0400-20260122:2000;20260123:0400-20260123:2000" (new format from Gateway)
+        - "NYSESTD;0930-1600" (old format)
+        - "NYSESTD;0930-1600:CLOSED;20220101-20220102" (with closed dates)
+
+        Returns:
+            Tuple of (trading_hours, timezone_id) or None on error.
+            Examples:
+            - ("20260122:0930-20260122:1600", "US/Eastern") for US stocks
+            - ("20260122:0900-20260122:1745", "MET") for German stocks
+            - ("20260122:0900-20260123:1530", "Japan") for Japanese stocks
         """
         try:
             await self._ensure_connection()
             details = await self.ib.reqContractDetailsAsync(contract)
             if details and len(details) > 0:
-                trading_hours = details[0].contractDetails.tradingHours
-                logger.debug(f"Trading hours for {contract.symbol}: {trading_hours}")
-                return trading_hours
+                # ib_async returns ContractDetails directly, not wrapped in another object
+                cd = details[0]
+                trading_hours = cd.tradingHours
+                timezone_id = cd.timeZoneId
+                logger.debug(f"Trading hours for {contract.symbol}: {trading_hours} (timezone: {timezone_id})")
+                return (trading_hours, timezone_id)
             logger.debug(f"No contract details available for {contract.symbol}")
             return None
         except Exception as e:
             logger.debug(f"Failed to get trading hours for {contract.symbol}: {e}")
             return None
 
-    def _is_market_open(self, trading_hours: Optional[str]) -> bool:
+    def _is_market_open(self, trading_hours: Optional[str], timezone_id: Optional[str] = None) -> bool:
         """
-        Determine if market is currently open based on trading_hours string.
+        Determine if market is currently open based on trading_hours string and timezone.
 
-        Format examples:
-        - "NYSESTD;0930-1600" (simple format)
-        - "NYSESTD;0930-1600:CLOSED;20220101-20220102" (with closed dates)
+        Format examples (Old):
+        - "NYSESTD;0930-1600"
+        - "NYSESTD;0930-1600:CLOSED;20220101-20220102"
 
-        Logic:
-        1. If no trading hours: assume unknown (return None)
-        2. Check if today is in CLOSED dates
-        3. Check if current server time is within trading interval
+        Format examples (New - from modern IBKR Gateway):
+        - "20260122:0400-20260122:2000;20260123:0400-20260123:2000;20260124:CLOSED;..."
+        - "20260122:0930-20260122:1600;20260123:0930-20260123:1600;20260124:CLOSED;..."
+
+        Args:
+            trading_hours: Trading hours string from IBKR
+            timezone_id: Timezone ID from IBKR (e.g., "US/Eastern", "MET", "Japan")
 
         Returns:
             True if market is open, False if closed, None if unknown
@@ -293,43 +310,84 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return None
 
         try:
-            # Get current time in market timezone (US/Eastern for NYSE)
-            now = datetime.now()
+            # Use timezone from IBKR - different exchanges have different timezones
+            # US/Eastern for NYSE/NASDAQ, MET for Germany, Japan for Tokyo, etc.
+            if timezone_id:
+                try:
+                    # Map IBKR timezone names to zoneinfo names
+                    timezone_map = {
+                        "US/Eastern": "America/New_York",
+                        "MET": "Europe/Berlin",  # Middle European Time
+                        "Japan": "Asia/Tokyo",
+                        "US/Central": "America/Chicago",
+                        "US/Mountain": "America/Denver",
+                        "US/Pacific": "America/Los_Angeles",
+                    }
+                    tz_name = timezone_map.get(timezone_id, timezone_id)
+                    tz = ZoneInfo(tz_name)
+                    now = datetime.now(tz)
+                    logger.debug(f"Using timezone: {timezone_id} ({tz_name})")
+                except Exception as e:
+                    logger.warning(f"Could not load timezone '{timezone_id}': {e}, using UTC")
+                    now = datetime.now(timezone.utc)
+            else:
+                # Fallback to US/Eastern if no timezone provided (legacy behavior)
+                logger.debug("No timezone provided, defaulting to US/Eastern")
+                now = datetime.now(ZoneInfo("America/New_York"))
+
             current_date_str = now.strftime("%Y%m%d")
             current_time_str = now.strftime("%H%M")
 
-            # Parse trading hours string
-            parts = trading_hours.split(":")
-            if len(parts) < 2:
-                logger.debug(f"Invalid trading hours format: {trading_hours}")
-                return None
+            # Split by semicolon to get individual day entries
+            day_entries = trading_hours.split(";")
 
-            # Extract trading times (e.g., "0930-1600")
-            trading_times = parts[1]
+            # Look for today's entry
+            for entry in day_entries:
+                if entry.startswith(current_date_str):
+                    # Format: "20260122:0400-20260122:2000" or "20260122:CLOSED"
+                    if "CLOSED" in entry:
+                        logger.debug(f"Market closed on {current_date_str}")
+                        return False
 
-            # Check for CLOSED dates
-            for part in parts:
-                if "CLOSED" in part:
-                    # Format: "CLOSED;20220101-20220102"
-                    closed_dates = part.split(";")
-                    if len(closed_dates) > 1:
-                        # Check if current date is in any closed date range
-                        date_ranges = closed_dates[1].split(",")
-                        for date_range in date_ranges:
-                            if "-" in date_range:
-                                start_date, end_date = date_range.split("-")
-                                if start_date <= current_date_str <= end_date:
-                                    logger.debug(f"Market closed on {current_date_str} (in range {date_range})")
-                                    return False
+                    # Parse: "20260122:0400-20260122:2000"
+                    # Split by "-" first to get start and end parts
+                    if "-" not in entry:
+                        logger.debug(f"No time range in entry: {entry}")
+                        return None
 
-            # Check if current time is within trading interval
-            if "-" in trading_times:
-                start_time, end_time = trading_times.split("-")
-                is_within = start_time <= current_time_str < end_time
-                logger.debug(f"Current time {current_time_str} within {start_time}-{end_time}: {is_within}")
-                return is_within
+                    time_parts = entry.split("-")
+                    if len(time_parts) != 2:
+                        logger.debug(f"Unexpected format: {entry}")
+                        return None
 
-            logger.debug(f"Could not parse trading interval from: {trading_times}")
+                    # Extract start time from "20260122:0400"
+                    start_part = time_parts[0]
+                    start_time = start_part.split(":")[1] if ":" in start_part else None
+
+                    # Extract end time from "20260122:2000"
+                    end_part = time_parts[1]
+                    end_time = end_part.split(":")[1] if ":" in end_part else None
+
+                    if not start_time or not end_time:
+                        logger.debug(f"Could not extract times from: {entry}")
+                        return None
+
+                    is_within = start_time <= current_time_str < end_time
+                    logger.debug(f"Current time {current_time_str} within {start_time}-{end_time}: {is_within}")
+                    return is_within
+
+            # Fallback for old format: "NYSESTD;0930-1600"
+            if "NYSESTD" in trading_hours or trading_hours.count(":") == 1:
+                parts = trading_hours.split(":")
+                if len(parts) >= 2:
+                    time_part = parts[1]
+                    if "-" in time_part:
+                        start_time, end_time = time_part.split("-")[0], time_part.split("-")[1]
+                        is_within = start_time <= current_time_str < end_time
+                        logger.debug(f"Old format - Time {current_time_str} within {start_time}-{end_time}: {is_within}")
+                        return is_within
+
+            logger.debug(f"Could not parse trading hours format: {trading_hours}")
             return None
 
         except Exception as e:
@@ -339,15 +397,16 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
     async def _get_market_open_status(self, contract: Contract) -> Optional[bool]:
         """
         Get current market open status for a contract.
-        Fetches trading hours and determines if market is currently open.
+        Fetches trading hours and timezone, then determines if market is currently open.
 
         Returns:
             True if market is open, False if closed, None if unable to determine
         """
         try:
-            trading_hours = await self._get_trading_hours(contract)
-            if trading_hours:
-                return self._is_market_open(trading_hours)
+            result = await self._get_trading_hours(contract)
+            if result:
+                trading_hours, timezone_id = result
+                return self._is_market_open(trading_hours, timezone_id)
             return None
         except Exception as e:
             logger.debug(f"Error determining market open status: {e}")

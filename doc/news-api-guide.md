@@ -3,9 +3,9 @@
 ## Overview
 
 The Company News API fetches company news articles from multiple data providers:
-- **Mock Provider** (✅ Works immediately - no setup)
-- **LSEG (Refinitiv)** (requires permission scope)
-- **IBKR (Interactive Brokers)** (requires TWS/Gateway connection)
+- Mock Provider (✅ Works immediately - no setup)
+- LSEG (Refinitiv) (requires permission scope)
+- IBKR (Interactive Brokers) (requires TWS/Gateway connection)
 
 ## Quick Start (Using Mock Provider)
 
@@ -42,21 +42,21 @@ GET /companies/{symbol}/news
 
 | Parameter | Type   | Required | Example | Description |
 |-----------|--------|----------|---------|-------------|
-| `symbol`  | string | Yes      | AAPL    | Stock ticker symbol |
+| symbol    | string | Yes      | AAPL    | Stock ticker symbol |
 
 ### Query Parameters
 
 | Parameter    | Type     | Default | Range | Description |
 |--------------|----------|---------|-------|-------------|
-| `provider`   | string   | mock    | mock, lseg, ibkr | Data provider |
-| `days`       | integer  | 30      | 1-365 | Last N days of news |
-| `from_date`  | string   | -       | YYYY-MM-DD | Start date (overrides days) |
-| `to_date`    | string   | today   | YYYY-MM-DD | End date |
-| `category`   | string   | -       | earnings, product, merger, legal | Filter by category |
-| `limit`      | integer  | 20      | 1-100 | Articles per page |
-| `offset`     | integer  | 0       | ≥0 | Pagination offset |
-| `format`     | string   | json    | json, csv | Response format |
-| `language`   | string   | en      | en, de, etc | Language |
+| provider     | string   | mock    | mock, lseg, ibkr | Data provider |
+| days         | integer  | 30      | 1-365 | Last N days of news |
+| from_date    | string   | -       | YYYY-MM-DD | Start date (overrides days) |
+| to_date      | string   | today   | YYYY-MM-DD | End date |
+| category     | string   | -       | earnings, product, merger, legal | Filter by category |
+| limit        | integer  | 20      | 1-100 | Articles per page |
+| offset       | integer  | 0       | ≥0 | Pagination offset |
+| format       | string   | json    | json, csv | Response format |
+| language     | string   | en      | en, de, etc | Language |
 
 ### Response (Success)
 
@@ -180,7 +180,7 @@ curl -s http://localhost:8000/companies/AAPL/news?provider=mock&format=csv | hea
 
 ### LSEG (Refinitiv) Setup
 
-**Current Status:** ⚠️ Permission Required
+Current Status: ⚠️ Permission Required
 
 To use the LSEG provider:
 
@@ -198,7 +198,7 @@ curl "http://localhost:8000/companies/AAPL/news?provider=lseg"
 
 ### IBKR (Interactive Brokers) Setup
 
-**Current Status:** ⚠️ Requires TWS Setup
+Current Status: ⚠️ Requires TWS Setup
 
 To use the IBKR provider:
 
@@ -232,10 +232,10 @@ curl ".../companies/AAPL/news?from_date=2025-12-01&to_date=2026-01-04"
 ### Category Filtering
 
 News articles are automatically categorized:
-- **earnings** - Earnings announcements, guidance
-- **product** - Product launches, releases
-- **merger** - Mergers, acquisitions
-- **legal** - Lawsuits, regulatory actions
+- earnings - Earnings announcements, guidance
+- product - Product launches, releases
+- merger - Mergers, acquisitions
+- legal - Lawsuits, regulatory actions
 
 ```bash
 # Get only earnings
@@ -323,29 +323,29 @@ scripts/
 
 ### Issue: "Connection refused" when using LSEG
 
-**Cause:** LSEG session not initialized
-**Solution:** Use mock provider instead, or contact LSEG for permission
+Cause: LSEG session not initialized
+Solution: Use mock provider instead, or contact LSEG for permission
 
 ### Issue: "Insufficient scope: trapi.data.news.read"
 
-**Cause:** LSEG account lacks permission
-**Solution:** Contact LSEG support to request scope
+Cause: LSEG account lacks permission
+Solution: Contact LSEG support to request scope
 
 ### Issue: IBKR provider returns no data
 
-**Cause:** TWS/Gateway not running
-**Solution:** Start TWS and enable API connections
+Cause: TWS/Gateway not running
+Solution: Start TWS and enable API connections
 
 ### Issue: "Ticker not found" error
 
-**Cause:** Invalid symbol (only AAPL, MSFT, GOOGL in mock)
-**Solution:** Use valid symbols or add to MockNewsProvider
+Cause: Invalid symbol (only AAPL, MSFT, GOOGL in mock)
+Solution: Use valid symbols or add to MockNewsProvider
 
 ## Development
 
 ### Add More Mock Data
 
-Edit `app/providers/mock_news.py`:
+Edit [app/providers/mock_news.py](../app/providers/mock_news.py):
 
 ```python
 MOCK_NEWS_DB = {
@@ -376,6 +376,6 @@ class NewProvider(BaseNewsProvider):
 ## Support
 
 For questions or issues:
-- Check [specs/04.prompt.md](../../specs/04.prompt.md) for requirements
+- Check [specs/04.prompt.md](../specs/04.prompt.md) for requirements
 - View test results: `/home/fscheffold/private/market-data-hub/scripts/test_news_api.sh`
-- Review code: [app/providers/mock_news.py](../../app/providers/mock_news.py)
+- Review code: [app/providers/mock_news.py](../app/providers/mock_news.py)
