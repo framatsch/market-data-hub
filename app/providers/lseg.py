@@ -85,6 +85,13 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         try:
             logger.info("Creating new Refinitiv session...")
 
+            # Workaround for httpx proxy issue in refinitiv.data v1.6.2
+            # Clear proxy environment variables that cause TypeError in httpx
+            import os
+            for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+                if proxy_var in os.environ:
+                    del os.environ[proxy_var]
+
             session = rd.session.platform.Definition(
                 app_key=settings.LSEG_APP_KEY,
                 grant=rd.session.platform.GrantPassword(
@@ -270,6 +277,19 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     def _is_retryable_error(self, error: Exception) -> bool:
         """Check if error should trigger retry."""
         error_str = str(error).lower()
+
+        # DO NOT retry on data availability errors
+        non_retryable_keywords = [
+            "no data to return",
+            "system cannot return data",
+            "not found",
+            "no such",
+            "unknown",
+            "invalid ric"
+        ]
+        if any(keyword in error_str for keyword in non_retryable_keywords):
+            return False
+
         # Retry on connection, timeout, rate limit, server errors
         return any(keyword in error_str for keyword in [
             "timeout", "connection", "429", "500", "502", "503"
@@ -374,7 +394,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         """
         Get historical price bars for a symbol.
 
-        Note: sec_type is ignored (LSEG handles stocks and indices via RIC lookup)
+        Note:
+            - sec_type is ignored (LSEG handles stocks and indices via RIC lookup)
+            - Intraday intervals (1m, 5m, etc.) limited to ~20 trading days max
+            - Very old intraday data (>2 years) may not be available; use daily intervals
         """
         # Ensure start/end are timezone-aware (convert naive to UTC)
         if start.tzinfo is None:
@@ -388,17 +411,38 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         # Map interval to Refinitiv format
         refinitiv_interval = self._map_interval(interval)
 
-        # Calculate number of bars needed
+        # Validate intraday requests - LSEG has limitations
         duration = end - start
+        is_intraday = interval in ["1m", "5m", "15m", "30m", "1h"]
+
+        if is_intraday:
+            # Check if request is too old for intraday
+            if duration.days > 365 * 2:  # >2 years
+                logger.warning(
+                    f"Intraday interval {interval} requested for {duration.days} days (>2 years). "
+                    f"LSEG may not have this historical data. Consider using daily interval."
+                )
+
+            # Warn if requesting too many intraday bars at once
+            estimated_bars = min(1000, duration.days * 390)
+            if estimated_bars > 500:
+                logger.warning(
+                    f"Large intraday request: ~{estimated_bars} bars for {duration.days} days. "
+                    f"This may exceed LSEG limits. Consider shorter date ranges."
+                )
+
+        # Calculate number of bars needed
         if interval == "1d":
             count = duration.days + 1
         elif interval == "1w":
             count = duration.days // 7 + 1
-        elif interval in ["1m", "5m", "15m", "30m", "1h"]:
-            # For intraday, limit to reasonable count
-            count = min(1000, duration.days * 390)  # ~390 minutes per trading day
+        elif is_intraday:
+            # For intraday, cap at 1000 bars (LSEG limitation)
+            count = min(1000, duration.days * 390)
         else:
             count = 100  # Default
+
+        logger.debug(f"LSEG historical request: RIC={ric}, interval={interval}, count={count}, duration={duration.days}d")
 
         # Fetch historical data with retry
         def fetch_historical():
@@ -413,11 +457,58 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
             if response.data.df is None or response.data.df.empty:
                 raise DataNotFoundError("Historical data", symbol,
-                    details={"ric": ric, "interval": interval})
+                    details={
+                        "ric": ric,
+                        "interval": interval,
+                        "duration_days": duration.days,
+                        "note": "LSEG limitation: intraday data only available for ~2 years; very old data needs daily interval"
+                    })
 
             return response.data.df
 
-        df = self._retry_with_backoff(fetch_historical)
+        try:
+            df = self._retry_with_backoff(fetch_historical)
+        except ProviderConnectionError as e:
+            # Re-wrap connection errors with data availability context
+            error_msg = str(e).lower()
+            if "system cannot return data" in error_msg or "no data to return" in error_msg:
+                raise DataNotFoundError(
+                    "Historical data",
+                    f"{symbol} ({interval}, {duration.days}d)",
+                    details={
+                        "ric": ric,
+                        "interval": interval,
+                        "duration_days": duration.days,
+                        "reason": "Data not available in LSEG archives",
+                        "suggestions": [
+                            "Try a shorter date range",
+                            "Use daily interval instead of intraday for data >2 years old",
+                            "Try more recent dates (last 2 years typically available)",
+                        ]
+                    }
+                )
+            raise
+        except Exception as e:
+            # Catch any other RDError or exception from LSEG
+            error_msg = str(e).lower()
+            if "system cannot return data" in error_msg or "no data" in error_msg:
+                raise DataNotFoundError(
+                    "Historical data",
+                    f"{symbol} ({interval}, {duration.days}d)",
+                    details={
+                        "ric": ric,
+                        "interval": interval,
+                        "duration_days": duration.days,
+                        "reason": "Data not available in LSEG archives",
+                        "suggestions": [
+                            "Try a shorter date range",
+                            "Use daily interval instead of intraday for data >2 years old",
+                            "Try more recent dates (last 2 years typically available)",
+                        ],
+                        "original_error": str(e)
+                    }
+                )
+            raise
 
         # Convert DataFrame to PriceBar list
         bars = []
