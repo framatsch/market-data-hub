@@ -19,6 +19,7 @@ async def search_companies(
     provider: Optional[str] = None
 ):
     """Search for companies by query string."""
+    provider = provider.lower() if provider else None
     results = await service.search_companies(q, provider)
     return ResponseEnvelope(data=results)
 
@@ -29,6 +30,8 @@ async def get_company_profile(
     provider: Optional[str] = None
 ):
     """Get company profile information."""
+    symbol = symbol.upper()
+    provider = provider.lower() if provider else None
     profile = await service.get_company_profile(symbol, provider)
     return ResponseEnvelope(data=profile)
 
@@ -64,6 +67,9 @@ async def get_company_news(
     - Pagination: `?limit=50&offset=50`
     - IBKR provider: `?provider=ibkr`
     """
+    symbol = symbol.upper()
+    provider = provider.lower()
+
     # 1. Determine date range (priority: days > explicit dates > default)
     if days:
         to_date_calc = date.today()

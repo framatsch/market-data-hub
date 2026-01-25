@@ -324,12 +324,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Price Provider Methods (BasePriceProvider)
     # ========================================================================
 
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
         """Get current price quote for a symbol.
 
         Note: LSEG uses historical pricing summaries (daily) and does not support
-        IBKR-style market data types. The `market_data_type` parameter is accepted
-        for interface compatibility but is ignored.
+        IBKR-style market data types. The `market_data_type` and `sec_type` parameters
+        are accepted for interface compatibility but are ignored.
         """
         # Log only if caller passed a market_data_type to make behavior explicit
         if market_data_type is not None:
@@ -370,8 +370,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return quote
 
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime) -> List[PriceBar]:
-        """Get historical price bars for a symbol."""
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
+        """
+        Get historical price bars for a symbol.
+
+        Note: sec_type is ignored (LSEG handles stocks and indices via RIC lookup)
+        """
         # Ensure start/end are timezone-aware (convert naive to UTC)
         if start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)

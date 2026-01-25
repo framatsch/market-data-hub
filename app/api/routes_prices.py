@@ -17,6 +17,10 @@ async def get_last_price(
         None,
         description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type and returns latest daily summary"
     ),
+    sec_type: str = Query(
+        "stock",
+        description="Security type: 'stock' (default) or 'index'. For indices like ^RUT, use 'index'."
+    ),
     market_data_type: Optional[int] = Query(
         None,
         description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter."
@@ -33,8 +37,12 @@ async def get_last_price(
     Provider notes:
     - IBKR: honors `market_data_type`; Level 1 requires subscription and will return 503 if unavailable
     - LSEG: ignores `market_data_type` and returns latest daily summary (historical_pricing)
+    - For indices (^RUT, ^VIX, etc.), set sec_type='index' and remove ^ prefix from symbol
     """
-    quote = await service.get_latest_price(symbol, provider, market_data_type)
+    symbol = symbol.upper()
+    provider = provider.lower() if provider else None
+    sec_type = sec_type.lower()
+    quote = await service.get_latest_price(symbol, provider, market_data_type, sec_type)
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(quote, f"{symbol}_last_price.csv")
@@ -54,6 +62,7 @@ async def get_historical_prices(
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
     provider: Optional[str] = None,
+    sec_type: str = Query("stock", description="Security type: 'stock' or 'index'"),
     format: str = "json"
 ):
     """
@@ -70,7 +79,10 @@ async def get_historical_prices(
     if not start:
         start = end - timedelta(days=30)
 
-    bars = await service.get_historical_prices(symbol, interval, start, end, provider)
+    symbol = symbol.upper()
+    provider = provider.lower() if provider else None
+    sec_type = sec_type.lower()
+    bars = await service.get_historical_prices(symbol, interval, start, end, provider, sec_type)
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(bars, f"{symbol}_history_{interval}.csv")

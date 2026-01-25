@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import List, Optional, Literal
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, Option, Contract
+from ib_async import IB, Stock, Option, Contract, Index
 from ib_async.objects import BarData
 
 from app.config import settings
@@ -419,11 +419,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             self._connected = False
             logger.debug("Disconnected from IBKR")
 
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime) -> List[PriceBar]:
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
         try:
             await self._ensure_connection()
 
-            contract = Stock(symbol, 'SMART', 'USD')
+            contract = self._create_contract(symbol, sec_type)
 
             # Map interval to IBKR bar size
             bar_size = self._map_interval(interval)
@@ -486,13 +486,14 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         finally:
             await self._disconnect()
 
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
         """
-        Get the latest price quote for a stock.
+        Get the latest price quote for a stock or index.
 
         Args:
-            symbol: Stock ticker symbol
+            symbol: Stock ticker symbol or index symbol
             market_data_type: 1=Live (Level 2), 2=Frozen (OPRA), 3=Delayed (default)
+            sec_type: Security type - "stock" (default) or "index"
 
         Returns:
             PriceQuote with:
@@ -506,6 +507,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             - Level 2/3 for stocks do not provide real-time bid/ask without subscription
             - When snapshot fails, system falls back to most recent daily close price
             - This fallback behavior is logged with date and close value
+            - For indices: Use sec_type="index" and symbol without ^ prefix (e.g., "RUT" not "^RUT")
         """
         try:
             await self._ensure_connection()
@@ -515,7 +517,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             # Set market data type if explicitly requested (1=Live,2=Frozen,3=Delayed)
             if market_data_type is not None:
                 await self._set_market_data_type(market_data_type)
-            contract = Stock(symbol, 'SMART', 'USD')
+
+            # Create contract based on security type
+            contract = self._create_contract(symbol, sec_type)
 
             # Qualify contract to get conId etc specific to SMART
             await self.ib.qualifyContractsAsync(contract)
@@ -840,6 +844,49 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         # Less than 1 day
         seconds = diff.total_seconds()
         return f"{int(seconds) + 60} S"
+
+    def _create_contract(self, symbol: str, sec_type: str = "stock") -> Contract:
+        """
+        Create appropriate IBKR contract based on security type.
+
+        Args:
+            symbol: Ticker symbol (e.g., "AAPL", "RUT")
+            sec_type: "stock" or "index"
+
+        Returns:
+            Stock or Index contract
+
+        Note:
+            - For indices, removes ^ prefix if present (e.g., "^RUT" -> "RUT")
+            - Stock contracts use SMART routing
+            - Index contracts use their primary exchange (CBOE for most US indices)
+        """
+        # Remove ^ prefix for indices (Yahoo Finance convention)
+        if sec_type.lower() == "index" and symbol.startswith("^"):
+            symbol = symbol[1:]
+
+        if sec_type.lower() == "index":
+            # Index contract - use appropriate exchange
+            # Common US indices trade on CBOE
+            exchange = self._get_index_exchange(symbol)
+            return Index(symbol, exchange)
+        else:
+            # Stock contract - default behavior
+            return Stock(symbol, 'SMART', 'USD')
+
+    def _get_index_exchange(self, symbol: str) -> str:
+        """Get primary exchange for index symbols."""
+        # Mapping of common index symbols to their exchanges
+        index_exchanges = {
+            "SPX": "CBOE",     # S&P 500
+            "RUT": "CBOE",     # Russell 2000
+            "VIX": "CBOE",     # Volatility Index
+            "NDX": "NASDAQ",   # NASDAQ-100
+            "DJX": "CBOE",     # Dow Jones
+            "INDU": "NYSE",    # Dow Jones Industrial Average
+        }
+        return index_exchanges.get(symbol.upper(), "CBOE")  # Default to CBOE
+
     # ==================== Company Data Methods ====================
 
     async def get_company_profile(self, symbol: str) -> CompanyProfile:

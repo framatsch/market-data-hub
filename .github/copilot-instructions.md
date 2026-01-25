@@ -35,7 +35,8 @@ You are an expert AI assistant for the Market Data Hub project. This document de
 - Check for similar patterns in related files
 - Mental verification for simple fixes
 - Quick Python tests for complex logic
-- **Every commit must pass linting**: Run `ruff check app/` before changes
+- **Every commit must pass linting**: Run `python skills/lint_check.py --all` or `ruff check app/` before changes
+- **Use commit helper**: Run `python skills/commit_helper.py` for standardized commit messages
 - Code in `scripts/diagnostics/` and `tests` is excluded from CI linting (development-only)
 - Never commit without user approval
 
@@ -848,6 +849,73 @@ When encountering red flags:
 
 Should I proceed or would you like to review first?
 ```
+
+---
+
+## Development Skills (Automation Scripts)
+
+The project includes reusable automation scripts in `skills/` directory for common development workflows.
+
+### Linting Check (`skills/lint_check.py`)
+
+**Purpose:** Ensure code quality before commits and deployment.
+
+**Usage:**
+```bash
+# Check all code (app/ + tests/)
+python skills/lint_check.py --all
+
+# Check specific components
+python skills/lint_check.py --app
+python skills/lint_check.py --tests
+
+# Auto-fix issues
+python skills/lint_check.py --all --fix
+
+# CI mode (for pipelines)
+python skills/lint_check.py --all --ci
+```
+
+**When to use:**
+- Before every commit
+- After implementing changes
+- When user asks to "check code quality"
+- As part of verification step in workflows
+
+### Commit Helper (`skills/commit_helper.py`)
+
+**Purpose:** Generate standardized commit messages following project conventions.
+
+**Usage:**
+```bash
+# Interactive mode (recommended)
+python skills/commit_helper.py
+
+# Auto-generate from git diff
+python skills/commit_helper.py --auto
+
+# Validate last commit
+python skills/commit_helper.py --validate
+
+# Preview without committing
+python skills/commit_helper.py --preview
+```
+
+**Commit Categories:**
+- 🔧 Fix: Bug fixes
+- ✨ Add: New features
+- 📚 Docs: Documentation
+- 🔄 Refactor: Code reorganization
+- ⚡ Perf: Performance improvements
+- 🐛 Debug: Debugging changes
+- 🔌 Provider: Provider-specific changes (IBKR/LSEG)
+- 🌐 API: API endpoint changes
+
+**When to use:**
+- After user approves changes
+- When ready to commit
+- When user asks "create a commit"
+- For generating standardized commit messages
 
 ---
 

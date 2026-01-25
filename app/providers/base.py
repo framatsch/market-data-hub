@@ -10,12 +10,12 @@ from app.models.news import NewsArticle
 
 class BasePriceProvider(ABC):
     @abstractmethod
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime) -> List[PriceBar]:
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
         """Fetch historical price bars."""
         pass
 
     @abstractmethod
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None) -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
         """Fetch latest price quote."""
         pass
 

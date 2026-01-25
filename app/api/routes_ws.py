@@ -23,14 +23,14 @@ async def websocket_prices(websocket: WebSocket):
             try:
                 # Basic parsing
                 message_dict = json.loads(data)
-                
+
                 # In a real app, we'd handle subscription state here
                 if message_dict.get("type") == "subscribe":
-                    symbols = message_dict.get("symbols", [])
-                    provider = message_dict.get("provider", "ibkr")
-                    
+                    symbols = [s.upper() for s in message_dict.get("symbols", [])]
+                    provider = message_dict.get("provider", "ibkr").lower()
+
                     logger.info(f"Subscribing to {symbols} from {provider}")
-                    
+
                     # Echo simulated stream for 10 updates
                     for i in range(10):
                         response = {
@@ -42,9 +42,9 @@ async def websocket_prices(websocket: WebSocket):
                         }
                         await websocket.send_json(response)
                         await asyncio.sleep(1)
-                        
+
             except json.JSONDecodeError:
                 await websocket.send_text("Invalid JSON")
-                
+
     except WebSocketDisconnect:
         logger.info("Client disconnected")

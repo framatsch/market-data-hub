@@ -36,6 +36,8 @@ async def get_option_chain(
     - If market_data_type is not specified, uses default from config (currently 3=Delayed)
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
+    symbol = symbol.upper()
+    provider = provider.lower() if provider else None
     if not expiry:
         # Default to today
         expiry = date.today()
@@ -78,6 +80,8 @@ async def get_option_quote(
     - If market_data_type is not specified, uses default from config (currently 3=Delayed)
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
+    symbol = symbol.upper()
+    provider = provider.lower() if provider else None
     quote = await service.get_option_quote(symbol, option_id, provider, market_data_type=market_data_type)
 
     if format.lower() == "csv":
