@@ -123,7 +123,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # ========================================================================
 
     def _ticker_to_ric(self, ticker: str) -> str:
-        """Convert ticker to RIC with 24h caching."""
+        """Convert ticker to RIC with 24h caching.
+        
+        Strategy: Try to find the equity (stock/ETF) version, not futures/options.
+        """
         # Check cache
         if ticker in self._ric_cache:
             ric, cached_at = self._ric_cache[ticker]
@@ -140,45 +143,60 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         # Try multiple search views/filters
         search_strategies = [
-            # Strategy 1: EQUITY_QUOTES with TickerSymbol filter (most reliable - from test_connect.py)
+            # Strategy 1: Try to find US equity with .N suffix (New York Stock Exchange)
+            {
+                "name": "DIRECT_US_EQUITY_WITH_SUFFIX",
+                "universe": f"{ticker}.N",  # Direct RIC attempt for US equity
+                "skip_search": True
+            },
+            # Strategy 2: EQUITY_QUOTES with TickerSymbol filter (may return futures/options)
             {
                 "name": "EQUITY_QUOTES_WITH_FILTER",
                 "view": search.Views.EQUITY_QUOTES,
                 "filter": f"TickerSymbol eq '{ticker}'",
                 "select": "RIC, DisplayName, TickerSymbol, ExchCode"
             },
-            # Strategy 2: EQUITY_INSTRUMENTS with TickerSymbol filter
+            # Strategy 3: EQUITY_INSTRUMENTS with TickerSymbol filter
             {
                 "name": "EQUITY_INSTRUMENTS_WITH_FILTER",
                 "view": search.Views.EQUITY_INSTRUMENTS,
                 "filter": f"TickerSymbol eq '{ticker}'",
                 "select": "RIC, TickerSymbol"
             },
-            # Strategy 3: EQUITY_QUOTES query-only (no filter)
-            {
-                "name": "EQUITY_QUOTES",
-                "view": search.Views.EQUITY_QUOTES,
-                "filter": None,
-                "select": "RIC, DisplayName"
-            },
-            # Strategy 4: EQUITY_INSTRUMENTS query-only (no filter)
-            {
-                "name": "EQUITY_INSTRUMENTS",
-                "view": search.Views.EQUITY_INSTRUMENTS,
-                "filter": None,
-                "select": "RIC, TickerSymbol"
-            }
         ]
 
         for strategy in search_strategies:
             try:
                 logger.debug(f"Trying RIC search strategy: {strategy['name']}")
+                
+                # Try direct RIC if specified
+                if strategy.get("skip_search"):
+                    ric = strategy["universe"]
+                    logger.debug(f"Trying direct RIC: {ric}")
+                    # Validate it works with a quick test
+                    self._throttle()
+                    try:
+                        from refinitiv.data.content import historical_pricing
+                        response = historical_pricing.summaries.Definition(
+                            universe=ric,
+                            interval=historical_pricing.Intervals.DAILY,
+                            count=1
+                        ).get_data()
+                        
+                        if response.data.df is not None and not response.data.df.empty:
+                            self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
+                            logger.info(f"Ticker {ticker} mapped to RIC {ric} (direct RIC)")
+                            return ric
+                    except Exception as e:
+                        # Direct RIC didn't work, continue to search strategies
+                        logger.debug(f"Direct RIC {ric} validation failed: {e}")
+                    continue
 
                 definition_params = {
                     "query": ticker,
                     "view": strategy["view"],
                     "select": strategy["select"],
-                    "top": 1
+                    "top": 10  # Get more results to filter for non-futures/options
                 }
 
                 if strategy["filter"]:
@@ -187,9 +205,21 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 response = search.Definition(**definition_params).get_data()
 
                 if response.data.df is not None and not response.data.df.empty:
-                    ric = response.data.df['RIC'].iloc[0]
+                    # Filter to prefer non-futures RICs (avoid 'c1', 'c2', etc. suffixes)
+                    rics = response.data.df['RIC'].tolist()
+                    
+                    # Prefer RICs without continuation/futures markers
+                    for ric in rics:
+                        # Skip continuation contracts, options, and other derivatives
+                        if not any(x in ric.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
+                            self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
+                            logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
+                            return ric
+                    
+                    # If no clean RIC found, use first one anyway (fallback)
+                    ric = rics[0]
                     self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                    logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
+                    logger.warning(f"Ticker {ticker} mapped to RIC {ric} (no clean RIC, using first result)")
                     return ric
 
             except Exception as e:
