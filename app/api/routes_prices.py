@@ -15,7 +15,7 @@ async def get_last_price(
     service: PriceServiceDep,
     provider: Optional[str] = Query(
         None,
-        description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type and returns latest daily summary"
+        description="Data provider: 'ibkr', 'lseg', or 'schwab'. Note: LSEG and Schwab ignore market_data_type"
     ),
     sec_type: str = Query(
         "stock",
@@ -37,6 +37,7 @@ async def get_last_price(
     Provider notes:
     - IBKR: honors `market_data_type`; Level 1 requires subscription and will return 503 if unavailable
     - LSEG: ignores `market_data_type` and returns latest daily summary (historical_pricing)
+    - Schwab: ignores `market_data_type`; returns delayed quote data from Schwab API
     - For indices (^RUT, ^VIX, etc.), set sec_type='index' and remove ^ prefix from symbol
     """
     symbol = symbol.upper()

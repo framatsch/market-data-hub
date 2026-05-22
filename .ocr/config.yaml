@@ -57,19 +57,23 @@ context_discovery:
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-severity rules for reviewers. Only add what's not obvious.
 
-# rules:
-#   critical:
-#     - Security vulnerabilities (injection, path traversal, secrets in code)
-#     - Breaking changes without migration path
-#     - Data loss or corruption risks
-#   important:
-#     - Silent error handling (catch without action)
-#     - Missing user-facing error messages
-#     - Performance regressions in hot paths
-#   consider:
-#     - Naming consistency
-#     - Documentation gaps
-#     - Test coverage for edge cases
+rules:
+  critical:
+    - Security vulnerabilities (injection, path traversal, secrets in code)
+    - Breaking changes without migration path
+    - Financial values handled as float instead of Decimal
+    - Provider errors swallowed instead of surfaced via AppError
+    - Blocking I/O calls in async context (sync provider called without executor)
+  important:
+    - Performance regressions in hot paths (provider fetch, quote, news routes)
+    - External API calls not parallelised where independent
+    - Missing timeouts or retry logic on provider connections
+    - Silent error handling (catch without action)
+    - httpx pin change (must stay at 0.26.0)
+  consider:
+    - Naming consistency with existing provider conventions
+    - Missing test coverage for provider edge cases (NaN, timeout, bad RIC)
+    - Documentation gaps in public API endpoints
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REVIEWER TEAM
@@ -78,13 +82,25 @@ context_discovery:
 default_team:
   # Calibrated for this repo: FastAPI + MCP + provider/gateway pattern, Python.
   # Core priority: low-latency market data delivery — performance is first-class.
+  #
+  # Always active — provide architectural depth + redundancy on every PR:
   principal: 2     # Holistic architecture and cross-component impact
   quality: 2       # Readability, maintainability, and implementation quality
-  backend: 1       # FastAPI/Pydantic/service/provider boundary correctness
   performance: 1   # Hot-path latency, I/O parallelism, caching, N+1, payload size
-  reliability: 1   # Timeouts, retries, fallbacks, error propagation
-  security: 1      # API/auth/data handling checks
-  testing: 1       # Coverage depth, edge cases, regression protection
+  #
+  # Auto-added by Tech Lead phase (see auto-detection rules in workflow.md):
+  #   backend     — FastAPI/Pydantic/service/provider boundary correctness
+  #                 → triggered by changes in app/api/, app/providers/, app/services/
+  #   reliability — timeouts, retries, fallbacks, error propagation
+  #                 → triggered by provider/connection/async changes
+  #   security    — API/auth/data handling checks
+  #                 → triggered by auth, API, or data handling changes
+  #   testing     — coverage depth, edge cases, regression protection
+  #                 → triggered by significant logic changes
+  # backend: 1
+  # reliability: 1
+  # security: 1
+  # testing: 1
 
   # ── Optional advanced forms ──
   # Form 2 — object: N instances, all sharing the same model.

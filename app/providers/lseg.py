@@ -14,6 +14,7 @@ from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseNewsP
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, DataValidationError, ProviderError
 
 logger = logging.getLogger(__name__)
+_REFINITIV_HTTPX_PROXY_PATCHED = False
 
 # Lazy import refinitiv to avoid import errors if not installed
 try:
@@ -27,6 +28,47 @@ except ImportError:
 T = TypeVar('T')
 
 
+def _patch_refinitiv_httpx_proxy_handling() -> None:
+    """Patch refinitiv-data proxy handling for httpx>=0.26.
+
+    refinitiv-data 1.6.2 passes a proxies dict into httpx.Client(proxy=...),
+    but httpx>=0.26 expects a single proxy URL for `proxy`.
+    """
+    global _REFINITIV_HTTPX_PROXY_PATCHED
+    if _REFINITIV_HTTPX_PROXY_PATCHED or not REFINITIV_AVAILABLE:
+        return
+
+    try:
+        from refinitiv.data._core.session import http_service
+    except Exception:
+        return
+
+    original_sync = http_service.get_httpx_client
+    original_async = http_service.get_httpx_client_async
+
+    def _normalize_proxy(proxies):
+        if not isinstance(proxies, dict):
+            return proxies
+
+        for key in ("https://", "http://", "all://", "https", "http", "all"):
+            url = proxies.get(key)
+            if url:
+                return url
+
+        return None
+
+    def patched_get_httpx_client(proxies, **kwargs):
+        return original_sync(_normalize_proxy(proxies), **kwargs)
+
+    def patched_get_httpx_client_async(proxies, **kwargs):
+        return original_async(_normalize_proxy(proxies), **kwargs)
+
+    http_service.get_httpx_client = patched_get_httpx_client
+    http_service.get_httpx_client_async = patched_get_httpx_client_async
+    _REFINITIV_HTTPX_PROXY_PATCHED = True
+    logger.info("Applied refinitiv-data proxy compatibility patch for httpx>=0.26")
+
+
 class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     """Refinitiv (LSEG) provider for stock prices, company data, and news.
 
@@ -37,6 +79,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     def __init__(self):
         if not REFINITIV_AVAILABLE:
             raise ImportError("refinitiv.data package is required for LSEG provider")
+
+        _patch_refinitiv_httpx_proxy_handling()
 
         # Session management
         self._session = None
@@ -143,20 +187,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         # Try multiple search views/filters
         search_strategies = [
-            # Strategy 1: Try to find US equity with .N suffix (New York Stock Exchange)
-            {
-                "name": "DIRECT_US_EQUITY_WITH_SUFFIX",
-                "universe": f"{ticker}.N",  # Direct RIC attempt for US equity
-                "skip_search": True
-            },
-            # Strategy 2: EQUITY_QUOTES with TickerSymbol filter (may return futures/options)
+            # Strategy 1: EQUITY_QUOTES with TickerSymbol filter (may return futures/options)
             {
                 "name": "EQUITY_QUOTES_WITH_FILTER",
                 "view": search.Views.EQUITY_QUOTES,
                 "filter": f"TickerSymbol eq '{ticker}'",
                 "select": "RIC, DisplayName, TickerSymbol, ExchCode"
             },
-            # Strategy 3: EQUITY_INSTRUMENTS with TickerSymbol filter
+            # Strategy 2: EQUITY_INSTRUMENTS with TickerSymbol filter
             {
                 "name": "EQUITY_INSTRUMENTS_WITH_FILTER",
                 "view": search.Views.EQUITY_INSTRUMENTS,
@@ -168,29 +206,6 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         for strategy in search_strategies:
             try:
                 logger.debug(f"Trying RIC search strategy: {strategy['name']}")
-
-                # Try direct RIC if specified
-                if strategy.get("skip_search"):
-                    ric = strategy["universe"]
-                    logger.debug(f"Trying direct RIC: {ric}")
-                    # Validate it works with a quick test
-                    self._throttle()
-                    try:
-                        from refinitiv.data.content import historical_pricing
-                        response = historical_pricing.summaries.Definition(
-                            universe=ric,
-                            interval=historical_pricing.Intervals.DAILY,
-                            count=1
-                        ).get_data()
-
-                        if response.data.df is not None and not response.data.df.empty:
-                            self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                            logger.info(f"Ticker {ticker} mapped to RIC {ric} (direct RIC)")
-                            return ric
-                    except Exception as e:
-                        # Direct RIC didn't work, continue to search strategies
-                        logger.debug(f"Direct RIC {ric} validation failed: {e}")
-                    continue
 
                 definition_params = {
                     "query": ticker,
@@ -366,6 +381,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             provider="lseg",
             bid=safe_decimal("BID"),
             ask=safe_decimal("ASK"),
+            open=safe_decimal("OPEN_PRC"),
+            high=safe_decimal("HIGH_1"),
+            low=safe_decimal("LOW_1"),
             volume=int(row["ACVOL_UNS"]) if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"]) else None,
             timestamp=datetime.now(timezone.utc)
         )

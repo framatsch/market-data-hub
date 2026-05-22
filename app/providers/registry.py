@@ -3,6 +3,7 @@ from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
 from app.providers.lseg import LSEGProvider
+from app.providers.schwab import SchwabProvider
 from app.providers.mock_news import MockNewsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.utils.errors import InvalidProviderError
@@ -16,6 +17,7 @@ class ProviderRegistry:
         # In a real app, we might lazily load these or load based on config
         self._providers["ibkr"] = IBKRProvider()
         self._providers["lseg"] = LSEGProvider()
+        self._providers["schwab"] = SchwabProvider()
         self._providers["mock"] = MockNewsProvider()
         self._providers["finnhub"] = FinnhubProvider()
 

@@ -11,8 +11,15 @@ class PriceQuote(BaseModel):
     provider: str
     bid: Optional[Decimal] = None
     ask: Optional[Decimal] = None
+    open: Optional[Decimal] = None
+    high: Optional[Decimal] = None
+    low: Optional[Decimal] = None
     volume: Optional[int] = None
     is_market_open: Optional[bool] = None
+
+    @property
+    def last_price(self) -> Decimal:
+        return self.price
 
 class PriceBar(BaseModel):
     symbol: str
@@ -24,3 +31,9 @@ class PriceBar(BaseModel):
     close: Decimal
     volume: int
     provider: str
+
+    @property
+    def timestamp(self) -> datetime:
+        if self.start.tzinfo is not None:
+            return self.start.replace(tzinfo=None)
+        return self.start

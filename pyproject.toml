@@ -15,6 +15,7 @@ dependencies = [
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
     "refinitiv-data==1.6.2",
+    "schwab-py>=1.5.0",
 ]
 
 [project.optional-dependencies]

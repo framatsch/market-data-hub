@@ -17,7 +17,7 @@ async def list_providers():
     """Lists available providers and defaults.
 
     Available Providers:
-    - price: "ibkr" (primary), "lseg" (secondary)
+    - price: "ibkr" (primary), "lseg" (secondary), "schwab" (historical + quotes)
     - company: "lseg" (primary), "ibkr" (basic lookup only)
     - options: "ibkr" (primary), "lseg" (secondary)
     - news: "finnhub" (primary, 60 calls/min), "lseg" (secondary), "ibkr" (basic), "mock" (testing)
@@ -34,7 +34,7 @@ async def list_providers():
             "news": "finnhub"
         },
         "available": {
-            "price": ["ibkr", "lseg"],
+            "price": ["ibkr", "lseg", "schwab"],
             "company": ["lseg", "ibkr"],
             "options": ["ibkr", "lseg"],
             "news": ["finnhub", "lseg", "ibkr", "mock"]

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Provider Defaults
-    DEFAULT_PRICE_PROVIDER: str = "ibkr"
+    DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg, schwab
     DEFAULT_COMPANY_PROVIDER: str = "finnhub"
     DEFAULT_OPTIONS_PROVIDER: str = "ibkr"  # LSEG does NOT support options (missing trapi.data.pricing.read scope)
 
@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     FINNHUB_BASE_URL: str = "https://finnhub.io/api/v1"
     FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
     FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
+
+    # Schwab Provider
+    SCHWAB_API_KEY: str = ""
+    SCHWAB_APP_SECRET: str = ""
+    SCHWAB_CALLBACK_URL: str = "https://127.0.0.1:8182"
+    SCHWAB_TOKEN_PATH: str = "/tmp/schwab_token.json"
+    SCHWAB_TIMEOUT_SECONDS: int = 30
+    SCHWAB_RATE_LIMIT_PER_SEC: int = 5
+    SCHWAB_ASYNCIO: bool = True
 
     # MCP Integration
     MCP_ENABLED: bool = False  # Set to True to expose MCP endpoints at /mcp/sse and /mcp/messages

@@ -38,7 +38,7 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 - LSEG returns the latest daily summary and logs an informational message when `market_data_type` is provided (and ignored)
 
 **How It Works**
-- API Layer (FastAPI) → Service Layer → Provider Layer (IBKR/LSEG/Finnhub)
+- API Layer (FastAPI) → Service Layer → Provider Layer (IBKR/LSEG/Schwab/Finnhub)
 - Strong Pydantic models ensure type-safety (Decimal for prices, Optional fields for missing data)
 - Async-first with `ib_async` for IBKR; synchronous session management for LSEG SDK
 
@@ -153,6 +153,7 @@ Configuration via environment variables (see `.env.example`):
 | `SCHWAB_TOKEN_PATH` | `/tmp/schwab_token.json` | Path to OAuth2 token file (managed by schwab-py) |
 | `SCHWAB_TIMEOUT_SECONDS` | `30` | HTTP request timeout |
 | `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
+| `SCHWAB_ASYNCIO` | `true` | Create Schwab async client (`schwab-py` asyncio mode) |
 
 ### LSEG Credentials Setup
 
@@ -292,7 +293,7 @@ Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chai
 This service implements the **Aggregator Pattern**:
 - **API Layer**: Exposes unified REST and WebSocket endpoints.
 - **Service Layer**: Orchestrates data fetching and business logic.
-- **Provider Layer**: Abstracts external APIs (IBKR, LSEG) via strict interfaces.
+- **Provider Layer**: Abstracts external APIs (IBKR, LSEG, Schwab) via strict interfaces.
 
 ## API Examples
 

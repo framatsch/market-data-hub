@@ -11,6 +11,7 @@ from httpx import AsyncClient, ASGITransport
 
 from app.api.mcp import router, _dispatch, TOOL_REGISTRY, TOOL_HANDLERS, _ACTIVE_STREAMS
 from app.utils.errors import AppError
+from starlette.testclient import TestClient as StarletteTestClient
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +82,6 @@ class TestMcpSse:
         exactly the first item from the async generator it returns.
         """
         from starlette.requests import Request
-        from starlette.testclient import TestClient
         from app.api.mcp import mcp_sse, _ACTIVE_STREAMS
 
         # Build a minimal scope for a GET /mcp/sse request
@@ -95,7 +95,6 @@ class TestMcpSse:
 
         # We need a real Request object but we won't actually stream — we just
         # call the handler and read the first chunk from the streaming body.
-        import uuid as _uuid
 
         sessions_before = set(_ACTIVE_STREAMS.keys())
 
@@ -124,9 +123,8 @@ class TestMcpSse:
 
     def test_mcp_disabled_returns_404(self):
         """When MCP router is not mounted, /mcp/sse must 404."""
-        from starlette.testclient import TestClient
         app = _make_app(mcp_enabled=False)
-        client = TestClient(app)
+        client = StarletteTestClient(app)
         response = client.get("/mcp/sse")
         assert response.status_code == 404
 
@@ -168,7 +166,7 @@ class TestMcpMessages:
             assert not queue.empty()
             sse_event = await queue.get()
             assert "event: message" in sse_event
-            data_line = [l for l in sse_event.splitlines() if l.startswith("data:")][0]
+            data_line = [line for line in sse_event.splitlines() if line.startswith("data:")][0]
             payload = json.loads(data_line[len("data:"):].strip())
             assert payload["id"] == 1
             assert payload["result"]["content"][0]["text"] == "42.00"
@@ -196,7 +194,7 @@ class TestMcpMessages:
                 )
             assert resp.status_code == 202
             sse_event = await queue.get()
-            data_line = [l for l in sse_event.splitlines() if l.startswith("data:")][0]
+            data_line = [line for line in sse_event.splitlines() if line.startswith("data:")][0]
             payload = json.loads(data_line[len("data:"):].strip())
             assert "error" in payload
             assert payload["error"]["code"] == "UNKNOWN_TOOL"
