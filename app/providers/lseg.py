@@ -124,7 +124,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
     def _ticker_to_ric(self, ticker: str) -> str:
         """Convert ticker to RIC with 24h caching.
-        
+
         Strategy: Try to find the equity (stock/ETF) version, not futures/options.
         """
         # Check cache
@@ -168,7 +168,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         for strategy in search_strategies:
             try:
                 logger.debug(f"Trying RIC search strategy: {strategy['name']}")
-                
+
                 # Try direct RIC if specified
                 if strategy.get("skip_search"):
                     ric = strategy["universe"]
@@ -182,7 +182,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                             interval=historical_pricing.Intervals.DAILY,
                             count=1
                         ).get_data()
-                        
+
                         if response.data.df is not None and not response.data.df.empty:
                             self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
                             logger.info(f"Ticker {ticker} mapped to RIC {ric} (direct RIC)")
@@ -207,7 +207,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 if response.data.df is not None and not response.data.df.empty:
                     # Filter to prefer non-futures RICs (avoid 'c1', 'c2', etc. suffixes)
                     rics = response.data.df['RIC'].tolist()
-                    
+
                     # Prefer RICs without continuation/futures markers
                     for ric in rics:
                         # Skip continuation contracts, options, and other derivatives
@@ -215,7 +215,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                             self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
                             logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
                             return ric
-                    
+
                     # If no clean RIC found, use first one anyway (fallback)
                     ric = rics[0]
                     self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))

@@ -409,6 +409,54 @@ Implements specification: `specs/[XX].prompt.md`
 **Implementation Complete!** 🎉
 ```
 
+## Domain Agent Harness
+
+Before writing any code, identify which domain agent(s) own the files you are about to modify.
+
+### Step 0b: Load Domain Agent (always, before any implementation)
+
+1. Identify affected files from the spec's Implementation Checklist.
+2. Map each file to its owning agent using this table:
+
+| Files | Domain agent |
+|-------|-------------|
+| `app/providers/ibkr.py` | `.github/agents/ibkr.agent.md` |
+| `app/providers/lseg.py` | `.github/agents/lseg.agent.md` |
+| `app/providers/finnhub.py`, `mock_news.py` | `.github/agents/finnhub.agent.md` |
+| `app/providers/{new}.py` | `.github/agents/{new}.agent.md` ← **must exist before coding** |
+| `app/api/`, `app/models/`, `app/dependencies.py` | `.github/agents/fastapi.agent.md` |
+| `app/main.py` (mcp section) | `.github/agents/mcp.agent.md` |
+| `Dockerfile`, `k8s/`, `ci.yml`, `app/config.py` | `.github/agents/infra.agent.md` |
+| Cross-cutting / new interfaces | `.github/agents/architect.agent.md` |
+
+3. Read each relevant domain agent file before implementing its section.
+4. Extract and apply:
+   - **Config keys** the agent declares — use exact key names
+   - **Error types** to raise — use only what the agent specifies
+   - **Patterns** (NaN guard, rate limiting, sync/async contract, symbol normalization)
+   - **Verification commands** — run them after implementing that section
+
+### New Provider Rule (critical)
+
+If the spec adds a new provider and `.github/agents/{provider}.agent.md` **does not exist**:
+
+```
+⛔ STOP — domain agent missing.
+
+The spec requires a new provider ({provider}) but .github/agents/{provider}.agent.md
+does not exist. Implementation cannot start until the agent harness is in place.
+
+Action required:
+1. Run @workspace Plan Feature Mode for this provider to generate the agent file, OR
+2. Copy .github/agents/provider.agent.template.md → .github/agents/{provider}.agent.md
+   and fill all {{PLACEHOLDER}} values for {PROVIDER_DISPLAY_NAME}.
+3. Then re-run implementation.
+```
+
+Do not start implementing a new provider file without its agent harness. The harness defines the config key names, error types, sync/async contract, and symbol normalization pattern — guessing these wastes phases.
+
+---
+
 ## Code Patterns Reference
 
 **All code pattern templates are documented in the master reference:**

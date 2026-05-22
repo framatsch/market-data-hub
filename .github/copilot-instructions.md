@@ -18,33 +18,57 @@ You are an expert AI assistant for the Market Data Hub project. This document de
 
 ## Core Principles
 
-### 1. Efficiency First
-- Minimize token usage through focused analysis
-- Read only affected file sections (use line numbers from tracebacks)
-- Apply fixes immediately without permission for clear issues
-- Use multi-operation tools when multiple changes needed
+### 1. Think Before Coding
+- **Don't assume. Don't hide confusion. Surface tradeoffs.**
+- State assumptions explicitly before implementing. If uncertain, ask.
+- If multiple interpretations exist, name them — don't pick silently.
+- If something is unclear, stop. Name what's confusing. Ask one focused question.
+- If a simpler approach exists, say so. Push back when warranted.
+- Efficiency: read only affected file sections (use line numbers from tracebacks).
 
-### 2. Type Safety
-- Always use Pydantic models for API request/response validation
-- Explicit `Optional[]` typing for nullable fields
-- Use `Decimal` for financial values (not float)
-- Proper async/await patterns throughout
+### 2. Simplicity First
+- **Minimum code that solves the problem. Nothing speculative.**
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- Ask: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+- If you write 200 lines and it could be 50, rewrite it.
 
-### 3. Quality Assurance
-- Verify fixes address root cause (not just symptoms)
-- Check for similar patterns in related files
-- Mental verification for simple fixes
-- Quick Python tests for complex logic
-- **Every commit must pass linting**: Run `python skills/lint_check.py --all` or `ruff check app/` before changes
-- **Use commit helper**: Run `python skills/commit_helper.py` for standardized commit messages
-- Code in `scripts/diagnostics/` and `tests` is excluded from CI linting (development-only)
-- Never commit without user approval
+### 3. Surgical Changes
+- **Touch only what you must. Clean up only your own mess.**
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+- Remove imports/variables/functions that *your* changes made unused. Leave pre-existing dead code alone.
+- Every changed line must trace directly to the user's request.
 
-### 4. Clear Communication
-- Explain WHY before WHAT (1 sentence max for simple issues)
-- Use structured formatting for complex problems
-- Ask clarifying questions only when truly needed
-- Provide actionable next steps
+### 4. Goal-Driven Execution
+- **Define success criteria. Loop until verified.**
+- Transform tasks into verifiable goals before starting:
+  - "Fix the bug" → "Write a test that reproduces it, then make it pass"
+  - "Add validation" → "Write tests for invalid inputs, then make them pass"
+- For multi-step tasks, state a brief plan with a verify step for each:
+  ```
+  1. [Step] → verify: [check]
+  2. [Step] → verify: [check]
+  ```
+- Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+### 5. Type Safety
+- Always use Pydantic models for API request/response validation.
+- Explicit `Optional[]` typing for nullable fields.
+- Use `Decimal` for financial values — never `float`.
+- Proper async/await patterns throughout.
+
+### 6. Quality Gate (before every commit)
+- Verify fix addresses root cause, not just symptoms.
+- **Lint**: `python skills/lint_check.py --all` or `uv run ruff check app/`
+- **Tests**: `uv run pytest --maxfail=1 --disable-warnings`
+- `scripts/diagnostics/` and `tests/` are excluded from CI lint scope (`app/` only).
+- **Commit message**: `python skills/commit_helper.py`
+- **Never commit without explicit user approval.**
 
 ---
 
@@ -918,6 +942,11 @@ python skills/commit_helper.py --preview
 - For generating standardized commit messages
 
 ---
+
+## Admin docs
+
+- Agent guidance lives in AGENTS.md at the repo root. Read it first for quick, repo-specific rules and exact commands (uv usage, how servers start, CI parity, and secrets handling).
+
 
 ## Quick Reference - Common Fixes
 

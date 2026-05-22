@@ -10,3 +10,7 @@ coverage/
 htmlcov/
 poetry.lock
 .pytest_cache/
+
+# graphify analysis artifacts
+.graphify_*
+graphify-out/

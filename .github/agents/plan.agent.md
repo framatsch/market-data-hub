@@ -191,6 +191,63 @@ After successful prompt creation, provide a concise chat summary with emojis:
 **🚀 Next Step:** Begin implementation with Implement Feature mode!
 ```
 
+## New Provider Detection
+
+If the feature request involves **adding a new data provider** (e.g. "add Schwab", "integrate Bloomberg", "add Yahoo Finance"):
+
+**Trigger condition:** Feature mentions a new data source / broker / API that does not already have a file in `app/providers/`.
+
+**Before generating the spec, perform this additional step:**
+
+### Step 3b: Provider Agent Scaffold (new-provider features only)
+
+After the Q&A session and before writing `specs/XX.prompt.md`, generate the provider agent file:
+
+1. Determine: `provider_name` (snake_case, e.g. `schwab`), `PROVIDER_PREFIX` (upper, e.g. `SCHWAB`), `ProviderClass` (PascalCase, e.g. `SchwabProvider`)
+2. Copy `.github/agents/provider.agent.template.md`
+3. Fill every `{{PLACEHOLDER}}` using answers from the Q&A — especially:
+   - Auth method → Authentication section
+   - Symbol format → Symbol Format + `_normalize_symbol` docstring
+   - Supported capabilities (price / company / options / news) → class inheritance list
+   - Known API quirks from provider docs → Known Quirks section
+   - Rate limits → `{{PROVIDER_PREFIX}}_RATE_LIMIT_PER_SEC` default value
+4. Write the filled file to `.github/agents/{provider_name}.agent.md`
+5. Announce: `Agent file created: .github/agents/{provider_name}.agent.md` — the implement agent will use this as its harness when coding the provider.
+
+**Q&A additions for new-provider features** (ask these after the standard 10 questions):
+
+```
+## 🎯 Provider Question P1: Authentication
+How does {PROVIDER_NAME} authenticate?
+A) API key in header
+B) OAuth2 / token exchange
+C) SDK with username + password session
+D) Certificate / other
+
+## 🎯 Provider Question P2: Symbol Format
+What identifier format does {PROVIDER_NAME} use?
+A) Standard ticker (AAPL, MSFT) — no conversion needed
+B) Proprietary ID requiring lookup/conversion (like LSEG RIC)
+C) CUSIP / ISIN
+D) Other
+
+## 🎯 Provider Question P3: Sync or Async
+Is the {PROVIDER_NAME} client library sync or async?
+A) Async (httpx, aiohttp, native async SDK)
+B) Sync SDK — will need asyncio.to_thread wrapping
+C) REST API — we write the HTTP client ourselves (use httpx)
+
+## 🎯 Provider Question P4: Capabilities
+Which data types does {PROVIDER_NAME} support?
+(select all that apply)
+A) Price quotes + historical OHLCV
+B) Company profiles + search
+C) Options chains + quotes
+D) News + sentiment
+```
+
+---
+
 ## Focus Areas for Market Data Hub
 
 ### Technical Consistency
