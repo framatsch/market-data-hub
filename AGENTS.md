@@ -32,10 +32,12 @@ uv sync --frozen --no-dev
 ## Running the Service
 
 ```bash
-python -m app.main                                          # both servers: HTTP :8000 + MCP :8001
+python -m app.main                                          # HTTP :8000 (MCP disabled by default)
+MCP_ENABLED=true python -m app.main                        # HTTP :8000 + MCP at /mcp/sse, /mcp/messages
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
 ```
 
+- MCP endpoints are on **the same port 8000** under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
 - README mentions mode args (`http|mcp|both`) — **current code does not parse them**. Ignore.
 - `tests/integration/` and `scripts/diagnostics/` require live IBKR/LSEG — do not run without services.
 

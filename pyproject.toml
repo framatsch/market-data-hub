@@ -15,7 +15,6 @@ dependencies = [
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
     "refinitiv-data==1.6.2",
-    "fastmcp>=2.0.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -33,8 +32,7 @@ test = [
 packages = ["app"]
 
 [tool.uv]
-# Override httpx version to resolve conflict between refinitiv-data (<0.27) and fastmcp (>=0.27)
-# Using httpx 0.26.x as common ground - both packages work with it in practice
+# Override httpx version to resolve conflict with refinitiv-data (<0.27)
 override-dependencies = [
     "httpx==0.26.0",
 ]

@@ -1,19 +1,17 @@
 import logging
-import threading
 import warnings
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastmcp import FastMCP
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
 from app.api import routes_meta, routes_prices, routes_companies, routes_options, routes_ws
 from app.logging_config import setup_logging
 
-mcp_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Suppress known deprecation warnings from upstream libraries (uvicorn/websockets migration in progress)
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets.legacy")
@@ -25,12 +23,11 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
-    mcp_logger.info(f"Starting {settings.APP_NAME} in {settings.APP_ENV} mode")
+    logger.info(f"Starting {settings.APP_NAME} in {settings.APP_ENV} mode")
+    if settings.MCP_ENABLED:
+        logger.info("MCP enabled — endpoints available at /mcp/sse and /mcp/messages")
     yield
-    mcp_logger.info(f"Shutting down {settings.APP_NAME}")
-
-
-
+    logger.info(f"Shutting down {settings.APP_NAME}")
 
 
 app = FastAPI(
@@ -40,21 +37,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Routers
+# REST routers
 app.include_router(routes_meta.router)
 app.include_router(routes_prices.router)
 app.include_router(routes_companies.router)
 app.include_router(routes_options.router)
 app.include_router(routes_ws.router)
 
-# Create MCP server
-mcp = FastMCP("Market Data Hub MCP")
-
-# Add example MCP tools
-@mcp.tool()
-def get_api_health() -> dict:
-    """Get the health status of the Market Data Hub API."""
-    return {"status": "OK", "message": "Market Data Hub is running"}
+# MCP router (opt-in via MCP_ENABLED=true)
+if settings.MCP_ENABLED:
+    from app.api.mcp import router as mcp_router
+    app.include_router(mcp_router)
 
 # Exception Handlers
 @app.exception_handler(AppError)
@@ -82,7 +75,7 @@ async def app_error_handler(request: Request, exc: AppError):
 @app.exception_handler(Exception)
 async def general_error_handler(request: Request, exc: Exception):
     """Handle unexpected errors."""
-    mcp_logger.error(f"Unexpected error: {exc}", exc_info=True)
+    logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
@@ -90,29 +83,14 @@ async def general_error_handler(request: Request, exc: Exception):
 
 
 if __name__ == "__main__":
-    """
-    Run both HTTP API and MCP servers in parallel.
-
-    - HTTP API: http://0.0.0.0:8000/
-    - MCP SSE:  http://0.0.0.0:8001/sse
-    """
+    """Run the HTTP API (single Uvicorn process on port 8000)."""
     import os
     is_docker = os.path.exists('/.dockerenv')
 
-    # Start HTTP server in background thread
-    def run_http():
-        mcp_logger.info("Starting HTTP API server on port 8000")
-        uvicorn.run(
-            "app.main:app",
-            host="0.0.0.0",
-            port=8000,
-            reload=False if is_docker else (settings.APP_ENV == "dev"),
-            log_level=settings.LOG_LEVEL.lower()
-        )
-
-    http_thread = threading.Thread(target=run_http, daemon=True)
-    http_thread.start()
-
-    # Run MCP server in main thread
-    mcp_logger.info("Starting MCP SSE server on port 8001")
-    mcp.run(transport="sse", host="0.0.0.0", port=8001)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False if is_docker else (settings.APP_ENV == "dev"),
+        log_level=settings.LOG_LEVEL.lower()
+    )

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
     FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
 
+    # MCP Integration
+    MCP_ENABLED: bool = False  # Set to True to expose MCP endpoints at /mcp/sse and /mcp/messages
+
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0
     PROVIDER_MAX_RETRIES: int = 3

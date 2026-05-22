@@ -183,24 +183,34 @@ See [doc/news-api-guide.md](doc/news-api-guide.md) for detailed news API usage a
 ## Running Modes
 
 ```bash
-# HTTP REST API (port 8000)
-python -m app.main http
+# HTTP REST API + optional MCP (single process, port 8000)
+python -m app.main
 
-# MCP SSE Protocol (port 8001)
-python -m app.main mcp
+# With MCP enabled (exposes /mcp/sse and /mcp/messages on port 8000)
+MCP_ENABLED=true python -m app.main
 
-# Both services in parallel (ports 8000 + 8001)
-python -m app.main both
-
-# Docker Compose (HTTP mode by default)
+# Docker Compose
 docker-compose up
 
-# Docker - custom mode
+# Docker with MCP enabled
 docker run -p 8000:8000 \
   --env-file .env \
-  market-data-hub:latest \
-  python -m app.main http
+  -e MCP_ENABLED=true \
+  market-data-hub:latest
 ```
+
+### MCP Integration
+
+When `MCP_ENABLED=true`, the MCP (Model Context Protocol) endpoints are available at:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET  /mcp/sse` | SSE stream — establishes a session and receives tool results |
+| `POST /mcp/messages?session_id=<id>` | JSON-RPC 2.0 tool calls |
+
+Connect an MCP client to `http://localhost:8000/mcp/sse`.
+
+Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`.
 
 ## Architecture
 
