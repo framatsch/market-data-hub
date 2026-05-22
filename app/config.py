@@ -1,4 +1,5 @@
 from typing import Literal
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     # → Use IBKR for: Options data and Greeks
     LSEG_APP_KEY: str = "stub-key"  # Refinitiv App Key
     LSEG_USERNAME: str = ""  # Refinitiv platform username
-    LSEG_PASSWORD: str = ""  # Refinitiv platform password
+    LSEG_PASSWORD: SecretStr = SecretStr("")  # Refinitiv platform password
     LSEG_BASE_URL: str = "https://api.lseg.com/v1"
 
     # LSEG Performance & Validation
@@ -40,19 +41,21 @@ class Settings(BaseSettings):
     LSEG_STRICT_VALIDATION: bool = False  # If True, raise error on missing fields; if False, return None
 
     # Finnhub Provider
-    FINNHUB_API_KEY: str = "stub-key"  # Finnhub API Key
+    FINNHUB_API_KEY: SecretStr = SecretStr("stub-key")  # Finnhub API Key
     FINNHUB_BASE_URL: str = "https://finnhub.io/api/v1"
     FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
     FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
 
     # Schwab Provider
-    SCHWAB_API_KEY: str = ""
-    SCHWAB_APP_SECRET: str = ""
-    SCHWAB_CALLBACK_URL: str = "https://127.0.0.1:8182"
-    SCHWAB_TOKEN_PATH: str = "/tmp/schwab_token.json"
-    SCHWAB_TIMEOUT_SECONDS: int = 30
-    SCHWAB_RATE_LIMIT_PER_SEC: int = 5
-    SCHWAB_ASYNCIO: bool = True
+    # Credentials: set via environment variables or .env file.
+    # For Kubernetes: mount as envFrom secretRef (see k8s/ or docs/schwab-setup.md).
+    SCHWAB_API_KEY: SecretStr = SecretStr("")       # Schwab Individual Trader API key
+    SCHWAB_APP_SECRET: SecretStr = SecretStr("")    # Schwab app secret (OAuth2 client secret)
+    SCHWAB_CALLBACK_URL: str = "https://127.0.0.1:8182"  # OAuth2 redirect URI (for token generation only)
+    SCHWAB_TOKEN_PATH: str = "./schwab_token.json"  # Persistent token file; avoid /tmp in containers
+    SCHWAB_TIMEOUT_SECONDS: int = 30               # Per-request timeout (applied via asyncio.wait_for)
+    SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min
+    SCHWAB_ASYNCIO: bool = True                    # True = async httpx client from schwab-py
 
     # MCP Integration
     MCP_ENABLED: bool = False  # Set to True to expose MCP endpoints at /mcp/sse and /mcp/messages

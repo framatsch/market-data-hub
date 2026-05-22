@@ -1,4 +1,7 @@
+import asyncio
+import logging
 from typing import Dict, Optional, cast
+
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
@@ -7,6 +10,9 @@ from app.providers.schwab import SchwabProvider
 from app.providers.mock_news import MockNewsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.utils.errors import InvalidProviderError
+
+logger = logging.getLogger(__name__)
+
 
 class ProviderRegistry:
     def __init__(self):
@@ -48,6 +54,16 @@ class ProviderRegistry:
         if not provider or not isinstance(provider, BaseNewsProvider):
             raise InvalidProviderError(name)
         return cast(BaseNewsProvider, provider)
+
+    async def shutdown(self) -> None:
+        """Gracefully close all providers that expose a close() coroutine."""
+        for provider in self._providers.values():
+            close = getattr(provider, "close", None)
+            if close is not None and asyncio.iscoroutinefunction(close):
+                try:
+                    await close()
+                except Exception:
+                    logger.warning("Error closing provider %s", type(provider).__name__, exc_info=True)
 
 # Global registry instance
 registry = ProviderRegistry()

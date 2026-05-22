@@ -28,11 +28,13 @@ async def lifespan(app: FastAPI):
         logger.info("MCP enabled — endpoints available at /mcp/sse and /mcp/messages")
     yield
     logger.info(f"Shutting down {settings.APP_NAME}")
+    from app.providers.registry import registry
+    await registry.shutdown()
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Real-time market data aggregation from IBKR and LSEG",
+    description="Real-time market data aggregation from IBKR, LSEG, and Schwab",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -57,7 +59,7 @@ async def app_error_handler(request: Request, exc: AppError):
         status_code = 404
     elif exc.code == "INVALID_PROVIDER":
         status_code = 400
-    elif exc.code in ("PROVIDER_NOT_AVAILABLE", "PROVIDER_TIMEOUT"):
+    elif exc.code in ("PROVIDER_NOT_AVAILABLE", "PROVIDER_TIMEOUT", "PROVIDER_CONNECTION_ERROR"):
         status_code = 503
 
     return JSONResponse(

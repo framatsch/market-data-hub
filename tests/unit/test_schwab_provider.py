@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -7,7 +8,12 @@ import pytest
 
 from app.config import settings
 from app.providers.schwab import SchwabProvider
-from app.utils.errors import DataNotFoundError, DataValidationError, ProviderConnectionError
+from app.utils.errors import (
+    DataNotFoundError,
+    DataValidationError,
+    ProviderConnectionError,
+    ProviderTimeoutError,
+)
 
 
 class _Response:
@@ -30,9 +36,14 @@ def provider(monkeypatch, tmp_path: Path) -> SchwabProvider:
     monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
     monkeypatch.setattr(settings, "SCHWAB_ASYNCIO", True)
     monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 50)
+    monkeypatch.setattr(settings, "SCHWAB_TIMEOUT_SECONDS", 10)
 
     return SchwabProvider()
 
+
+# ---------------------------------------------------------------------------
+# Happy path — historical prices
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_get_historical_prices_daily_success(provider: SchwabProvider):
@@ -111,6 +122,10 @@ async def test_get_historical_prices_unsupported_interval(provider: SchwabProvid
         )
 
 
+# ---------------------------------------------------------------------------
+# Happy path — last price
+# ---------------------------------------------------------------------------
+
 @pytest.mark.asyncio
 async def test_get_last_price_success(provider: SchwabProvider):
     client = Mock()
@@ -135,6 +150,9 @@ async def test_get_last_price_success(provider: SchwabProvider):
 
     assert quote.provider == "schwab"
     assert quote.price == Decimal("182.63")
+    assert quote.bid == Decimal("182.6")
+    assert quote.ask == Decimal("182.7")
+    assert quote.volume == 12345
 
 
 @pytest.mark.asyncio
@@ -146,6 +164,10 @@ async def test_get_last_price_unknown_symbol(provider: SchwabProvider):
     with pytest.raises(DataNotFoundError):
         await provider.get_last_price("AAPL")
 
+
+# ---------------------------------------------------------------------------
+# Connection / auth errors
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_provider_disabled_when_no_api_key(monkeypatch, tmp_path: Path):
@@ -174,28 +196,7 @@ async def test_missing_token_file_raises_connection_error(monkeypatch, tmp_path:
     with pytest.raises(ProviderConnectionError) as exc:
         await provider._get_client()
 
-    assert "token_path" in exc.value.details
-    assert exc.value.details["token_path"] == str(missing)
-
-
-def test_decimal_conversion_from_float(provider: SchwabProvider):
-    bars = provider._parse_ohlcv(
-        {
-            "candles": [
-                {
-                    "datetime": 1715731200000,
-                    "open": 182.6,
-                    "high": 183.2,
-                    "low": 181.8,
-                    "close": 182.63,
-                    "volume": 100,
-                }
-            ]
-        },
-        "AAPL",
-    )
-
-    assert bars[0].close == Decimal("182.63")
+    assert "hint" in exc.value.details
 
 
 @pytest.mark.asyncio
@@ -216,3 +217,195 @@ async def test_missing_token_file_from_easy_client_raises_connection_error(
     with patch("app.providers.schwab.easy_client", side_effect=FileNotFoundError("missing token")):
         with pytest.raises(ProviderConnectionError):
             await provider._get_client()
+
+
+@pytest.mark.asyncio
+async def test_expired_token_raises_connection_error(monkeypatch, tmp_path: Path):
+    """Generic exception from easy_client (e.g. expired token) → ProviderConnectionError with hint."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
+    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
+
+    provider = SchwabProvider()
+
+    with patch("app.providers.schwab.easy_client", side_effect=Exception("token_expired")):
+        with pytest.raises(ProviderConnectionError) as exc:
+            await provider._get_client()
+
+    assert "Re-generate token" in exc.value.message
+
+
+# ---------------------------------------------------------------------------
+# HTTP error codes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_last_price_429_raises_timeout(provider: SchwabProvider):
+    client = Mock()
+    client.get_quotes = AsyncMock(return_value=_Response(429, {}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    with pytest.raises(ProviderTimeoutError):
+        await provider.get_last_price("AAPL")
+
+
+@pytest.mark.asyncio
+async def test_get_historical_prices_429_raises_timeout(provider: SchwabProvider):
+    client = Mock()
+    client.get_price_history_every_day = AsyncMock(return_value=_Response(429, {}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    with pytest.raises(ProviderTimeoutError):
+        await provider.get_historical_prices(
+            "AAPL", "1d",
+            datetime(2024, 1, 1, tzinfo=timezone.utc),
+            datetime(2024, 1, 31, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_last_price_401_clears_client_and_raises_connection_error(provider: SchwabProvider):
+    """401 from Schwab API → clears cached client + raises ProviderConnectionError."""
+    client = Mock()
+    client.get_quotes = AsyncMock(return_value=_Response(401, {}))
+    provider._get_client = AsyncMock(return_value=client)
+    provider._client = client  # simulate cached client
+
+    with pytest.raises(ProviderConnectionError) as exc:
+        await provider.get_last_price("AAPL")
+
+    assert "expired" in exc.value.message.lower() or "invalid" in exc.value.message.lower()
+    assert provider._client is None  # must be cleared so next call re-authenticates
+
+
+@pytest.mark.asyncio
+async def test_get_last_price_403_clears_client_and_raises_connection_error(provider: SchwabProvider):
+    client = Mock()
+    client.get_quotes = AsyncMock(return_value=_Response(403, {}))
+    provider._get_client = AsyncMock(return_value=client)
+    provider._client = client
+
+    with pytest.raises(ProviderConnectionError):
+        await provider.get_last_price("AAPL")
+
+    assert provider._client is None
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_rate_limit_exceeded_raises_timeout(monkeypatch, tmp_path: Path):
+    """In-process rate limit: fill the window, next call should raise ProviderTimeoutError."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
+    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
+    monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 3)
+
+    provider = SchwabProvider()
+    # Pre-fill the window with `limit` timestamps right now
+    now = time.time()
+    for _ in range(3):
+        provider._request_times.append(now)
+
+    with pytest.raises(ProviderTimeoutError) as exc:
+        await provider._check_rate_limit()
+
+    assert exc.value.details["reason"] == "rate limit exceeded"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_window_expires_allows_new_requests(monkeypatch, tmp_path: Path):
+    """After the 1-second window expires, requests should be allowed again."""
+    token_file = tmp_path / "token.json"
+    token_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
+    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
+    monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 2)
+
+    provider = SchwabProvider()
+    # Fill with timestamps 2 seconds ago (outside the 1s window)
+    old_time = time.time() - 2.0
+    provider._request_times.append(old_time)
+    provider._request_times.append(old_time)
+
+    # Should NOT raise — old entries are evicted
+    await provider._check_rate_limit()
+
+
+# ---------------------------------------------------------------------------
+# close() lifecycle
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_close_sets_client_to_none(provider: SchwabProvider):
+    mock_client = Mock()
+    mock_client.close = AsyncMock()
+    provider._client = mock_client
+
+    await provider.close()
+
+    assert provider._client is None
+    mock_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_noop_when_no_client(provider: SchwabProvider):
+    provider._client = None
+    await provider.close()  # must not raise
+    assert provider._client is None
+
+
+@pytest.mark.asyncio
+async def test_close_sync_close_method(provider: SchwabProvider):
+    """close() handles sync (non-coroutine) close method gracefully."""
+    mock_client = Mock()
+    mock_client.close = Mock(return_value=None)  # sync, not coroutine
+    provider._client = mock_client
+
+    await provider.close()
+
+    assert provider._client is None
+
+
+# ---------------------------------------------------------------------------
+# Decimal conversion
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field", ["open", "high", "low", "close"])
+def test_decimal_conversion_uses_str_path(provider: SchwabProvider, field: str):
+    """All OHLCV fields use Decimal(str(value)), not Decimal(float) — precision preserved."""
+    candle_values = {"open": 182.6, "high": 183.2, "low": 181.8, "close": 182.63}
+    bars = provider._parse_ohlcv(
+        {
+            "candles": [
+                {
+                    "datetime": 1715731200000,
+                    **candle_values,
+                    "volume": 100,
+                }
+            ]
+        },
+        "AAPL",
+    )
+
+    result = getattr(bars[0], field)
+    expected = Decimal(str(candle_values[field]))
+    float_result = Decimal(candle_values[field])  # the buggy form
+
+    assert result == expected
+    # Prove the two forms differ for floats that lose precision
+    if expected != float_result:
+        assert result != float_result, f"{field}: should use str-path, not direct float Decimal"

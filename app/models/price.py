@@ -32,8 +32,4 @@ class PriceBar(BaseModel):
     volume: int
     provider: str
 
-    @property
-    def timestamp(self) -> datetime:
-        if self.start.tzinfo is not None:
-            return self.start.replace(tzinfo=None)
-        return self.start
+

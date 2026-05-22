@@ -12,6 +12,7 @@ from app.models.price import PriceQuote, PriceBar
 from app.models.news import NewsArticle
 from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, DataValidationError, ProviderError
+from app.utils.secrets import unwrap_secret
 
 logger = logging.getLogger(__name__)
 _REFINITIV_HTTPX_PROXY_PATCHED = False
@@ -94,8 +95,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         # Quote caching for performance
         self._quote_cache: Dict[str, Tuple[PriceQuote, datetime]] = {}
 
-        # Rate limiting
-        self._request_times: deque = deque(maxlen=settings.LSEG_RATE_LIMIT_PER_SEC)
+        # Rate limiting — no maxlen: manual popleft manages window to avoid eviction races
+        self._request_times: deque = deque()
 
         logger.info("LSEGProvider initialized")
 
@@ -140,7 +141,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 app_key=settings.LSEG_APP_KEY,
                 grant=rd.session.platform.GrantPassword(
                     username=settings.LSEG_USERNAME,
-                    password=settings.LSEG_PASSWORD
+                    password=unwrap_secret(settings.LSEG_PASSWORD)
                 ),
                 signon_control=True
             ).get_session()
@@ -158,8 +159,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         except Exception as e:
             logger.error(f"❌ Failed to create Refinitiv session: {type(e).__name__}: {e}")
             raise ProviderConnectionError(
-                "Could not authenticate with Refinitiv",
-                details={"error": str(e), "error_type": type(e).__name__}
+                "Could not authenticate with Refinitiv. Check LSEG credentials.",
+                details={"hint": f"Auth error: {type(e).__name__}"},
             )
 
     # ========================================================================

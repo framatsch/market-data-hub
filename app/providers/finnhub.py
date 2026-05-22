@@ -16,6 +16,7 @@ from app.config import settings
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderError, ProviderConnectionError
+from app.utils.secrets import unwrap_secret
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,14 @@ class FinnhubProvider(BaseNewsProvider):
     """
 
     def __init__(self):
-        if not settings.FINNHUB_API_KEY or settings.FINNHUB_API_KEY == "stub-key":
+        self._api_key: str = unwrap_secret(settings.FINNHUB_API_KEY)
+        if not self._api_key or self._api_key == "stub-key":
             logger.warning("Finnhub API key not configured - provider will not work")
 
-        # Token Bucket for Rate Limiting (60 calls per minute)
+        # Sliding-window rate limiter (60 calls per minute).
+        # No maxlen: manual popleft manages the window to avoid eviction races.
         self._rate_limit_per_min = settings.FINNHUB_RATE_LIMIT_PER_MIN
-        self._request_times: deque = deque(maxlen=self._rate_limit_per_min)
+        self._request_times: deque = deque()
         self._last_rate_limit_error: Optional[datetime] = None
 
         # HTTP client
@@ -241,7 +244,7 @@ class FinnhubProvider(BaseNewsProvider):
                     "symbol": symbol.upper(),
                     "from": from_date.isoformat(),
                     "to": to_date.isoformat(),
-                    "token": settings.FINNHUB_API_KEY
+                    "token": self._api_key
                 }
             )
 
