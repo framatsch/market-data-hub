@@ -8,11 +8,19 @@
 # Injected into ALL review requests. Keep it tight—focus on what reviewers
 # genuinely need to know that isn't obvious from the code itself.
 
-# context: |
-#   Tech stack: TypeScript, React, Node.js, PostgreSQL
-#   Architecture: Monorepo with NX, ESM only
-#   Testing: Jest + React Testing Library, mock only external services
-#   Critical constraint: All public APIs must be backwards compatible
+context: |
+  Tech stack: Python, FastAPI, Pydantic, uv, pytest
+  Architecture: HTTP API (:8000) + optional MCP SSE (:8000/mcp) — single port.
+    Provider/gateway pattern: registry → ibkr | lseg | schwab | finnhub providers.
+    All financial values as Decimal. AppError hierarchy maps to HTTP status codes.
+  Performance priority: low-latency market data delivery — every hot path matters.
+    Providers may be sync (LSEG/refinitiv-data) or async (IBKR/ib_async, Finnhub/httpx).
+    External calls must be parallelised where independent; connections must be reused.
+  Critical constraints:
+    - All financial values MUST use Decimal, never float
+    - Provider errors surface via AppError, never raw exceptions
+    - httpx pinned at 0.26.0 (uv override) — do not change
+    - Lint gate: ruff check app/ must pass before every commit
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONTEXT DISCOVERY
@@ -68,11 +76,15 @@ context_discovery:
 # ─────────────────────────────────────────────────────────────────────────────
 
 default_team:
-  # Form 1 — shorthand. N instances, no model override.
-  principal: 2    # Holistic architecture review
-  quality: 2      # Code quality and maintainability
-  # security: 1   # Auto-added for auth/API/data changes
-  # testing: 1    # Auto-added for logic-heavy changes
+  # Calibrated for this repo: FastAPI + MCP + provider/gateway pattern, Python.
+  # Core priority: low-latency market data delivery — performance is first-class.
+  principal: 2     # Holistic architecture and cross-component impact
+  quality: 2       # Readability, maintainability, and implementation quality
+  backend: 1       # FastAPI/Pydantic/service/provider boundary correctness
+  performance: 1   # Hot-path latency, I/O parallelism, caching, N+1, payload size
+  reliability: 1   # Timeouts, retries, fallbacks, error propagation
+  security: 1      # API/auth/data handling checks
+  testing: 1       # Coverage depth, edge cases, regression protection
 
   # ── Optional advanced forms ──
   # Form 2 — object: N instances, all sharing the same model.
