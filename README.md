@@ -7,7 +7,7 @@
 </div>
 
 
-Market Data Hub (MDH) is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
+Market Data Hub (MDH) is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Schwab, and Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
 
 **What It Does**
 - Aggregates real-time and delayed market data from IBKR and LSEG
@@ -29,6 +29,7 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 **Providers & Data Types**
 - IBKR: real-time equities and options; supports `market_data_type` (1=Live/Level 2, 2=Frozen, 3=Delayed)
 - LSEG: equity prices via daily summaries; ignores `market_data_type`; not suitable for options Greeks
+- Schwab: equity quotes and historical OHLCV (1m–1w granularity, back to 1985); requires OAuth2 token; no extra data subscription beyond a standard brokerage account
 - Finnhub: supplemental news and company data for fallback scenarios
 
 **Behavior Highlights**
@@ -109,8 +110,9 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 
 | Data Type | Primary Provider | Fallback | Reason |
 |-----------|-----------------|----------|--------|
-| **Stock Prices** | IBKR | LSEG | IBKR provides real-time market data |
-| **Options** | **IBKR ONLY** | - | LSEG lacks `trapi.data.pricing.read` scope for Greeks |
+| **Stock Prices** | IBKR | LSEG, Schwab | IBKR provides real-time market data |
+| **Historical OHLCV** | Schwab | IBKR, LSEG | Schwab history back to 1985; no extra subscription needed |
+| **Options** | **IBKR ONLY** | - | LSEG and Schwab lack real-time options Greeks |
 | **Company Data** | LSEG | Finnhub | LSEG has comprehensive fundamentals |
 | **News** | LSEG | Finnhub | LSEG provides institutional-grade news |
 
@@ -144,7 +146,13 @@ Configuration via environment variables (see `.env.example`):
 | `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
 | `APP_ENV` | `dev` | Environment: dev, test, prod |
 | `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
-| `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg |
+| `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg, schwab |
+| `SCHWAB_API_KEY` | *(empty)* | Schwab app key — leave empty to disable provider |
+| `SCHWAB_APP_SECRET` | *(empty)* | Schwab app secret from developer portal |
+| `SCHWAB_CALLBACK_URL` | `https://127.0.0.1:8182` | Must match app config exactly (including trailing slash) |
+| `SCHWAB_TOKEN_PATH` | `/tmp/schwab_token.json` | Path to OAuth2 token file (managed by schwab-py) |
+| `SCHWAB_TIMEOUT_SECONDS` | `30` | HTTP request timeout |
+| `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
 
 ### LSEG Credentials Setup
 
@@ -179,6 +187,73 @@ To access company news and data from Finnhub (fallback provider), obtain an API 
 - Rate limit handling: Automatically falls back to mock provider when limit exceeded (configurable via `FINNHUB_FALLBACK_ON_RATE_LIMIT`)
 
 See [doc/news-api-guide.md](doc/news-api-guide.md) for detailed news API usage and testing.
+
+### Schwab Credentials Setup
+
+Schwab requires OAuth2 authentication via the [Schwab Developer Portal](https://developer.schwab.com/). The `schwab-py` library manages the token lifecycle automatically once set up.
+
+#### 1. Create a Schwab developer app
+
+1. Sign in at [developer.schwab.com](https://developer.schwab.com/)
+2. Create a new app under **Products → Trader API – Individual**
+3. Set the callback URL to `https://127.0.0.1:8182` (or another `https://127.0.0.1:<port>` URL)
+4. Note your **App Key** and **App Secret**
+
+> **App approval delay:** New and modified apps enter an `Approved - Pending` state and require manual review by Schwab. This typically takes a few days. Until the status shows **Ready for Use**, API calls will return `401` errors.
+
+#### 2. Generate the token (one-time per machine)
+
+Run the token generator on a machine with a browser:
+
+```bash
+schwab-generate-token.py \
+  --token_file /path/to/schwab_token.json \
+  --api_key YOUR_APP_KEY \
+  --app_secret YOUR_APP_SECRET \
+  --callback_url https://127.0.0.1:8182
+```
+
+A browser window will open. Log in with your Schwab brokerage account. After redirecting, the token file is written automatically.
+
+> Your browser will warn about an invalid/self-signed certificate on the callback URL — this is expected. Proceed anyway, but verify the address matches your callback URL.
+
+#### 3. Configure `.env`
+
+```bash
+SCHWAB_API_KEY=your-app-key-here
+SCHWAB_APP_SECRET=your-app-secret-here
+SCHWAB_CALLBACK_URL=https://127.0.0.1:8182
+SCHWAB_TOKEN_PATH=/path/to/schwab_token.json
+```
+
+#### 4. Token rotation (every 7 days)
+
+Schwab refresh tokens expire after **7 days**. Re-run `schwab-generate-token.py` weekly before the token expires, or set a cron job:
+
+```bash
+# Example: regenerate token every Sunday at 08:00
+0 8 * * 0 schwab-generate-token.py --token_file /path/to/token.json --api_key $SCHWAB_API_KEY --app_secret $SCHWAB_APP_SECRET --callback_url https://127.0.0.1:8182
+```
+
+#### 5. Containerized / headless deployments
+
+The login flow requires a browser. For servers:
+
+1. Generate the token on a local machine (step 2 above)
+2. Copy `schwab_token.json` to the server / mount it as a secret
+3. **Never share or commit the token file** — it grants full account access
+
+**Do not** create, edit, or copy-paste the JSON contents manually. The token file is managed exclusively by `schwab-py`.
+
+#### Verify the setup
+
+```bash
+# Check provider is active (requires running server)
+curl http://localhost:8000/providers | python -m json.tool
+
+# Fetch historical daily prices via Schwab
+curl "http://localhost:8000/prices/history/AAPL?interval=1d&period=1y&provider=schwab"
+```
 
 ## Running Modes
 

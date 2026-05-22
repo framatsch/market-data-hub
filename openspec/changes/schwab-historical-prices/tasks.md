@@ -39,9 +39,17 @@
 
 - [ ] 5.1 Create `scripts/diagnostics/test_schwab_connection.py` — imports `SchwabProvider`, calls `get_last_price("AAPL")`, prints result; requires live token in `SCHWAB_TOKEN_PATH`
 
-## 6. Verification & Cleanup
+## 6. Documentation
 
-- [ ] 6.1 Run `uv run ruff check app/providers/schwab.py` and fix any lint errors
-- [ ] 6.2 Run `uv run pytest tests/unit/test_schwab_provider.py -v --disable-warnings` — all tests pass
-- [ ] 6.3 Run `uv run pytest --maxfail=1 --disable-warnings` — full suite still green (no regressions)
-- [ ] 6.4 Verify `curl http://localhost:8000/providers | python -m json.tool` shows `"schwab"` in the provider list (requires running server with `SCHWAB_API_KEY` set)
+- [ ] 6.1 Add `SCHWAB_*` config variables to the Configuration table in `README.md`
+- [ ] 6.2 Add a **Schwab Credentials Setup** section to `README.md` (after the Finnhub section) covering: developer portal registration, app approval wait, token generation with `schwab-generate-token.py`, 7-day token rotation, and headless/container deployment pattern
+- [ ] 6.3 Update the **Provider Matrix** table in `README.md` to include Schwab (Stock Prices — delayed quotes, historical OHLCV back to 1985)
+- [ ] 6.4 Update the **What It Does** / **Providers & Data Types** intro paragraphs in `README.md` to mention Schwab alongside IBKR and LSEG
+- [ ] 6.5 Add `schwab.agent.md` reference row to the Domain Expert Agents table in `AGENTS.md`
+
+## 7. Verification & Cleanup
+
+- [ ] 7.1 Run `uv run ruff check app/providers/schwab.py` and fix any lint errors
+- [ ] 7.2 Run `uv run pytest tests/unit/test_schwab_provider.py -v --disable-warnings` — all tests pass
+- [ ] 7.3 Run `uv run pytest --maxfail=1 --disable-warnings` — full suite still green (no regressions)
+- [ ] 7.4 Verify `curl http://localhost:8000/providers | python -m json.tool` shows `"schwab"` in the provider list (requires running server with `SCHWAB_API_KEY` set)

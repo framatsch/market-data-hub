@@ -1,121 +1,110 @@
 ---
 name: openspec-propose
-description: Propose a new feature for Market Data Hub. Generates a spec file in specs/ with proposal, design, and task breakdown ready for implementation via plan.agent.md and implement.agent.md.
+description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
 license: MIT
-compatibility: opencode
+compatibility: Requires openspec CLI.
 metadata:
-  toolchain: python
+  author: openspec
+  version: "1.0"
+  generatedBy: "1.3.1"
 ---
 
-# Spec Propose
+Propose a new change - create the change and generate all artifacts in one step.
 
-Generate a complete feature spec in `specs/` — proposal, design decisions, and phased task breakdown — ready for `implement.agent.md` to execute.
+I'll create a change with artifacts:
+- proposal.md (what & why)
+- design.md (how)
+- tasks.md (implementation steps)
 
-This replaces the openspec CLI workflow. All state lives in `specs/XX.prompt.md`.
-
----
-
-## Input
-
-A description of what the user wants to build. A kebab-case name is optional.
-
-If the description is vague, use **AskUserQuestion** to clarify before proceeding.
+When ready to implement, run /opsx-apply
 
 ---
 
-## Steps
+**Input**: The user's request should include a change name (kebab-case) OR a description of what they want to build.
 
-### 1. Understand the request
+**Steps**
 
-If not provided, ask:
-> "What feature do you want to build? Describe the problem it solves and what you expect it to do."
+1. **If no clear input provided, ask what they want to build**
 
-Derive a short kebab-case name (e.g., "add schwab provider" → `add-schwab-provider`).
+   Use the **AskUserQuestion tool** (open-ended, no preset options) to ask:
+   > "What change do you want to work on? Describe what you want to build or fix."
 
-### 2. Find the next spec number
+   From their description, derive a kebab-case name (e.g., "add user authentication" → `add-user-auth`).
 
-```bash
-ls specs/ | grep -E '^[0-9]+' | sort | tail -1
-```
+   **IMPORTANT**: Do NOT proceed without understanding what the user wants to build.
 
-Increment by 1 to get the next number (zero-pad to 2 digits, e.g., `05`).
+2. **Create the change directory**
+   ```bash
+   openspec new change "<name>"
+   ```
+   This creates a scaffolded change at `openspec/changes/<name>/` with `.openspec.yaml`.
 
-### 3. Explore the codebase for context
+3. **Get the artifact build order**
+   ```bash
+   openspec status --change "<name>" --json
+   ```
+   Parse the JSON to get:
+   - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
+   - `artifacts`: list of all artifacts with their status and dependencies
 
-Before writing anything, understand:
-- Which existing provider is most similar (for new providers: read `app/providers/ibkr.py` or `app/providers/lseg.py`)
-- Which routes/models will be affected (`app/api/`, `app/models/`)
-- Which config keys exist in `app/config.py`
-- Whether `app/providers/base.py` needs changes
+4. **Create artifacts in sequence until apply-ready**
 
-### 4. Check if a new provider agent is needed
+   Use the **TodoWrite tool** to track progress through the artifacts.
 
-If the feature adds a new data provider:
-- **The agent file must be created first**, before any spec tasks reference implementation.
-- Use `.github/agents/provider.agent.template.md` as the template.
-- Add a task in the spec: "Create `.github/agents/<name>.agent.md` from template — commit before any code."
+   Loop through artifacts in dependency order (artifacts with no pending dependencies first):
 
-### 5. Write the spec file
+   a. **For each artifact that is `ready` (dependencies satisfied)**:
+      - Get instructions:
+        ```bash
+        openspec instructions <artifact-id> --change "<name>" --json
+        ```
+      - The instructions JSON includes:
+        - `context`: Project background (constraints for you - do NOT include in output)
+        - `rules`: Artifact-specific rules (constraints for you - do NOT include in output)
+        - `template`: The structure to use for your output file
+        - `instruction`: Schema-specific guidance for this artifact type
+        - `outputPath`: Where to write the artifact
+        - `dependencies`: Completed artifacts to read for context
+      - Read any completed dependency files for context
+      - Create the artifact file using `template` as the structure
+      - Apply `context` and `rules` as constraints - but do NOT copy them into the file
+      - Show brief progress: "Created <artifact-id>"
 
-Create `specs/NN-<name>.prompt.md` (or `specs/NN.prompt.md` to match existing naming):
+   b. **Continue until all `applyRequires` artifacts are complete**
+      - After creating each artifact, re-run `openspec status --change "<name>" --json`
+      - Check if every artifact ID in `applyRequires` has `status: "done"` in the artifacts array
+      - Stop when all `applyRequires` artifacts are done
 
-```markdown
-# Spec: <Human-Readable Feature Name>
+   c. **If an artifact requires user input** (unclear context):
+      - Use **AskUserQuestion tool** to clarify
+      - Then continue with creation
 
-## Problem
-[What gap or need does this address?]
+5. **Show final status**
+   ```bash
+   openspec status --change "<name>"
+   ```
 
-## Proposed Solution
-[High-level description of the approach]
+**Output**
 
-## Design Decisions
-[Key architectural or implementation choices, with rationale]
+After completing all artifacts, summarize:
+- Change name and location
+- List of artifacts created with brief descriptions
+- What's ready: "All artifacts created! Ready for implementation."
+- Prompt: "Run `/opsx-apply` or ask me to implement to start working on the tasks."
 
-## Scope
-**In scope:**
-- [item]
+**Artifact Creation Guidelines**
 
-**Out of scope:**
-- [item]
+- Follow the `instruction` field from `openspec instructions` for each artifact type
+- The schema defines what each artifact should contain - follow it
+- Read dependency artifacts for context before creating new ones
+- Use `template` as the structure for your output file - fill in its sections
+- **IMPORTANT**: `context` and `rules` are constraints for YOU, not content for the file
+  - Do NOT copy `<context>`, `<rules>`, `<project_context>` blocks into the artifact
+  - These guide what you write, but should never appear in the output
 
-## Affected Components
-- `app/providers/<name>.py` — [what changes]
-- `app/api/routes_<name>.py` — [what changes]
-- `app/models/<name>.py` — [what changes]
-- `app/config.py` — [new env vars, if any]
-
-## Implementation Phases
-
-### Phase 1: [Name]
-- [ ] Task 1
-- [ ] Task 2
-
-### Phase 2: [Name]
-- [ ] Task 3
-- [ ] Task 4
-
-## Acceptance Criteria
-- [ ] [Verifiable outcome 1]
-- [ ] [Verifiable outcome 2]
-
-## Provider Agent (if new provider)
-- [ ] Create `.github/agents/<name>.agent.md` from `provider.agent.template.md` **before any implementation tasks**
-```
-
-### 6. Show summary
-
-Display:
-- Spec file path
-- Key design decisions made
-- Phase breakdown
-- Next step: "Run `implement.agent.md` with this spec, or load `.github/agents/implement.agent.md` to start."
-
----
-
-## Guardrails
-
-- Never start writing a spec without understanding what the user wants to build
-- For new providers: always include the agent-file task as Phase 0 or first task
-- Keep tasks atomic — each task should be completable in one focused coding session
-- Acceptance criteria must be verifiable (runnable tests or observable behavior)
-- Do not implement anything — this skill only produces the spec file
+**Guardrails**
+- Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`)
+- Always read dependency artifacts before creating a new one
+- If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum
+- If a change with that name already exists, ask if user wants to continue it or create a new one
+- Verify each artifact file exists after writing before proceeding to next
