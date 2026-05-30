@@ -17,7 +17,7 @@
 from datetime import datetime
 from fastapi import APIRouter
 from app.models.common import HealthResponse, ResponseEnvelope
-from app.config import settings
+from app.providers.registry import registry
 
 router = APIRouter(tags=["Meta"])
 start_time = datetime.now()
@@ -44,10 +44,10 @@ async def list_providers():
     """
     return ResponseEnvelope(data={
         "defaults": {
-            "price": settings.DEFAULT_PRICE_PROVIDER,
-            "company": settings.DEFAULT_COMPANY_PROVIDER,
-            "options": settings.DEFAULT_OPTIONS_PROVIDER,
-            "news": "finnhub"
+            "price": registry.default_price_provider,
+            "company": registry.default_company_provider,
+            "options": registry.default_options_provider,
+            "news": registry.default_news_provider,
         },
         "available": {
             "price": ["ibkr", "lseg", "schwab"],

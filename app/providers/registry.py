@@ -33,7 +33,29 @@ logger = logging.getLogger(__name__)
 class ProviderRegistry:
     def __init__(self):
         self._providers: Dict[str, object] = {}
+        self.default_price_provider: str = "ibkr"
+        self.default_company_provider: str = "finnhub"
+        self.default_options_provider: str = "ibkr"
+        self.default_news_provider: str = "finnhub"
         self._initialize_providers()
+
+    def _resolve_default(self, config_key: str, base_class: type) -> str:
+        """Check if the configured default is loaded and valid; fall back otherwise."""
+        configured = getattr(settings, config_key)
+        if configured in self._providers and isinstance(self._providers[configured], base_class):
+            return configured
+        for name, provider in self._providers.items():
+            if isinstance(provider, base_class):
+                logger.warning(
+                    "%s '%s' is not enabled or does not implement %s. Falling back to '%s'.",
+                    config_key, configured, base_class.__name__, name,
+                )
+                return name
+        logger.error(
+            "%s '%s' is not enabled and no alternative provider implements %s.",
+            config_key, configured, base_class.__name__,
+        )
+        return configured
 
     def _initialize_providers(self):
         # All potential providers
@@ -63,29 +85,35 @@ class ProviderRegistry:
             except Exception as e:
                 logger.error(f"Failed to initialize provider '{name}': {e}")
 
+        # Resolve effective defaults against actually loaded providers
+        self.default_price_provider = self._resolve_default("DEFAULT_PRICE_PROVIDER", BasePriceProvider)
+        self.default_company_provider = self._resolve_default("DEFAULT_COMPANY_PROVIDER", BaseCompanyProvider)
+        self.default_options_provider = self._resolve_default("DEFAULT_OPTIONS_PROVIDER", BaseOptionsProvider)
+        self.default_news_provider = self._resolve_default("DEFAULT_NEWS_PROVIDER", BaseNewsProvider)
+
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
-        name = name or settings.DEFAULT_PRICE_PROVIDER
+        name = name or self.default_price_provider
         provider = self._providers.get(name)
         if not provider or not isinstance(provider, BasePriceProvider):
             raise InvalidProviderError(name)
         return cast(BasePriceProvider, provider)
 
     def get_company_provider(self, name: Optional[str] = None) -> BaseCompanyProvider:
-        name = name or settings.DEFAULT_COMPANY_PROVIDER
+        name = name or self.default_company_provider
         provider = self._providers.get(name)
         if not provider or not isinstance(provider, BaseCompanyProvider):
             raise InvalidProviderError(name)
         return cast(BaseCompanyProvider, provider)
 
     def get_options_provider(self, name: Optional[str] = None) -> BaseOptionsProvider:
-        name = name or settings.DEFAULT_OPTIONS_PROVIDER
+        name = name or self.default_options_provider
         provider = self._providers.get(name)
         if not provider or not isinstance(provider, BaseOptionsProvider):
             raise InvalidProviderError(name)
         return cast(BaseOptionsProvider, provider)
 
     def get_news_provider(self, name: Optional[str] = None) -> BaseNewsProvider:
-        name = name or "lseg"  # Default to LSEG for news
+        name = name or self.default_news_provider
         provider = self._providers.get(name)
         if not provider or not isinstance(provider, BaseNewsProvider):
             raise InvalidProviderError(name)

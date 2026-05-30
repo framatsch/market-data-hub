@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg, schwab
     DEFAULT_COMPANY_PROVIDER: str = "finnhub"
     DEFAULT_OPTIONS_PROVIDER: str = "ibkr"  # LSEG does NOT support options (missing trapi.data.pricing.read scope)
+    DEFAULT_NEWS_PROVIDER: str = "finnhub"
 
     # IBKR Provider
     IBKR_HOST: str = "127.0.0.1"

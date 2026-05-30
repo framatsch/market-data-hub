@@ -37,9 +37,8 @@ MCP_ENABLED=true python -m app.main                        # HTTP :8000 + MCP at
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
 ```
 
-- MCP endpoints are on **the same port 8000** under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
-- README mentions mode args (`http|mcp|both`) — **current code does not parse them**. Ignore.
-- `tests/integration/` and `scripts/diagnostics/` require live IBKR/LSEG — do not run without services.
+- MCP endpoints are on **the same port 8000** (or configured port) under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
+- The MCP server is integrated directly into FastAPI (not a separate process).
 
 ---
 
@@ -48,6 +47,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
 - Copy `.env.example` → `.env`. Required: `LSEG_APP_KEY`, `LSEG_USERNAME`, `LSEG_PASSWORD`.
 - IBKR: running TWS/Gateway required (Gateway port 4001, TWS paper 7497).
 - Settings via `app/config.py` (`SettingsConfigDict(env_file=".env")`). Never commit credentials.
+- `MCP_ENABLED=true` enables Model Context Protocol.
+- `ENABLED_PROVIDERS=lseg,ibkr` limits loaded providers (default: all).
 
 ---
 
@@ -59,7 +60,7 @@ HTTP :8000  FastAPI (app/api/routes_*.py)
             → ibkr.py (async ib_async) | lseg.py (sync refinitiv.data) | finnhub.py (async httpx)
             ← app/models/ (Pydantic, all financial values as Decimal)
 
-MCP  :8001  FastMCP SSE (app/main.py — @mcp.tool() functions)
+MCP  :8000  Integrated Router (app/api/mcp.py) — available via SSE
 ```
 
 Provider details, error patterns, and code templates → `.github/copilot-instructions.md`
@@ -105,7 +106,7 @@ All agent configs live in `.github/agents/`. One config consumed by GitHub Copil
 | `schwab.agent.md` | `app/providers/schwab.py`, SCHWAB_* config keys | Schwab OAuth2 token, price history, quote fetch, `schwab-py` |
 | `finnhub.agent.md` | `app/providers/finnhub.py`, `mock_news.py` | News, sentiment, Finnhub |
 | `fastapi.agent.md` | `app/api/`, `app/models/`, `app/dependencies.py` | Routes, Pydantic models, DI, CSV export |
-| `mcp.agent.md` | MCP tools in `app/main.py`, SSE port 8001 | Exposing data to LLM clients via MCP |
+| `mcp.agent.md` | MCP tools in `app/api/mcp.py`, SSE on app port | Exposing data to LLM clients via MCP |
 | `infra.agent.md` | `Dockerfile`, `k8s/`, `ci.yml`, `app/config.py` | Docker, K8s, CI, env vars |
 | `provider.agent.template.md` | Template for new providers | Adding any new data provider |
 
