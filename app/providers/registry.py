@@ -36,12 +36,32 @@ class ProviderRegistry:
         self._initialize_providers()
 
     def _initialize_providers(self):
-        # In a real app, we might lazily load these or load based on config
-        self._providers["ibkr"] = IBKRProvider()
-        self._providers["lseg"] = LSEGProvider()
-        self._providers["schwab"] = SchwabProvider()
-        self._providers["mock"] = MockNewsProvider()
-        self._providers["finnhub"] = FinnhubProvider()
+        # All potential providers
+        all_available = {
+            "ibkr": IBKRProvider,
+            "lseg": LSEGProvider,
+            "schwab": SchwabProvider,
+            "mock": MockNewsProvider,
+            "finnhub": FinnhubProvider,
+        }
+
+        # Parse enabled providers from config
+        enabled_str = settings.ENABLED_PROVIDERS.strip()
+        if enabled_str:
+            enabled_list = [p.strip().lower() for p in enabled_str.split(",")]
+            # Filter to only requested and valid names
+            to_load = {name: cls for name, cls in all_available.items() if name in enabled_list}
+            logger.info(f"Filtered provider loading: {list(to_load.keys())}")
+        else:
+            to_load = all_available
+
+        for name, cls in to_load.items():
+            try:
+                self._providers[name] = cls()
+            except ImportError as e:
+                logger.warning(f"Provider '{name}' not available: {e}")
+            except Exception as e:
+                logger.error(f"Failed to initialize provider '{name}': {e}")
 
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
         name = name or settings.DEFAULT_PRICE_PROVIDER

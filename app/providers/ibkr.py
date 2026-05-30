@@ -146,6 +146,13 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         # Track if Level 1 subscription error occurred (for strict failure)
         self._level1_subscription_error = False
 
+    async def close(self):
+        """Gracefully disconnect from IBKR."""
+        if self.ib.isConnected():
+            logger.info("Disconnecting from IBKR...")
+            self.ib.disconnect()
+            self._connected = False
+
     def _is_valid(self, val) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
 

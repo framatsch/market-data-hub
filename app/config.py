@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "Market Data Hub"
     APP_ENV: Literal["dev", "test", "prod"] = "dev"
     LOG_LEVEL: str = "INFO"
+    
+    # Enabled Providers (comma-separated list, empty = all)
+    ENABLED_PROVIDERS: str = ""
 
     # Provider Defaults
     DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg, schwab

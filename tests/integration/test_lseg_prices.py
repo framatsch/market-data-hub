@@ -131,7 +131,7 @@ class TestGetHistoricalPrices:
         assert bar.low is not None
         assert bar.close is not None
         assert bar.volume is not None
-        assert bar.timestamp is not None
+        assert bar.start is not None
 
         # Verify OHLC relationship
         assert bar.high >= bar.low

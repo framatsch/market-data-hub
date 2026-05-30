@@ -110,6 +110,9 @@ async def mcp_messages(
 
     try:
         result = await _dispatch(method, params)
+        if rpc_id is None:
+            # Notification, no response needed
+            return Response(status_code=202)
         response_payload: dict = {"jsonrpc": "2.0", "id": rpc_id, "result": result}
     except AppError as exc:
         logger.warning("MCP AppError in method=%s: %s", method, exc.message)
@@ -140,8 +143,26 @@ async def mcp_messages(
 # Dispatch
 # ---------------------------------------------------------------------------
 
-async def _dispatch(method: str, params: dict) -> dict:
+async def _dispatch(method: str, params: dict) -> dict | None:
     """Route an MCP JSON-RPC call to the appropriate handler."""
+    if method == "initialize":
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+                "tools": {}
+            },
+            "serverInfo": {
+                "name": "market-data-hub",
+                "version": "1.0.0"
+            }
+        }
+
+    if method == "notifications/initialized":
+        return None
+
+    if method == "ping":
+        return {}
+
     if method == "tools/list":
         return {"tools": TOOL_REGISTRY}
 

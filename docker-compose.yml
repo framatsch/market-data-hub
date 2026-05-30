@@ -5,8 +5,7 @@ services:
       dockerfile: Dockerfile
     image: market-data-hub:latest
     ports:
-      - "8000:8000"
-      - "8001:8001"
+      - "9000:8000"
     environment:
       IBKR_HOST: ${IBKR_HOST:-localhost}
       IBKR_PORT: ${IBKR_PORT:-4002}
@@ -18,6 +17,8 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      ENABLED_PROVIDERS: ${ENABLED_PROVIDERS:-}
     # command is inherited from Dockerfile (uv run python -m app.main)
     healthcheck:
       test: [

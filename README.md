@@ -288,6 +288,8 @@ Connect an MCP client to `http://localhost:8000/mcp/sse`.
 
 Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`.
 
+For more details on connecting clients and using the tools, see the [MCP Guide](doc/mcp-guide.md).
+
 ## Architecture
 
 This service implements the **Aggregator Pattern**:

@@ -39,20 +39,54 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
-    logger.info(f"Starting {settings.APP_NAME} in {settings.APP_ENV} mode")
-    if settings.MCP_ENABLED:
-        logger.info("MCP enabled — endpoints available at /mcp/sse and /mcp/messages")
-    yield
-    logger.info(f"Shutting down {settings.APP_NAME}")
     from app.providers.registry import registry
+    
+    # --- STARTUP PROTOCOL OVERVIEW ---
+    active_providers = list(registry._providers.keys())
+    mcp_status = "ENABLED ✅" if settings.MCP_ENABLED else "DISABLED ❌"
+    
+    banner = f"""
+{"=" * 60}
+{settings.APP_NAME} - STARTUP PROTOCOL
+{"-" * 60}
+Environment : {settings.APP_ENV}
+MCP Status  : {mcp_status}
+{"MCP Path    : /mcp/sse, /mcp/messages" if settings.MCP_ENABLED else ""}
+{"-" * 60}
+ACTIVE PROVIDERS:
+"""
+    for p in ["ibkr", "lseg", "schwab", "finnhub"]:
+        status = "✅ Active" if p in active_providers else "❌ Unavailable"
+        banner += f"  - {p.upper():<8}: {status}\n"
+    
+    banner += f"{'-' * 60}\nService is ready to accept requests\n{'=' * 60}"
+    
+    # Force print to stdout to ensure it shows in Docker logs immediately
+    print(banner, flush=True)
+    logger.info("Startup protocol displayed.")
+    
+    yield
+    
+    logger.info(f"Shutting down {settings.APP_NAME}")
     await registry.shutdown()
 
 
+from fastapi.middleware.cors import CORSMiddleware
+...
 app = FastAPI(
     title=settings.APP_NAME,
     description="Real-time market data aggregation from IBKR, LSEG, and Schwab",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# Enable CORS for MCP Inspector and other clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify actual origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # REST routers
