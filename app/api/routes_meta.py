@@ -15,9 +15,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from fastapi import APIRouter
-from app.models.common import HealthResponse, ResponseEnvelope
-from app.providers.registry import registry
+from typing import Optional
+from fastapi import APIRouter, Query
+from app.models.common import HealthResponse, ResponseEnvelope, MarketStatus
+from app.config import settings
+from app.dependencies import PriceServiceDep
+from app.providers.registry import get_registry
 
 router = APIRouter(tags=["Meta"])
 start_time = datetime.now()
@@ -28,31 +31,41 @@ async def health_check():
     uptime = (datetime.now() - start_time).total_seconds()
     return HealthResponse(status="OK", uptime_seconds=uptime)
 
+@router.get("/market-status", response_model=ResponseEnvelope[MarketStatus])
+async def get_market_status(
+    service: PriceServiceDep,
+    provider: Optional[str] = Query(None, description="Data provider (e.g., polygon, ibkr)")
+):
+    """Returns current market status."""
+    status = await service.get_market_status(provider_name=provider)
+    return ResponseEnvelope(data=status)
+
 @router.get("/providers", response_model=ResponseEnvelope[dict])
 async def list_providers():
     """Lists available providers and defaults.
 
     Available Providers:
-    - price: "ibkr" (primary), "lseg" (secondary), "schwab" (historical + quotes)
-    - company: "lseg" (primary), "ibkr" (basic lookup only)
-    - options: "ibkr" (primary), "lseg" (secondary)
-    - news: "finnhub" (primary, 60 calls/min), "lseg" (secondary), "ibkr" (basic), "mock" (testing)
+    - price: "ibkr", "lseg", "polygon"
+    - company: "finnhub", "lseg", "ibkr", "polygon"
+    - options: "ibkr", "lseg", "polygon"
+    - news: "finnhub", "lseg", "ibkr", "mock"
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     Note: Mock provider provides test data for development and testing.
-    Note: Finnhub provides real-time news with sentiment analysis. Free tier: 60 calls/min.
+    Note: Finnhub provides real-time news with sentiment analysis.
     """
+    reg = get_registry()
     return ResponseEnvelope(data={
         "defaults": {
-            "price": registry.default_price_provider,
-            "company": registry.default_company_provider,
-            "options": registry.default_options_provider,
-            "news": registry.default_news_provider,
+            "price": reg.default_price_provider,
+            "company": reg.default_company_provider,
+            "options": reg.default_options_provider,
+            "news": reg.default_news_provider,
         },
         "available": {
-            "price": ["ibkr", "lseg", "schwab"],
-            "company": ["lseg", "ibkr"],
-            "options": ["ibkr", "lseg"],
+            "price": ["ibkr", "lseg", "polygon", "prixe"],
+            "company": ["finnhub", "lseg", "ibkr", "polygon"],
+            "options": ["ibkr", "lseg", "polygon"],
             "news": ["finnhub", "lseg", "ibkr", "mock"]
         }
     })

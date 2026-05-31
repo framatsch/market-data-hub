@@ -514,10 +514,16 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             self._get_session()
             self._throttle()
 
+            # Format dates for LSEG (YYYY-MM-DD for daily, full ISO for intraday)
+            # Summaries Definition supports start and end strings
+            start_str = start.strftime("%Y-%m-%d") if interval == "1d" else start.isoformat()
+            end_str = end.strftime("%Y-%m-%d") if interval == "1d" else end.isoformat()
+
             response = historical_pricing.summaries.Definition(
                 universe=ric,
                 interval=refinitiv_interval,
-                count=count
+                start=start_str,
+                end=end_str
             ).get_data()
 
             if response.data.df is None or response.data.df.empty:

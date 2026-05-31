@@ -97,6 +97,7 @@ async def get_option_quote(
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
     symbol = symbol.upper()
+    option_id = option_id.upper()
     provider = provider.lower() if provider else None
     quote = await service.get_option_quote(symbol, option_id, provider, market_data_type=market_data_type)
 

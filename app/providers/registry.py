@@ -22,9 +22,10 @@ from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
 from app.providers.lseg import LSEGProvider
-from app.providers.schwab import SchwabProvider
 from app.providers.mock_news import MockNewsProvider
 from app.providers.finnhub import FinnhubProvider
+from app.providers.polygon import PolygonProvider
+from app.providers.prixe import PrixeProvider
 from app.utils.errors import InvalidProviderError
 
 logger = logging.getLogger(__name__)
@@ -62,10 +63,11 @@ class ProviderRegistry:
         all_available = {
             "ibkr": IBKRProvider,
             "lseg": LSEGProvider,
-            "schwab": SchwabProvider,
             "mock": MockNewsProvider,
             "finnhub": FinnhubProvider,
-        }
+            "polygon": PolygonProvider,
+            "prixe": PrixeProvider,
+            }
 
         # Parse enabled providers from config
         enabled_str = settings.ENABLED_PROVIDERS.strip()

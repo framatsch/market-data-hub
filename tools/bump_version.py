@@ -118,8 +118,8 @@ def main():
             version += ".dev0"
 
     # Files to update
-    json_files = ["package.json", "frontend/package.json"]
-    toml_files = ["backend/pyproject.toml"]
+    json_files = []
+    toml_files = ["pyproject.toml"]
 
     updated = []
     for f in json_files:

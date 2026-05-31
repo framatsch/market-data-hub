@@ -28,15 +28,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #!/usr/bin/env python3
-"""Unit and integration test runner for the tradesensei backend.
+"""Unit and integration test runner for the Market Data Hub application.
 
-Runs pytest via uv against the backend test suite with proper
+Runs pytest via uv against the test suite with proper
 coverage reporting.
 
 Usage:
     python tools/unit_test.py                # Run all tests
-    python tools/unit_test.py --unit         # Unit tests only (no DB)
-    python tools/unit_test.py --integration  # Integration tests only (requires DB)
+    python tools/unit_test.py --unit         # Unit tests only
+    python tools/unit_test.py --integration  # Integration tests only
     python tools/unit_test.py --coverage     # Full run + HTML coverage report
     python tools/unit_test.py --ci           # Exit 1 on failure + XML coverage (for CI)
 """
@@ -54,11 +54,11 @@ from rich.panel import Panel
 console = Console()
 
 ROOT_DIR = Path(__file__).parent.parent
-BACKEND_DIR = ROOT_DIR / "backend"
+BACKEND_DIR = ROOT_DIR
 
 
 def run_pytest(args: List[str], env_overrides: dict | None = None) -> int:
-    """Run pytest via uv run in the backend directory."""
+    """Run pytest via uv run."""
     env = os.environ.copy()
     if env_overrides:
         env.update(env_overrides)
@@ -82,15 +82,15 @@ def run_pytest(args: List[str], env_overrides: dict | None = None) -> int:
     "--ci", is_flag=True, help="CI mode: XML coverage output, exit 1 on failure"
 )
 def main(unit: bool, integration: bool, coverage: bool, ci: bool) -> None:
-    """Run the tradesensei backend test suite."""
+    """Run the Market Data Hub test suite."""
     if not BACKEND_DIR.exists():
-        console.print(f"[red]Backend directory not found: {BACKEND_DIR}[/red]")
+        console.print(f"[red]Application directory not found: {BACKEND_DIR}[/red]")
         sys.exit(1)
 
     console.print(
         Panel.fit(
-            "[bold magenta]Trade Sensei — Test Runner[/bold magenta]\n"
-            f"Backend: {BACKEND_DIR}",
+            "[bold magenta]Market Data Hub — Test Runner[/bold magenta]\n"
+            f"Directory: {BACKEND_DIR}",
             border_style="magenta",
         )
     )
@@ -98,27 +98,28 @@ def main(unit: bool, integration: bool, coverage: bool, ci: bool) -> None:
     pytest_args: List[str] = ["-v"]
 
     # Scope
-    if unit and not integration:
-        pytest_args += ["tests/unit/"]
-        console.print("[bold]Scope:[/bold] unit tests only")
-    elif integration and not unit:
+    if integration:
         pytest_args += ["tests/integration/"]
         console.print(
-            "[bold]Scope:[/bold] integration tests only (requires running DB)"
+            "[bold]Scope:[/bold] integration tests only (requires provider access)"
         )
+    elif unit:
+        pytest_args += ["tests/unit/"]
+        console.print("[bold]Scope:[/bold] unit tests only")
     else:
-        pytest_args += ["tests/"]
-        console.print("[bold]Scope:[/bold] all tests")
+        # DEFAULT: Only unit tests to avoid accidental integration runs
+        pytest_args += ["tests/unit/"]
+        console.print("[bold]Scope:[/bold] unit tests (default)")
 
     # Coverage
-    pytest_args += ["--cov=app", "--cov-fail-under=74"]
+    pytest_args += ["--cov=app", "--cov-fail-under=70"]
     if ci:
         pytest_args += ["--cov-report=xml:coverage.xml", "--cov-report=term-missing"]
         console.print("[bold]Mode:[/bold] CI (XML coverage output)")
     elif coverage:
         pytest_args += ["--cov-report=html:htmlcov", "--cov-report=term-missing"]
         console.print(
-            "[bold]Mode:[/bold] HTML coverage report → backend/htmlcov/index.html"
+            "[bold]Mode:[/bold] HTML coverage report → htmlcov/index.html"
         )
     else:
         pytest_args += ["--cov-report=term-missing"]

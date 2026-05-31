@@ -39,7 +39,7 @@ def to_csv(data: Any, filename: str = "export.csv") -> tuple[str, bytes]:
     if not isinstance(data, list):
         data = [data]
 
-    if not data:
+    if not data or data[0] is None:
         # Return empty CSV with header if data is empty
         output.write("")
         return ("text/csv", output.getvalue().encode())

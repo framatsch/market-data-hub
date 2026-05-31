@@ -206,6 +206,8 @@ async def _tool_get_last_price(args: dict) -> dict:
     symbol = args["symbol"].upper()
     sec_type = args.get("sec_type", "stock")
     quote = await _price_service().get_latest_price(symbol, sec_type=sec_type)
+    if not quote:
+        return _text_content(f"No price data found for {symbol} ({sec_type})")
     return _text_content(quote.model_dump())
 
 
@@ -220,6 +222,8 @@ async def _tool_get_historical_prices(args: dict) -> dict:
     if "end_date" in args:
         end = datetime.fromisoformat(args["end_date"])
     bars = await _price_service().get_historical_prices(symbol, interval, start, end, sec_type=sec_type)
+    if not bars:
+        return _text_content(f"No historical data found for {symbol} ({sec_type})")
     return _text_content([b.model_dump() for b in bars])
 
 
@@ -233,7 +237,7 @@ async def _tool_get_option_chain(args: dict) -> dict:
 
 async def _tool_get_option_quote(args: dict) -> dict:
     symbol = args["symbol"].upper()
-    option_id = args["option_id"]
+    option_id = args["option_id"].upper()
     quote = await _options_service().get_option_quote(symbol, option_id)
     return _text_content(quote.model_dump())
 
@@ -263,6 +267,12 @@ async def _tool_get_company_news(args: dict) -> dict:
     provider = registry.get_news_provider()
     articles = await provider.get_company_news(symbol, from_date, to_date, limit=limit)
     return _text_content([a.model_dump() for a in articles])
+
+
+async def _tool_get_market_status(args: dict) -> dict:
+    provider = args.get("provider")
+    status = await _price_service().get_market_status(provider_name=provider)
+    return _text_content(status.model_dump())
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +400,19 @@ TOOL_REGISTRY: list[dict] = [
             },
         },
     },
+    {
+        "name": "get_market_status",
+        "description": "Get the current market status (open/closed/extended hours).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider (e.g., polygon, ibkr)",
+                },
+            },
+        },
+    },
 ]
 
 TOOL_HANDLERS: Dict[str, Any] = {
@@ -400,4 +423,5 @@ TOOL_HANDLERS: Dict[str, Any] = {
     "get_company_profile": _tool_get_company_profile,
     "search_companies": _tool_search_companies,
     "get_company_news": _tool_get_company_news,
+    "get_market_status": _tool_get_market_status,
 }

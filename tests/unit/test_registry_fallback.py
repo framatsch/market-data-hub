@@ -1,5 +1,6 @@
 import logging
 import pytest
+from unittest.mock import MagicMock, AsyncMock
 
 from app.config import settings
 from app.providers.registry import ProviderRegistry
@@ -91,3 +92,46 @@ class TestProviderFallback:
         provider = reg.get_news_provider("finnhub")
         from app.providers.finnhub import FinnhubProvider
         assert isinstance(provider, FinnhubProvider)
+
+    def test_get_provider_invalid_type(self):
+        from app.utils.errors import InvalidProviderError
+        from app.dependencies import get_provider
+        with pytest.raises(InvalidProviderError):
+            get_provider("invalid_type", "ibkr")
+
+    def test_get_price_provider_invalid_explicit(self):
+        from app.utils.errors import InvalidProviderError
+        reg = ProviderRegistry()
+        with pytest.raises(InvalidProviderError):
+            reg.get_price_provider("non_existent")
+
+    def test_get_company_provider_invalid_explicit(self):
+        from app.utils.errors import InvalidProviderError
+        reg = ProviderRegistry()
+        with pytest.raises(InvalidProviderError):
+            reg.get_company_provider("non_existent")
+
+    def test_get_options_provider_invalid_explicit(self):
+        from app.utils.errors import InvalidProviderError
+        reg = ProviderRegistry()
+        with pytest.raises(InvalidProviderError):
+            reg.get_options_provider("non_existent")
+
+    def test_get_news_provider_invalid_explicit(self):
+        from app.utils.errors import InvalidProviderError
+        reg = ProviderRegistry()
+        with pytest.raises(InvalidProviderError):
+            reg.get_news_provider("non_existent")
+
+    @pytest.mark.asyncio
+    async def test_registry_shutdown_error(self):
+        reg = ProviderRegistry()
+        mock_provider = MagicMock()
+        mock_provider.close = AsyncMock(side_effect=Exception("Shutdown fail"))
+        reg._providers["test"] = mock_provider
+        
+        # Should not raise
+        await reg.shutdown()
+
+
+

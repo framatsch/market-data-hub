@@ -17,10 +17,10 @@
 from typing import List, Optional
 from datetime import date, timedelta
 import io
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
 
-from app.dependencies import CompanyServiceDep, get_news_provider
+from app.dependencies import CompanyServiceDep, get_news_provider, NewsProviderDep
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import ResponseEnvelope
 from app.models.news import NewsResponse, NewsMetadata
@@ -55,6 +55,7 @@ async def get_company_profile(
 @router.get("/{symbol}/news", response_model=NewsResponse)
 async def get_company_news(
     symbol: str,
+    news_provider: NewsProviderDep,
     provider: str = Query("lseg", description="Data provider (lseg, ibkr)"),
     days: Optional[int] = Query(None, description="Last N days (overrides from/to dates)"),
     from_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -98,10 +99,7 @@ async def get_company_news(
         to_date_calc = date.today()
         from_date_calc = to_date_calc - timedelta(days=30)
 
-    # 2. Get provider instance (raises HTTPException if invalid)
-    news_provider = get_news_provider(provider)
-
-    # 3. Fetch news articles
+    # 2. Fetch news articles
     articles = await news_provider.get_company_news(
         symbol=symbol,
         from_date=from_date_calc,

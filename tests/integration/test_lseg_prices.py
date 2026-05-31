@@ -156,13 +156,15 @@ class TestGetHistoricalPrices:
     @pytest.mark.asyncio
     async def test_bars_in_date_range(self, lseg_provider):
         """Test returned bars are within requested date range."""
-        end = datetime.now()
+        from datetime import timezone
+        end = datetime.now(timezone.utc)
         start = end - timedelta(days=10)
 
         bars = await lseg_provider.get_historical_prices("AAPL", "1d", start, end)
 
         for bar in bars:
-            assert start <= bar.timestamp <= end
+            # Note: bar.start is used in the model
+            assert start <= bar.start <= end
 
     @pytest.mark.asyncio
     async def test_different_intervals(self, lseg_provider):

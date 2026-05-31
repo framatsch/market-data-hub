@@ -15,6 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from typing import Any, Dict, Optional
+
+import httpx
 from pydantic import BaseModel
 
 class AppError(Exception):
@@ -60,3 +62,39 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+def map_httpx_http_error(
+    *,
+    provider: str,
+    error: httpx.HTTPStatusError,
+    entity: str,
+    identifier: str,
+) -> AppError:
+    """Map HTTP status errors from providers to internal AppError types."""
+    status_code = error.response.status_code
+    details = {
+        "provider": provider,
+        "status_code": status_code,
+    }
+
+    response_text = error.response.text
+    if response_text:
+        details["response"] = response_text[:500]
+
+    if status_code == 404:
+        return DataNotFoundError(entity, identifier, details=details)
+    if status_code in (401, 403):
+        return ProviderNotAvailableError(provider, details=details)
+    if status_code == 429:
+        return ProviderTimeoutError(provider, details=details)
+    if status_code >= 500:
+        return ProviderConnectionError(
+            f"Provider '{provider}' returned server error {status_code}.",
+            details=details,
+        )
+
+    return ProviderError(
+        f"Provider '{provider}' returned HTTP {status_code}.",
+        details=details,
+    )

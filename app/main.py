@@ -55,7 +55,7 @@ MCP Status  : {mcp_status}
 {"-" * 60}
 ACTIVE PROVIDERS:
 """
-    for p in ["ibkr", "lseg", "schwab", "finnhub"]:
+    for p in ["ibkr", "lseg", "finnhub", "polygon", "prixe"]:
         status = "✅ Active" if p in active_providers else "❌ Unavailable"
         banner += f"  - {p.upper():<8}: {status}\n"
     
@@ -75,7 +75,7 @@ from fastapi.middleware.cors import CORSMiddleware
 ...
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Real-time market data aggregation from IBKR, LSEG, and Schwab",
+    description="Real-time market data aggregation from IBKR, LSEG, and Finnhub",
     version="1.0.0",
     lifespan=lifespan
 )

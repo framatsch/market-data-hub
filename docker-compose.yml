@@ -6,17 +6,23 @@ services:
     image: market-data-hub:latest
     ports:
       - "9000:8000"
+    env_file:
+      - .env
     environment:
-      IBKR_HOST: ${IBKR_HOST:-localhost}
+      IBKR_HOST: ${IBKR_HOST:-host.docker.internal}
       IBKR_PORT: ${IBKR_PORT:-4002}
       IBKR_CLIENT_ID: ${IBKR_CLIENT_ID:-815}
       IBKR_MARKET_DATA_TYPE: ${IBKR_MARKET_DATA_TYPE:-2}
       LSEG_APP_KEY: ${LSEG_APP_KEY}
       LSEG_USERNAME: ${LSEG_USERNAME}
       LSEG_PASSWORD: ${LSEG_PASSWORD}
+      POLYGON_API_KEY: ${POLYGON_API_KEY}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
+      DEFAULT_COMPANY_PROVIDER: ${DEFAULT_COMPANY_PROVIDER:-finnhub}
+      DEFAULT_NEWS_PROVIDER: ${DEFAULT_NEWS_PROVIDER:-finnhub}
       MCP_ENABLED: ${MCP_ENABLED:-true}
       ENABLED_PROVIDERS: ${ENABLED_PROVIDERS:-}
     # command is inherited from Dockerfile (uv run python -m app.main)

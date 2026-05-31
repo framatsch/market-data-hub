@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from app.models.price import PriceBar, PriceQuote
+from app.models.common import MarketStatus
 from app.providers.registry import get_registry
 
 class PriceService:
@@ -39,5 +40,9 @@ class PriceService:
     ) -> List[PriceBar]:
         provider = self.registry.get_price_provider(provider_name)
         return await provider.get_historical_prices(symbol, interval, start, end, sec_type)
+
+    async def get_market_status(self, provider_name: Optional[str] = None) -> MarketStatus:
+        provider = self.registry.get_price_provider(provider_name)
+        return await provider.get_market_status()
 
 price_service = PriceService()

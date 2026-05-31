@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     ENABLED_PROVIDERS: str = ""
 
     # Provider Defaults
-    DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg, schwab
+    DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg
     DEFAULT_COMPANY_PROVIDER: str = "finnhub"
     DEFAULT_OPTIONS_PROVIDER: str = "ibkr"  # LSEG does NOT support options (missing trapi.data.pricing.read scope)
     DEFAULT_NEWS_PROVIDER: str = "finnhub"
@@ -66,16 +66,13 @@ class Settings(BaseSettings):
     FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
     FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
 
-    # Schwab Provider
-    # Credentials: set via environment variables or .env file.
-    # For Kubernetes: mount as envFrom secretRef (see k8s/ or docs/schwab-setup.md).
-    SCHWAB_API_KEY: SecretStr = SecretStr("")       # Schwab Individual Trader API key
-    SCHWAB_APP_SECRET: SecretStr = SecretStr("")    # Schwab app secret (OAuth2 client secret)
-    SCHWAB_CALLBACK_URL: str = "https://127.0.0.1:8182"  # OAuth2 redirect URI (for token generation only)
-    SCHWAB_TOKEN_PATH: str = "./schwab_token.json"  # Persistent token file; avoid /tmp in containers
-    SCHWAB_TIMEOUT_SECONDS: int = 30               # Per-request timeout (applied via asyncio.wait_for)
-    SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min
-    SCHWAB_ASYNCIO: bool = True                    # True = async httpx client from schwab-py
+    # Polygon.io Provider
+    POLYGON_API_KEY: SecretStr = SecretStr("stub-key")
+    POLYGON_BASE_URL: str = "https://api.polygon.io"
+
+    # Prixe Provider
+    PRIXE_API_KEY: SecretStr = SecretStr("")
+    PRIXE_BASE_URL: str = "https://api.prixe.io"
 
     # MCP Integration
     MCP_ENABLED: bool = False  # Set to True to expose MCP endpoints at /mcp/sse and /mcp/messages

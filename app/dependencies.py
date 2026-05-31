@@ -43,6 +43,19 @@ CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 
 
+def get_news_provider_dep(provider: str = "lseg") -> BaseNewsProvider:
+    """Dependency version of get_news_provider."""
+    try:
+        return get_provider("news", provider)
+    except InvalidProviderError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid news provider: {provider}."
+        )
+
+NewsProviderDep = Annotated[BaseNewsProvider, Depends(get_news_provider_dep)]
+
+
 def get_news_provider(provider: str = "finnhub") -> BaseNewsProvider:
     """
     Get news provider instance.

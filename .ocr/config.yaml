@@ -11,7 +11,7 @@
 context: |
   Tech stack: Python, FastAPI, Pydantic, uv, pytest
   Architecture: HTTP API (:8000) + optional MCP SSE (:8000/mcp) — single port.
-    Provider/gateway pattern: registry → ibkr | lseg | schwab | finnhub providers.
+    Provider/gateway pattern: registry → ibkr | lseg | finnhub providers.
     All financial values as Decimal. AppError hierarchy maps to HTTP status codes.
   Performance priority: low-latency market data delivery — every hot path matters.
     Providers may be sync (LSEG/refinitiv-data) or async (IBKR/ib_async, Finnhub/httpx).

@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from datetime import datetime
 from typing import Generic, TypeVar, Optional
 from pydantic import BaseModel, ConfigDict
 
@@ -37,3 +38,9 @@ class ResponseEnvelope(BaseModel, Generic[T]):
 class HealthResponse(BaseModel):
     status: str
     uptime_seconds: float
+
+class MarketStatus(BaseModel):
+    market: str  # e.g. "open", "closed", "extended-hours"
+    exchanges: Optional[dict[str, str]] = None
+    server_time: datetime
+    provider: str

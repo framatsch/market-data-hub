@@ -23,6 +23,7 @@ from app.models.price import PriceBar, PriceQuote
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.options import OptionChain, OptionQuote
 from app.models.news import NewsArticle
+from app.models.common import MarketStatus
 
 class BasePriceProvider(ABC):
     @abstractmethod
@@ -34,6 +35,10 @@ class BasePriceProvider(ABC):
     async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
         """Fetch latest price quote."""
         pass
+
+    async def get_market_status(self) -> MarketStatus:
+        """Fetch current market status."""
+        raise NotImplementedError("Market status not implemented for this provider")
 
 class BaseCompanyProvider(ABC):
     @abstractmethod

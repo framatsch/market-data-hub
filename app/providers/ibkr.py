@@ -20,7 +20,7 @@ from decimal import Decimal
 from typing import List, Optional, Literal
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, Option, Contract, Index
+from ib_async import IB, Stock, Option, Contract, Index, Future
 from ib_async.objects import BarData
 
 from app.config import settings
@@ -788,7 +788,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             if not contract.conId:
                  # Try searching by parsing?
                  # Maybe option_id is more descriptive?
-                 raise DataNotFoundError(f"Could not resolve option contract {option_id}")
+                 raise DataNotFoundError("OptionContract", option_id)
 
             tickers = await self._get_tickers_snapshot([contract], skip_on_error=True)
             ticker = tickers[0] if tickers else None
@@ -893,6 +893,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             # Common US indices trade on CBOE
             exchange = self._get_index_exchange(symbol)
             return Index(symbol, exchange)
+        elif sec_type.lower() == "future":
+            return Future(symbol, exchange="CME")
         else:
             # Stock contract - default behavior
             return Stock(symbol, 'SMART', 'USD')

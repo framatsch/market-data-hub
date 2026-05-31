@@ -7,10 +7,10 @@
 </div>
 
 
-Market Data Hub (MDH) is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Schwab, and Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
+Market Data Hub (MDH) is a focused, production-ready aggregation service for market data. It unifies multiple providers (IBKR, LSEG/Refinitiv, Polygon, Prixe, and Finnhub for news) behind a single, consistent REST/WebSocket API and an MCP server, so your apps can query prices, options, companies, and news without coupling to any one vendor.
 
 **What It Does**
-- Aggregates real-time and delayed market data from IBKR and LSEG
+- Aggregates real-time and delayed market data from IBKR, LSEG, Polygon, and Prixe
 - Provides options chains and quotes (IBKR), equity prices (IBKR and LSEG), company profiles, and news
 - Exposes a clean, provider-agnostic API surface with strong Pydantic models
 - Runs reliably in Docker and Kubernetes; supports managed IBKR Gateway
@@ -29,7 +29,8 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 **Providers & Data Types**
 - IBKR: real-time equities and options; supports `market_data_type` (1=Live/Level 2, 2=Frozen, 3=Delayed)
 - LSEG: equity prices via daily summaries; ignores `market_data_type`; not suitable for options Greeks
-- Schwab: equity quotes and historical OHLCV (1m–1w granularity, back to 1985); requires OAuth2 token; no extra data subscription beyond a standard brokerage account
+- Polygon: equity quotes and historical OHLCV (1m-1w granularity)
+- Prixe: latest stock price via `POST /api/last_sold` (Bearer token)
 - Finnhub: supplemental news and company data for fallback scenarios
 
 **Behavior Highlights**
@@ -38,7 +39,7 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 - LSEG returns the latest daily summary and logs an informational message when `market_data_type` is provided (and ignored)
 
 **How It Works**
-- API Layer (FastAPI) → Service Layer → Provider Layer (IBKR/LSEG/Schwab/Finnhub)
+- API Layer (FastAPI) -> Service Layer -> Provider Layer (IBKR/LSEG/Polygon/Prixe/Finnhub)
 - Strong Pydantic models ensure type-safety (Decimal for prices, Optional fields for missing data)
 - Async-first with `ib_async` for IBKR; synchronous session management for LSEG SDK
 
@@ -47,6 +48,8 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
   - curl "http://localhost:8000/prices/IWM/last?provider=ibkr&market_data_type=3"
 - Last price (LSEG, daily summary):
   - curl "http://localhost:8000/prices/IWM/last?provider=lseg"
+- Last price (Prixe):
+  - curl "http://localhost:8000/prices/IWM/last?provider=prixe"
 - Option chain (IBKR only):
   - curl "http://localhost:8000/options/IWM/chain?expiry=2026-01-13&min_strike=227&max_strike=277&market_data_type=3"
 
@@ -110,9 +113,9 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 
 | Data Type | Primary Provider | Fallback | Reason |
 |-----------|-----------------|----------|--------|
-| **Stock Prices** | IBKR | LSEG, Schwab | IBKR provides real-time market data |
-| **Historical OHLCV** | Schwab | IBKR, LSEG | Schwab history back to 1985; no extra subscription needed |
-| **Options** | **IBKR ONLY** | - | LSEG and Schwab lack real-time options Greeks |
+| **Stock Prices** | IBKR | LSEG | IBKR provides real-time market data |
+| **Historical OHLCV** |  | IBKR, LSEG |  history back to 1985; no extra subscription needed |
+| **Options** | **IBKR ONLY** | - | LSEG and  lack real-time options Greeks |
 | **Company Data** | LSEG | Finnhub | LSEG has comprehensive fundamentals |
 | **News** | LSEG | Finnhub | LSEG provides institutional-grade news |
 
@@ -146,14 +149,16 @@ Configuration via environment variables (see `.env.example`):
 | `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
 | `APP_ENV` | `dev` | Environment: dev, test, prod |
 | `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
-| `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg, schwab |
-| `SCHWAB_API_KEY` | *(empty)* | Schwab app key — leave empty to disable provider |
-| `SCHWAB_APP_SECRET` | *(empty)* | Schwab app secret from developer portal |
+| `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg, polygon, prixe |
+| `PRIXE_API_KEY` | *(empty)* | Prixe API key (Bearer token) |
+| `PRIXE_BASE_URL` | `https://api.prixe.io` | Prixe API base URL |
+| `SCHWAB_API_KEY` | *(empty)* |  app key — leave empty to disable provider |
+| `SCHWAB_APP_SECRET` | *(empty)* |  app secret from developer portal |
 | `SCHWAB_CALLBACK_URL` | `https://127.0.0.1:8182` | Must match app config exactly (including trailing slash) |
-| `SCHWAB_TOKEN_PATH` | `/tmp/schwab_token.json` | Path to OAuth2 token file (managed by schwab-py) |
+| `SCHWAB_TOKEN_PATH` | `/tmp/_token.json` | Path to OAuth2 token file (managed by -py) |
 | `SCHWAB_TIMEOUT_SECONDS` | `30` | HTTP request timeout |
 | `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
-| `SCHWAB_ASYNCIO` | `true` | Create Schwab async client (`schwab-py` asyncio mode) |
+| `SCHWAB_ASYNCIO` | `true` | Create  async client (`-py` asyncio mode) |
 
 ### LSEG Credentials Setup
 
@@ -189,32 +194,32 @@ To access company news and data from Finnhub (fallback provider), obtain an API 
 
 See [doc/news-api-guide.md](doc/news-api-guide.md) for detailed news API usage and testing.
 
-### Schwab Credentials Setup
+###  Credentials Setup
 
-Schwab requires OAuth2 authentication via the [Schwab Developer Portal](https://developer.schwab.com/). The `schwab-py` library manages the token lifecycle automatically once set up.
+ requires OAuth2 authentication via the [ Developer Portal](https://developer..com/). The `-py` library manages the token lifecycle automatically once set up.
 
-#### 1. Create a Schwab developer app
+#### 1. Create a  developer app
 
-1. Sign in at [developer.schwab.com](https://developer.schwab.com/)
+1. Sign in at [developer..com](https://developer..com/)
 2. Create a new app under **Products → Trader API – Individual**
 3. Set the callback URL to `https://127.0.0.1:8182` (or another `https://127.0.0.1:<port>` URL)
 4. Note your **App Key** and **App Secret**
 
-> **App approval delay:** New and modified apps enter an `Approved - Pending` state and require manual review by Schwab. This typically takes a few days. Until the status shows **Ready for Use**, API calls will return `401` errors.
+> **App approval delay:** New and modified apps enter an `Approved - Pending` state and require manual review by . This typically takes a few days. Until the status shows **Ready for Use**, API calls will return `401` errors.
 
 #### 2. Generate the token (one-time per machine)
 
 Run the token generator on a machine with a browser:
 
 ```bash
-schwab-generate-token.py \
-  --token_file /path/to/schwab_token.json \
+-generate-token.py \
+  --token_file /path/to/_token.json \
   --api_key YOUR_APP_KEY \
   --app_secret YOUR_APP_SECRET \
   --callback_url https://127.0.0.1:8182
 ```
 
-A browser window will open. Log in with your Schwab brokerage account. After redirecting, the token file is written automatically.
+A browser window will open. Log in with your  brokerage account. After redirecting, the token file is written automatically.
 
 > Your browser will warn about an invalid/self-signed certificate on the callback URL — this is expected. Proceed anyway, but verify the address matches your callback URL.
 
@@ -224,16 +229,16 @@ A browser window will open. Log in with your Schwab brokerage account. After red
 SCHWAB_API_KEY=your-app-key-here
 SCHWAB_APP_SECRET=your-app-secret-here
 SCHWAB_CALLBACK_URL=https://127.0.0.1:8182
-SCHWAB_TOKEN_PATH=/path/to/schwab_token.json
+SCHWAB_TOKEN_PATH=/path/to/_token.json
 ```
 
 #### 4. Token rotation (every 7 days)
 
-Schwab refresh tokens expire after **7 days**. Re-run `schwab-generate-token.py` weekly before the token expires, or set a cron job:
+ refresh tokens expire after **7 days**. Re-run `-generate-token.py` weekly before the token expires, or set a cron job:
 
 ```bash
 # Example: regenerate token every Sunday at 08:00
-0 8 * * 0 schwab-generate-token.py --token_file /path/to/token.json --api_key $SCHWAB_API_KEY --app_secret $SCHWAB_APP_SECRET --callback_url https://127.0.0.1:8182
+0 8 * * 0 -generate-token.py --token_file /path/to/token.json --api_key $SCHWAB_API_KEY --app_secret $SCHWAB_APP_SECRET --callback_url https://127.0.0.1:8182
 ```
 
 #### 5. Containerized / headless deployments
@@ -241,10 +246,10 @@ Schwab refresh tokens expire after **7 days**. Re-run `schwab-generate-token.py`
 The login flow requires a browser. For servers:
 
 1. Generate the token on a local machine (step 2 above)
-2. Copy `schwab_token.json` to the server / mount it as a secret
+2. Copy `_token.json` to the server / mount it as a secret
 3. **Never share or commit the token file** — it grants full account access
 
-**Do not** create, edit, or copy-paste the JSON contents manually. The token file is managed exclusively by `schwab-py`.
+**Do not** create, edit, or copy-paste the JSON contents manually. The token file is managed exclusively by `-py`.
 
 #### Verify the setup
 
@@ -252,8 +257,8 @@ The login flow requires a browser. For servers:
 # Check provider is active (requires running server)
 curl http://localhost:8000/providers | python -m json.tool
 
-# Fetch historical daily prices via Schwab
-curl "http://localhost:8000/prices/history/AAPL?interval=1d&period=1y&provider=schwab"
+# Fetch historical daily prices via 
+curl "http://localhost:8000/prices/history/AAPL?interval=1d&period=1y&provider="
 ```
 
 ## Running Modes
@@ -295,7 +300,7 @@ For more details on connecting clients and using the tools, see the [MCP Guide](
 This service implements the **Aggregator Pattern**:
 - **API Layer**: Exposes unified REST and WebSocket endpoints.
 - **Service Layer**: Orchestrates data fetching and business logic.
-- **Provider Layer**: Abstracts external APIs (IBKR, LSEG, Schwab) via strict interfaces.
+- **Provider Layer**: Abstracts external APIs (IBKR, LSEG) via strict interfaces.
 
 ## API Examples
 

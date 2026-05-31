@@ -16,7 +16,6 @@ dependencies = [
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
     "refinitiv-data==1.6.2",
-    "schwab-py>=1.5.0",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +40,9 @@ override-dependencies = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests that hit external services or require networked dependencies",
+]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

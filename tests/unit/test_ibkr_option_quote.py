@@ -14,17 +14,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import asyncio
+import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
+from decimal import Decimal
+from datetime import datetime, date
+from app.providers.ibkr import IBKRProvider
 
-from app.providers.schwab import SchwabProvider
+@pytest.fixture
+def ibkr_provider():
+    with patch("app.providers.ibkr.IB") as mock_ib:
+        provider = IBKRProvider()
+        return provider, mock_ib.return_value
 
-
-async def main() -> None:
-    provider = SchwabProvider()
-    quote = await provider.get_last_price("AAPL")
-    print("Schwab connection successful")
-    print(quote.model_dump())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+def test_extract_greeks_none(ibkr_provider):
+    provider, _ = ibkr_provider
+    ticker = MagicMock()
+    ticker.modelGreeks = None
+    
+    greeks = provider._extract_greeks(ticker)
+    assert greeks["delta"] is None
+    assert greeks["implied_volatility"] is None

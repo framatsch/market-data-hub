@@ -28,7 +28,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #!/usr/bin/env python3
-"""Commit Helper — Generate and validate commits for the tradesensei project.
+"""Commit Helper — Generate and validate commits for the Market Data Hub project.
 
 Analyzes git diff to suggest appropriate commit categories, validates messages,
 and provides guided interactive commit creation.
@@ -45,7 +45,6 @@ Categories:
     infra    📦  Docker, K8s, CI/CD changes
     db       🗄️  Alembic migrations, model changes
     api      🔌  FastAPI endpoint or schema changes
-    frontend 🖥️  Next.js / React component changes
     test     🧪  Test additions or improvements
     docs     📝  Documentation, AGENTS.md, OpenAPI
     config   ⚙️  Environment, settings, pyproject.toml
@@ -71,9 +70,8 @@ CATEGORIES: Dict[str, Dict] = {
         "patterns": [
             "app/api/",
             "app/services/",
-            "app/schemas/",
-            "components/",
-            "app/(",
+            "app/providers/",
+            "app/models/",
         ],
         "description": "New feature implementation",
         "changelog": "Added",
@@ -92,33 +90,14 @@ CATEGORIES: Dict[str, Dict] = {
             "k8s/",
             ".github/workflows",
             "ci.yml",
-            "docker.yml",
         ],
         "description": "Docker, Kubernetes, or CI/CD",
         "changelog": "Changed",
     },
-    "db": {
-        "emoji": "🗄️",
-        "patterns": ["alembic/", "app/models/", "migrations/", "hypertable"],
-        "description": "Database model or migration",
-        "changelog": "Changed",
-    },
     "api": {
         "emoji": "🔌",
-        "patterns": ["app/api/", "app/schemas/", "app/repositories/", "app/services/"],
-        "description": "FastAPI endpoint or schema change",
-        "changelog": "Added",
-    },
-    "frontend": {
-        "emoji": "🖥️",
-        "patterns": [
-            "frontend/",
-            "components/",
-            "app/(dashboard)",
-            "hooks/",
-            "stores/",
-        ],
-        "description": "Next.js / React component",
+        "patterns": ["app/api/", "app/providers/", "app/services/"],
+        "description": "FastAPI endpoint or provider change",
         "changelog": "Added",
     },
     "test": {
@@ -129,7 +108,7 @@ CATEGORIES: Dict[str, Dict] = {
     },
     "docs": {
         "emoji": "📝",
-        "patterns": [".md", "AGENTS.md", "CHANGELOG", "docs/", "openapi", "docstring"],
+        "patterns": [".md", "AGENTS.md", "CHANGELOG", "doc/", "openapi", "docstring"],
         "description": "Documentation update",
         "changelog": "Changed",
     },
@@ -141,14 +120,13 @@ CATEGORIES: Dict[str, Dict] = {
             "config",
             "settings",
             "uv.lock",
-            "opencode.json",
         ],
         "description": "Configuration or dependency change",
         "changelog": "Changed",
     },
     "security": {
         "emoji": "🔒",
-        "patterns": ["auth", "jwt", "password", "secret", "permission", "token"],
+        "patterns": ["auth", "password", "secret", "permission", "token"],
         "description": "Security, auth, or permissions",
         "changelog": "Security",
     },
@@ -329,10 +307,10 @@ def commit_with_message(message: str, add_all: bool = False) -> bool:
 )
 @click.option("--add-all", is_flag=True, help="Run 'git add -A' before committing")
 def main(validate: bool, auto: bool, preview: bool, add_all: bool) -> None:
-    """Trade Sensei — Commit Helper."""
+    """Market Data Hub — Commit Helper."""
     console.print(
         Panel.fit(
-            "[bold cyan]Trade Sensei — Commit Helper[/bold cyan]\n"
+            "[bold cyan]Market Data Hub — Commit Helper[/bold cyan]\n"
             "Consistent commits following Keep a Changelog categories",
             border_style="cyan",
         )
