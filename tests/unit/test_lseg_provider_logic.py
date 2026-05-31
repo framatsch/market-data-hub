@@ -23,7 +23,7 @@ def lseg_provider():
     with patch("app.providers.lseg.REFINITIV_AVAILABLE", True):
         with patch("app.providers.lseg.rd"):
             provider = LSEGProvider()
-            return provider
+            yield provider
 
 def test_ticker_to_ric_cleanup(lseg_provider):
     mock_search = MagicMock()

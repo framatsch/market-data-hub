@@ -26,7 +26,7 @@ def lseg_provider():
     with patch("app.providers.lseg.REFINITIV_AVAILABLE", True):
         with patch("app.providers.lseg.rd"):
             provider = LSEGProvider()
-            return provider
+            yield provider
 
 def test_extract_bars(lseg_provider):
     # Mock historical data DataFrame

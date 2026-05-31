@@ -24,7 +24,7 @@ def lseg_provider():
     with patch("app.providers.lseg.REFINITIV_AVAILABLE", True):
         with patch("app.providers.lseg.rd"):
             provider = LSEGProvider()
-            return provider
+            yield provider
 
 def test_extract_company_profile(lseg_provider):
     # Mock response DataFrame

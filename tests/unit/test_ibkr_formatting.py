@@ -22,7 +22,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_format_option_id(ibkr_provider):
     # This might fail if _format_option_id is not implemented or named differently

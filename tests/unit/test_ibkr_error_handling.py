@@ -22,7 +22,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_on_ib_error_level1(ibkr_provider):
     # Set to Level 1

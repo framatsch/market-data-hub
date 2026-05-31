@@ -38,7 +38,7 @@ def lseg_provider(monkeypatch):
         # Mock RIC lookup
         provider._ticker_to_ric = MagicMock(return_value="AAPL.O")
 
-        return provider, mock_headlines
+        yield provider, mock_headlines
 
 @pytest.mark.asyncio
 async def test_get_company_news_lseg(lseg_provider):

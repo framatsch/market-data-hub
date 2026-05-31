@@ -24,7 +24,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_is_market_open_new_format(ibkr_provider):
     # Format: "20260122:0400-20260122:2000"

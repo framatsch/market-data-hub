@@ -23,7 +23,7 @@ from app.utils.errors import ProviderConnectionError
 def ibkr_provider():
     with patch("app.providers.ibkr.IB") as mock_ib:
         provider = IBKRProvider()
-        return provider, mock_ib.return_value
+        yield provider, mock_ib.return_value
 
 @pytest.mark.asyncio
 async def test_ensure_connection_success(ibkr_provider):

@@ -27,7 +27,7 @@ def lseg_provider():
                 mock_hp.Intervals.MINUTE = "PT1M"
                 mock_hp.Intervals.DAILY = "P1D"
                 provider = LSEGProvider()
-                return provider
+                yield provider
 
 def test_map_interval_all_lseg(lseg_provider):
     from app.providers.lseg import historical_pricing

@@ -30,7 +30,7 @@ def polygon_provider():
         mock_instance = mock_client.return_value
         mock_instance.get = AsyncMock()
         provider = PolygonProvider()
-        return provider
+        yield provider
 
 def test_format_ticker(polygon_provider):
     assert polygon_provider._format_ticker("AAPL", "stock") == "AAPL"

@@ -22,7 +22,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_map_interval_all(ibkr_provider):
     assert ibkr_provider._map_interval("1m") == "1 min"

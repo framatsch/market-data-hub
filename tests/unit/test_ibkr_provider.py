@@ -25,7 +25,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_ibkr_is_valid(ibkr_provider):
     assert ibkr_provider._is_valid(10.5) is True

@@ -24,7 +24,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB") as mock_ib:
         provider = IBKRProvider()
-        return provider, mock_ib.return_value
+        yield provider, mock_ib.return_value
 
 @pytest.mark.asyncio
 async def test_get_historical_prices_ibkr(ibkr_provider):

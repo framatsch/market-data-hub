@@ -22,7 +22,7 @@ from app.providers.ibkr import IBKRProvider
 def ibkr_provider():
     with patch("app.providers.ibkr.IB"):
         provider = IBKRProvider()
-        return provider
+        yield provider
 
 def test_ibkr_market_data_type_logic(ibkr_provider):
     ibkr_provider.market_data_type = 3

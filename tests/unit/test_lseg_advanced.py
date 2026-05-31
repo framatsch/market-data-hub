@@ -25,7 +25,7 @@ def lseg_provider():
     with patch("app.providers.lseg.REFINITIV_AVAILABLE", True):
         with patch("app.providers.lseg.rd"):
             provider = LSEGProvider()
-            return provider
+            yield provider
 
 def test_safe_decimal_strict_validation(lseg_provider):
     from app.config import settings
