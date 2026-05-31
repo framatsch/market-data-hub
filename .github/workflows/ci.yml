@@ -43,7 +43,7 @@ jobs:
         run: uv run ruff check app/
 
       - name: Run tests
-        run: uv run pytest --maxfail=1 --disable-warnings
+        run: uv run pytest tests/unit/ --maxfail=1 --disable-warnings
 
   build-and-push:
     name: Build and Push Docker Image

@@ -16,7 +16,7 @@
 
 import logging
 from datetime import datetime, date
-from typing import List, Optional, Dict
+from typing import List, Optional
 from decimal import Decimal
 
 import httpx

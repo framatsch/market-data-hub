@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
@@ -71,8 +72,7 @@ ACTIVE PROVIDERS:
     await registry.shutdown()
 
 
-from fastapi.middleware.cors import CORSMiddleware
-...
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="Real-time market data aggregation from IBKR, LSEG, and Finnhub",

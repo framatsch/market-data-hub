@@ -18,7 +18,6 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Query
 from app.models.common import HealthResponse, ResponseEnvelope, MarketStatus
-from app.config import settings
 from app.dependencies import PriceServiceDep
 from app.providers.registry import get_registry
 

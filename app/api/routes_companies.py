@@ -17,10 +17,10 @@
 from typing import List, Optional
 from datetime import date, timedelta
 import io
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
-from app.dependencies import CompanyServiceDep, get_news_provider, NewsProviderDep
+from app.dependencies import CompanyServiceDep, NewsProviderDep
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import ResponseEnvelope
 from app.models.news import NewsResponse, NewsMetadata
