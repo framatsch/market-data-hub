@@ -27,10 +27,10 @@ When `ADMIN_AUTH_ENABLED=true`, the backend SHALL validate Bearer JWTs by fetchi
 - **THEN** the system immediately refreshes the JWKS cache and retries validation once before returning 401
 
 ### Requirement: PKCE authorization code flow
-The backend SHALL expose `GET /api/admin/auth/url` to generate an OIDC authorization URL with PKCE (code_challenge_method=S256). It SHALL expose `POST /api/admin/auth/token` to exchange an authorization code for tokens, proxying to the OIDC provider's token endpoint.
+The backend SHALL expose `GET /api/admin/auth/url?code_challenge=<challenge>` to generate an OIDC authorization URL using the SPA-generated PKCE challenge (code_challenge_method=S256). It SHALL expose `POST /api/admin/auth/token` to exchange an authorization code plus SPA-held `code_verifier` for tokens, proxying to the OIDC provider's token endpoint.
 
 #### Scenario: Authorization URL generated
-- **WHEN** SPA calls `GET /api/admin/auth/url`
+- **WHEN** SPA generates a PKCE verifier/challenge pair and calls `GET /api/admin/auth/url?code_challenge=<challenge>`
 - **THEN** response contains `{"auth_url": "https://authentik.../authorize?client_id=...&code_challenge=...&..."}`
 
 #### Scenario: Token exchange succeeds

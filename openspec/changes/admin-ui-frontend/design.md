@@ -32,8 +32,10 @@ Handles `/admin/*` routes client-side. The catch-all route in FastAPI (`GET /adm
 ### D3: TanStack Query for server state
 Handles caching, background refetch, loading/error states for all API calls. Provider status auto-refreshes every 30 seconds via `refetchInterval`. Eliminates manual `useEffect`/fetch boilerplate.
 
-### D4: shadcn/ui + Tailwind CSS
-shadcn/ui generates component source files (no runtime package dependency). Tailwind handles styling. Together they produce a clean, maintainable UI without a heavyweight framework.
+### D4: Material UI theme and components
+The SPA uses Material UI (`@mui/material`) for layout, forms, navigation, cards, dialogs, status chips, and theme tokens. A custom MDH theme is defined in `admin/src/theme.ts` and provided via `ThemeProvider` and `CssBaseline` in `main.tsx`.
+
+Material UI is preferred here because the admin area is form-heavy (credentials, provider config, OAuth steps) and benefits from accessible, production-grade inputs, switches, tabs, accordions, alerts, and dialogs without custom component work.
 
 ### D5: Access token stored in sessionStorage
 Pragmatic trade-off for an admin tool. Not localStorage (persists across tabs indefinitely — worse security surface). Not memory-only (lost on page refresh, forces re-auth on every reload). sessionStorage is tab-scoped and cleared when the tab closes.
@@ -45,7 +47,7 @@ Pragmatic trade-off for an admin tool. Not localStorage (persists across tabs in
 
 - **`admin/dist/` not committed** → CI must run `npm ci && npm run build` before Docker build. The Dockerfile build stage handles this automatically. Local dev uses Vite dev server, not the built assets.
 - **PKCE code verifier in sessionStorage** → If the browser tab is closed between step 1 (auth URL) and step 2 (callback), the verifier is lost and auth fails. Mitigation: show a clear error on the callback page with a "Try again" button.
-- **TanStack Query cache** → stale provider status may show briefly after enable/disable. Mitigation: invalidate the providers query cache immediately on mutation success.
+- **TanStack Query cache** → stale provider status/config may show briefly after enable/disable or config update. Mitigation: invalidate both `providers` and `providerConfig:<name>` query caches immediately on mutation success.
 
 ## Migration Plan
 

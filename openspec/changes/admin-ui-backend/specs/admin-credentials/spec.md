@@ -1,46 +1,57 @@
 ## ADDED Requirements
 
-### Requirement: List credentials with masked values
-`GET /api/admin/credentials` SHALL return all known credential keys for all providers. Secret values SHALL be masked (show only last 4 chars or `***` if shorter). The response SHALL indicate whether each key is currently set.
+### Requirement: List credentials with masked metadata only
+`GET /api/admin/credentials` SHALL return all known credential slots for all providers. Secret values SHALL never be decrypted for the response. The response SHALL indicate whether each credential is configured and SHALL include `updated_at` metadata when available.
 
-#### Scenario: Credentials listed with masking
-- **WHEN** `GET /api/admin/credentials` is called and `FINNHUB_API_KEY=sk-abc123xyz`
-- **THEN** response includes `{"key": "FINNHUB_API_KEY", "provider": "finnhub", "set": true, "masked_value": "***xyz"}`
+#### Scenario: Configured credential listed without value
+- **WHEN** `GET /api/admin/credentials` is called and `finnhub.api_key` exists in SQLite
+- **THEN** response includes `{"provider": "finnhub", "credential_name": "api_key", "set": true, "masked_value": "configured", "updated_at": "..."}`
 
 #### Scenario: Unset credential shown
-- **WHEN** a credential key is empty or not set
-- **THEN** response includes `{"key": "SCHWAB_APP_SECRET", "provider": "schwab", "set": false, "masked_value": null}`
+- **WHEN** no row exists for `schwab.app_secret`
+- **THEN** response includes `{"provider": "schwab", "credential_name": "app_secret", "set": false, "masked_value": null, "updated_at": null}`
 
-### Requirement: Update credentials for a provider
-`PUT /api/admin/credentials/{provider}` SHALL accept a JSON object with credential key-value pairs for the specified provider, validate that the keys are known for that provider, and persist them via CredentialStore.
+#### Scenario: Plaintext never returned
+- **WHEN** `GET /api/admin/credentials` is called
+- **THEN** the response body contains no decrypted credential value, no ciphertext, no IV, and no auth tag
+
+### Requirement: Update credentials for a provider in encrypted SQLite
+`PUT /api/admin/credentials/{provider}` SHALL accept a JSON object with credential-name to plaintext-value pairs for the specified provider, validate that each credential name is known for that provider, and persist secrets via `KeyRepository.save(provider, credential_name, plaintext)` into encrypted SQLite `keys.db`.
 
 #### Scenario: Successfully update API key
-- **WHEN** `PUT /api/admin/credentials/finnhub` is called with `{"FINNHUB_API_KEY": "new-key-value"}`
-- **THEN** CredentialStore writes the value, response is `{"updated": ["FINNHUB_API_KEY"], "errors": []}`
+- **WHEN** `PUT /api/admin/credentials/finnhub` is called with `{"api_key": "new-key-value"}`
+- **THEN** `KeyRepository.save("finnhub", "api_key", "new-key-value")` is called and response is `{"updated": ["api_key"], "errors": []}`
 
-#### Scenario: Unknown key rejected
-- **WHEN** `PUT /api/admin/credentials/finnhub` is called with `{"UNKNOWN_KEY": "value"}`
-- **THEN** response is HTTP 400 with `{"detail": "Unknown credential key: UNKNOWN_KEY for provider finnhub"}`
+#### Scenario: Unknown credential rejected
+- **WHEN** `PUT /api/admin/credentials/finnhub` is called with `{"unknown_key": "value"}`
+- **THEN** response is HTTP 400 with `{"detail": "Unknown credential: unknown_key for provider finnhub"}`
 
-#### Scenario: Credential written to K8s Secret in-cluster
+#### Scenario: Credential written to SQLite in K3s
 - **WHEN** running in a K8s Pod and `PUT /api/admin/credentials/schwab` is called
-- **THEN** the K8s Secret named `ADMIN_K8S_SECRET_NAME` is patched with the new value
+- **THEN** the encrypted credential is written to `keys.db` and no K8s Secret is patched
 
-#### Scenario: Credential written to .env file locally
-- **WHEN** `KUBERNETES_SERVICE_HOST` is not set and credential is updated
-- **THEN** `python-dotenv` `set_key()` writes the value to `.env`
+#### Scenario: Credential written to SQLite locally
+- **WHEN** running locally and credential is updated
+- **THEN** the encrypted credential is written to `keys.db` and `.env` is not modified
 
-### Requirement: CredentialStore auto-detection
-The system SHALL use a `CredentialStore` abstraction that automatically selects `K8sCredentialStore` when `KUBERNETES_SERVICE_HOST` env var is present, and `EnvFileCredentialStore` otherwise. The active backend SHALL be overridable via `CREDENTIAL_STORE=k8s|env`.
+### Requirement: Only APP_ENCRYPTION_KEY remains external secret
+Provider credentials, provider enablement, provider runtime configuration, webhook URLs, and Schwab token JSON SHALL be stored in SQLite. The only external secret needed for credential protection SHALL be `APP_ENCRYPTION_KEY`, supplied via environment variable / `.env` locally or K8s Secret in K3s.
 
-#### Scenario: In-cluster auto-detection
-- **WHEN** `KUBERNETES_SERVICE_HOST` is set
-- **THEN** `K8sCredentialStore` is used without explicit configuration
+#### Scenario: Provider key does not require K8s Secret
+- **WHEN** Schwab API credentials are entered through admin APIs in K3s
+- **THEN** only `keys.db` is updated and no K8s Secret update occurs
 
-#### Scenario: Local auto-detection
-- **WHEN** `KUBERNETES_SERVICE_HOST` is not set
-- **THEN** `EnvFileCredentialStore` is used without explicit configuration
+#### Scenario: Encryption key remains external
+- **WHEN** the app starts in K3s
+- **THEN** `APP_ENCRYPTION_KEY` is read from environment supplied by K8s Secret and is never stored in `keys.db`
 
-#### Scenario: Explicit override
-- **WHEN** `CREDENTIAL_STORE=env` is set even with `KUBERNETES_SERVICE_HOST` present
-- **THEN** `EnvFileCredentialStore` is used
+### Requirement: Credential allowlist per provider
+The system SHALL maintain an allowlist of credential names per provider. At minimum it SHALL support: `schwab.api_key`, `schwab.app_secret`, `schwab.token_json`, `schwab.alert_webhook_url`, `finnhub.api_key`, `polygon.api_key`, `lseg.app_key`, `lseg.username`, `lseg.password`.
+
+#### Scenario: Known Schwab credentials accepted
+- **WHEN** `PUT /api/admin/credentials/schwab` is called with `{"api_key": "...", "app_secret": "..."}`
+- **THEN** both credentials are accepted and saved encrypted
+
+#### Scenario: Polygon credential accepted
+- **WHEN** `PUT /api/admin/credentials/polygon` is called with `{"api_key": "..."}`
+- **THEN** the credential is accepted and saved encrypted

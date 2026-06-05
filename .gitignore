@@ -13,4 +13,4 @@ poetry.lock
 
 # graphify analysis artifacts
 .graphify_*
-graphify-out/
+graphify-out/3.11.9

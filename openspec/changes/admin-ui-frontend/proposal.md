@@ -9,8 +9,8 @@ The `admin-ui-backend` change delivers all `/api/admin/*` endpoints and the Fast
 - OIDC auth guard: calls `GET /api/admin/auth/me`, redirects to Authentik if 401 (bypassed when auth disabled)
 - PKCE authorization code flow handled entirely in the SPA (`/admin/callback` route)
 - Dashboard page: live provider status cards with 30-second auto-refresh
-- Providers page: enable/disable toggles + IBKR gateway URL form
-- Credentials page: masked credential display with per-provider edit forms
+- Providers page: enable/disable toggles plus provider runtime configuration forms for timeout, retry, rate limit, circuit breaker, and provider-specific connection config (e.g. IBKR host/port)
+- Credentials page: configured/unconfigured credential metadata display with per-provider edit forms; plaintext values are never read back from backend
 - Schwab Auth page: step-by-step OAuth2 re-authorization UI (get URL → paste callback URL → confirm)
 - Alerts page: webhook URL configuration + test send
 
@@ -28,6 +28,6 @@ The `admin-ui-backend` change delivers all `/api/admin/*` endpoints and the Fast
 
 - **New files**: `admin/` directory (Vite/React project), `admin/dist/` (gitignored build output)
 - **Modified files**: `.gitignore` (add `admin/dist/`), `README.md` (Admin UI section)
-- **New dev dependencies**: React, Vite, React Router v6, TanStack Query, Tailwind CSS, shadcn/ui
+- **New dev/runtime dependencies**: React, Vite, React Router v6, TanStack Query, Material UI (`@mui/material`, `@mui/icons-material`, `@emotion/react`, `@emotion/styled`)
 - **No changes** to `app/` Python code — consumes existing `/api/admin/*` endpoints only
 - **Prerequisite**: `admin-ui-backend` change must be complete and deployed
