@@ -252,7 +252,7 @@ async def test_expired_token_raises_connection_error(monkeypatch, tmp_path: Path
         with pytest.raises(ProviderConnectionError) as exc:
             await provider._get_client()
 
-    assert "Re-generate token" in exc.value.message
+    assert "Re-authorize through the admin UI" in exc.value.message
 
 
 # ---------------------------------------------------------------------------

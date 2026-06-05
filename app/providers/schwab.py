@@ -27,6 +27,7 @@ Authentication model:
 
 import asyncio
 import logging
+import tempfile
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -85,6 +86,8 @@ class SchwabProvider(BasePriceProvider):
 
     def __init__(self) -> None:
         self._client: Any = None
+        self._paused = False
+        self._temp_token_path: str | None = None
         # Locks are created lazily inside the running event loop (Python 3.12+ safe).
         self._client_lock: Optional[asyncio.Lock] = None
         self._rate_limit_lock: Optional[asyncio.Lock] = None
@@ -104,28 +107,52 @@ class SchwabProvider(BasePriceProvider):
             self._rate_limit_lock = asyncio.Lock()
         return self._rate_limit_lock
 
-    def _ensure_configured(self) -> None:
-        key_value = unwrap_secret(settings.SCHWAB_API_KEY)
+    async def _load_repository_credential(self, credential_name: str) -> str | None:
+        try:
+            from app.admin.runtime import get_key_repository
+
+            return await get_key_repository().get("schwab", credential_name)
+        except RuntimeError:
+            return None
+
+    async def _get_credentials(self) -> tuple[str, str]:
+        key_value = await self._load_repository_credential("api_key") or unwrap_secret(settings.SCHWAB_API_KEY)
+        secret_value = await self._load_repository_credential("app_secret") or unwrap_secret(settings.SCHWAB_APP_SECRET)
         if not key_value:
             raise ProviderConnectionError(
                 "Schwab provider is not configured. Set SCHWAB_API_KEY to enable it.",
                 details={"setting": "SCHWAB_API_KEY"},
             )
+        return key_value, secret_value
+
+    async def _resolve_token_path(self) -> str:
+        token_json = await self._load_repository_credential("token_json")
+        if token_json is not None:
+            temp_file = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+            with temp_file:
+                temp_file.write(token_json)
+            self._temp_token_path = temp_file.name
+            return temp_file.name
+
+        if Path(settings.SCHWAB_TOKEN_PATH).exists():
+            return settings.SCHWAB_TOKEN_PATH
+
+        raise ProviderConnectionError(
+            "Schwab token not found. Re-authorize Schwab through the admin UI.",
+            details={"hint": "Configure schwab.token_json or set SCHWAB_TOKEN_PATH."},
+        )
 
     async def _get_client(self) -> Any:
-        self._ensure_configured()
+        if self._paused:
+            raise ProviderConnectionError("Schwab provider paused - re-authorization required")
         if self._client is not None:
             return self._client
 
         async with self._get_client_lock():
+            if self._paused:
+                raise ProviderConnectionError("Schwab provider paused - re-authorization required")
             if self._client is not None:
                 return self._client
-
-            if not Path(settings.SCHWAB_TOKEN_PATH).exists():
-                raise ProviderConnectionError(
-                    "Schwab token file not found. Re-run schwab-generate-token.py.",
-                    details={"hint": "Set SCHWAB_TOKEN_PATH to the token file location."},
-                )
 
             if easy_client is None:
                 raise ProviderConnectionError(
@@ -133,8 +160,8 @@ class SchwabProvider(BasePriceProvider):
                     details={"dependency": "schwab-py"},
                 )
 
-            key_value = unwrap_secret(settings.SCHWAB_API_KEY)
-            secret_value = unwrap_secret(settings.SCHWAB_APP_SECRET)
+            key_value, secret_value = await self._get_credentials()
+            token_path = await self._resolve_token_path()
 
             def _create_client() -> Any:
                 # easy_client() is a synchronous factory: reads the token file and
@@ -144,7 +171,7 @@ class SchwabProvider(BasePriceProvider):
                     api_key=key_value,
                     app_secret=secret_value,
                     callback_url=settings.SCHWAB_CALLBACK_URL,
-                    token_path=settings.SCHWAB_TOKEN_PATH,
+                    token_path=token_path,
                     asyncio=settings.SCHWAB_ASYNCIO,
                 )
 
@@ -152,12 +179,12 @@ class SchwabProvider(BasePriceProvider):
                 self._client = await asyncio.to_thread(_create_client)
             except FileNotFoundError:
                 raise ProviderConnectionError(
-                    "Schwab token file not found. Re-run schwab-generate-token.py.",
-                    details={"hint": "Set SCHWAB_TOKEN_PATH to the token file location."},
+                    "Schwab token not found. Re-authorize Schwab through the admin UI.",
+                    details={"hint": "Configure schwab.token_json or set SCHWAB_TOKEN_PATH."},
                 )
             except Exception as exc:
                 raise ProviderConnectionError(
-                    "Failed to authenticate with Schwab. Re-generate token with schwab-generate-token.py.",
+                    "Failed to authenticate with Schwab. Re-authorize through the admin UI.",
                     details={"hint": f"Auth error: {type(exc).__name__}"},
                 ) from exc
 
@@ -269,16 +296,41 @@ class SchwabProvider(BasePriceProvider):
         if status_code == _HTTP_RATE_LIMITED:
             raise ProviderTimeoutError("schwab", details={"status_code": status_code})
         if status_code in (_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN):
-            # Clear cached client so the next call re-authenticates
+            was_initialized = self._client is not None
+            if was_initialized:
+                self._paused = True
+                asyncio.create_task(
+                    self._fire_webhook("Schwab token expired - re-authorization required via MDH Admin UI")
+                )
             self._client = None
             raise ProviderConnectionError(
-                "Schwab token has expired or is invalid. Re-run schwab-generate-token.py.",
+                "Schwab token has expired or is invalid. Re-authorize through the admin UI.",
                 details={"hint": "Token rotation required every 7 days."},
             )
         raise ProviderError(
             f"Schwab {context} request failed for {symbol}.",
             details={"status_code": status_code},
         )
+
+    async def _fire_webhook(self, message: str) -> None:
+        webhook_url = await self._load_repository_credential("alert_webhook_url") or unwrap_secret(
+            settings.SCHWAB_ALERT_WEBHOOK_URL
+        )
+        if not webhook_url:
+            return
+        payload = {"text": message} if settings.SCHWAB_ALERT_WEBHOOK_FORMAT == "slack" else {"message": message}
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.post(webhook_url, json=payload)
+                response.raise_for_status()
+        except Exception:
+            logger.warning("Failed to send Schwab token-expiry webhook", exc_info=True)
+
+    def unpause(self) -> None:
+        self._paused = False
+        self._client = None
 
     # ------------------------------------------------------------------
     # Public interface

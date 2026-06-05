@@ -4,12 +4,14 @@
 #
 # Prerequisites:
 # 1. Create namespace: kubectl create namespace market-data-hub
-# 2. Create secrets: kubectl create secret generic market-data-hub-secrets \
-#      --from-literal=lseg_app_key=$LSEG_APP_KEY \
-#      --from-literal=lseg_username=$LSEG_USERNAME \
-#      --from-literal=lseg_password=$LSEG_PASSWORD \
+# 2. Generate the admin encryption key:
+#      python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+# 3. Create secrets: kubectl create secret generic market-data-hub-admin \
+#      --from-literal=app_encryption_key=$APP_ENCRYPTION_KEY \
+#      --from-literal=admin_oidc_client_secret=$ADMIN_OIDC_CLIENT_SECRET \
 #      -n market-data-hub
-# 3. Apply this file: kubectl apply -f deploy/kubernetes.yaml -n market-data-hub
+# 4. Back up both this secret and the keys-db PVC. Losing either makes encrypted credentials unrecoverable.
+# 5. Apply this file: kubectl apply -f k8s/market-data-hub.yaml -n market-data-hub
 
 ---
 apiVersion: v1
@@ -26,6 +28,24 @@ data:
   app_env: "prod"
   log_level: "INFO"
   default_price_provider: "ibkr"
+  keys_db_path: "/data/keys.db"
+  admin_auth_enabled: "false"
+  admin_oidc_issuer: ""
+  admin_oidc_client_id: ""
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: market-data-hub-keys-db
+  labels:
+    app: market-data-hub
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 
 ---
 apiVersion: apps/v1
@@ -75,22 +95,7 @@ spec:
             configMapKeyRef:
               name: market-data-hub-config
               key: ibkr_market_data_type
-        # LSEG Credentials from Secret
-        - name: LSEG_APP_KEY
-          valueFrom:
-            secretKeyRef:
-              name: market-data-hub-secrets
-              key: lseg_app_key
-        - name: LSEG_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: market-data-hub-secrets
-              key: lseg_username
-        - name: LSEG_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: market-data-hub-secrets
-              key: lseg_password
+        # Provider credentials are admin-managed in encrypted SQLite keys.db.
         # Application Settings from ConfigMap
         - name: APP_ENV
           valueFrom:
@@ -107,6 +112,39 @@ spec:
             configMapKeyRef:
               name: market-data-hub-config
               key: default_price_provider
+        - name: KEYS_DB_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: keys_db_path
+        - name: ADMIN_AUTH_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: admin_auth_enabled
+        - name: ADMIN_OIDC_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: admin_oidc_issuer
+        - name: ADMIN_OIDC_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: market-data-hub-config
+              key: admin_oidc_client_id
+        - name: APP_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: market-data-hub-admin
+              key: app_encryption_key
+        - name: ADMIN_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: market-data-hub-admin
+              key: admin_oidc_client_secret
+        volumeMounts:
+        - name: keys-db
+          mountPath: /data
         resources:
           requests:
             memory: "512Mi"
@@ -137,6 +175,10 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 2
           failureThreshold: 3
+      volumes:
+      - name: keys-db
+        persistentVolumeClaim:
+          claimName: market-data-hub-keys-db
       # Sidecar container for MCP health monitoring
       - name: mcp-health
         image: curlimages/curl:latest

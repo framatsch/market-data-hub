@@ -46,9 +46,14 @@ Document every key in `.env.example` with an inline comment. Coordinate with `@i
 
 ---
 
-## Authentication — schwab-py OAuth2
+## Authentication — schwab-py OAuth2 and Admin Runtime
 
-The `schwab-py` library handles the full OAuth2 token lifecycle. **Never manage tokens manually.**
+The `schwab-py` library handles OAuth2 client behavior, but MDH Admin now stores Schwab credentials and token JSON in encrypted SQLite `keys.db` via `KeyRepository`.
+
+Runtime sources, in order:
+- `schwab.api_key`, `schwab.app_secret`, and `schwab.token_json` from `KeyRepository`
+- Legacy `SCHWAB_API_KEY`, `SCHWAB_APP_SECRET`, and `SCHWAB_TOKEN_PATH` only as fallback
+- Provider timeout, retry, rate-limit, circuit-breaker, and Schwab connection settings from `ProviderConfigRepository`
 
 ```python
 from schwab.auth import easy_client, client_from_token_file
@@ -56,25 +61,24 @@ import httpx
 
 async def _get_client(self):
     """
-    Create or reload a schwab-py client. Tokens live at SCHWAB_TOKEN_PATH.
-    easy_client() loads an existing token or triggers the login flow (browser).
-    For headless / server environments, use client_from_token_file() after the
-    token was pre-created with: schwab-generate-token.py
+    Create or reload a schwab-py client. Token JSON is loaded from encrypted
+    SQLite first and written to a temporary file for schwab-py compatibility.
+    SCHWAB_TOKEN_PATH remains a legacy fallback only.
     """
     if self._client is None:
         try:
             self._client = await asyncio.to_thread(
                 easy_client,
-                api_key=settings.SCHWAB_API_KEY,
-                app_secret=settings.SCHWAB_APP_SECRET,
+                api_key=api_key,
+                app_secret=app_secret,
                 callback_url=settings.SCHWAB_CALLBACK_URL,
-                token_path=settings.SCHWAB_TOKEN_PATH,
+                token_path=token_path,
                 asyncio=True,
             )
         except FileNotFoundError:
             raise ProviderConnectionError(
-                "Schwab token not found. Run schwab-generate-token.py to create one.",
-                details={"token_path": settings.SCHWAB_TOKEN_PATH},
+                "Schwab token not found. Re-authorize through the admin UI.",
+                details={"credential": "schwab.token_json"},
             )
         except Exception as e:
             raise ProviderConnectionError(
@@ -85,11 +89,23 @@ async def _get_client(self):
 ```
 
 **Key facts about token management:**
-- Tokens expire after **7 days** — users must regenerate manually or automate via cron.
+- Tokens expire after **7 days** — users re-authorize through `/api/admin/schwab/auth/*`.
 - `easy_client()` auto-refreshes access tokens (30-min lifetime) using the refresh token.
-- **Never share or modify the token file** — the library manages it exclusively.
-- For containerized deployments: pre-create token on a machine with a browser, then copy it.
+- The admin callback saves token JSON with `KeyRepository.save("schwab", "token_json", ...)`; do not write plaintext tokens into K8s Secrets or `.env`.
+- For containerized deployments: mount `keys.db` on persistent storage and back it up with `APP_ENCRYPTION_KEY`.
 - Check token age: `client.token_age()` returns seconds; proactively warn at 6 days.
+
+## Paused State and Alerts
+
+`SchwabProvider` has `_paused: bool` and `unpause()`:
+- `_paused=True` makes `_get_client()` raise `ProviderConnectionError` immediately without network calls.
+- 401/403 after a previously initialized client means refresh-token expiry: set `_paused=True`, clear `_client`, and fire a background webhook.
+- Successful admin re-authorization calls `SchwabProvider.unpause()` and clears `_client` so the next request reinitializes.
+
+Alert behavior:
+- `schwab.alert_webhook_url` is stored encrypted in `KeyRepository`.
+- `alert_webhook_format` is stored as non-secret Schwab provider runtime config.
+- Webhook failures are logged at WARNING and must not mask the original provider error.
 
 ---
 

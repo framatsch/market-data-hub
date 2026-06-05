@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Enabled Providers (comma-separated list, empty = all)
     ENABLED_PROVIDERS: str = ""
 
+    # Admin runtime storage
+    APP_ENCRYPTION_KEY: str = ""
+    KEYS_DB_PATH: str = "./keys.db"
+
     # Provider Defaults
     DEFAULT_PRICE_PROVIDER: str = "ibkr"  # Valid: ibkr, lseg, schwab
     DEFAULT_COMPANY_PROVIDER: str = "finnhub"
@@ -76,6 +80,14 @@ class Settings(BaseSettings):
     SCHWAB_TIMEOUT_SECONDS: int = 30               # Per-request timeout (applied via asyncio.wait_for)
     SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min
     SCHWAB_ASYNCIO: bool = True                    # True = async httpx client from schwab-py
+    SCHWAB_ALERT_WEBHOOK_URL: SecretStr = SecretStr("")
+    SCHWAB_ALERT_WEBHOOK_FORMAT: Literal["slack", "generic"] = "slack"
+
+    # Admin Auth
+    ADMIN_AUTH_ENABLED: bool = False
+    ADMIN_OIDC_ISSUER: str = ""
+    ADMIN_OIDC_CLIENT_ID: str = ""
+    ADMIN_OIDC_CLIENT_SECRET: SecretStr = SecretStr("")
 
     # Polygon.io Provider
     POLYGON_API_KEY: SecretStr = SecretStr("stub-key")

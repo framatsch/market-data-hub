@@ -19,13 +19,16 @@ import warnings
 from contextlib import asynccontextmanager
 
 import uvicorn
+from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
-from app.api import routes_meta, routes_prices, routes_companies, routes_options, routes_ws
+from app.api import routes_admin, routes_meta, routes_prices, routes_companies, routes_options, routes_ws
 from app.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,9 @@ setup_logging()
 async def lifespan(app: FastAPI):
     """Manage application lifecycle."""
     from app.providers.registry import registry
+    from app.admin.runtime import initialize_admin_runtime
+
+    initialize_admin_runtime()
     
     # --- STARTUP PROTOCOL OVERVIEW ---
     active_providers = list(registry._providers.keys())
@@ -95,6 +101,24 @@ app.include_router(routes_prices.router)
 app.include_router(routes_companies.router)
 app.include_router(routes_options.router)
 app.include_router(routes_ws.router)
+app.include_router(routes_admin.router)
+
+admin_static_dir = Path(__file__).parent / "static" / "admin"
+admin_index = admin_static_dir / "index.html"
+if admin_static_dir.exists():
+    app.mount("/admin/assets", StaticFiles(directory=admin_static_dir / "assets"), name="admin-assets") if (admin_static_dir / "assets").exists() else None
+
+    @app.get("/admin", include_in_schema=False)
+    async def serve_admin_root():
+        if admin_index.exists():
+            return FileResponse(admin_index)
+        return JSONResponse(status_code=404, content={"detail": "Admin UI not built"})
+
+    @app.get("/admin/{full_path:path}", include_in_schema=False)
+    async def serve_admin_spa(full_path: str):  # noqa: ARG001
+        if admin_index.exists():
+            return FileResponse(admin_index)
+        return JSONResponse(status_code=404, content={"detail": "Admin UI not built"})
 
 # MCP router (opt-in via MCP_ENABLED=true)
 if settings.MCP_ENABLED:

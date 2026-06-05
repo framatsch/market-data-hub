@@ -13,10 +13,12 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic-settings>=2.1.0",
     "httpx>=0.26.0",
+    "cryptography>=42.0.0",
     "tenacity>=8.2.0",
     "ib_async>=1.0.0",
     "refinitiv-data==1.6.2",
     "schwab-py>=1.5.0",
+    "python-jose[cryptography]>=3.3.0",
 ]
 
 [project.optional-dependencies]

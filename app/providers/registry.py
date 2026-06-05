@@ -18,6 +18,7 @@ import asyncio
 import logging
 from typing import Dict, Optional, cast
 
+from app.admin.provider_config_repository import ProviderConfigRepository, ProviderRuntimeConfig
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
@@ -33,13 +34,29 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderRegistry:
+    provider_classes = {
+        "ibkr": IBKRProvider,
+        "lseg": LSEGProvider,
+        "schwab": SchwabProvider,
+        "mock": MockNewsProvider,
+        "finnhub": FinnhubProvider,
+        "polygon": PolygonProvider,
+        "prixe": PrixeProvider,
+    }
+
     def __init__(self):
         self._providers: Dict[str, object] = {}
+        self._reload_lock: Optional[asyncio.Lock] = None
         self.default_price_provider: str = "ibkr"
         self.default_company_provider: str = "finnhub"
         self.default_options_provider: str = "ibkr"
         self.default_news_provider: str = "finnhub"
         self._initialize_providers()
+
+    def _get_reload_lock(self) -> asyncio.Lock:
+        if self._reload_lock is None:
+            self._reload_lock = asyncio.Lock()
+        return self._reload_lock
 
     def _resolve_default(self, config_key: str, base_class: type) -> str:
         """Check if the configured default is loaded and valid; fall back otherwise."""
@@ -60,26 +77,15 @@ class ProviderRegistry:
         return configured
 
     def _initialize_providers(self):
-        # All potential providers
-        all_available = {
-            "ibkr": IBKRProvider,
-            "lseg": LSEGProvider,
-            "schwab": SchwabProvider,
-            "mock": MockNewsProvider,
-            "finnhub": FinnhubProvider,
-            "polygon": PolygonProvider,
-            "prixe": PrixeProvider,
-            }
-
         # Parse enabled providers from config
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if enabled_str:
             enabled_list = [p.strip().lower() for p in enabled_str.split(",")]
             # Filter to only requested and valid names
-            to_load = {name: cls for name, cls in all_available.items() if name in enabled_list}
+            to_load = {name: cls for name, cls in self.provider_classes.items() if name in enabled_list}
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
-            to_load = all_available
+            to_load = self.provider_classes
 
         for name, cls in to_load.items():
             try:
@@ -94,6 +100,63 @@ class ProviderRegistry:
         self.default_company_provider = self._resolve_default("DEFAULT_COMPANY_PROVIDER", BaseCompanyProvider)
         self.default_options_provider = self._resolve_default("DEFAULT_OPTIONS_PROVIDER", BaseOptionsProvider)
         self.default_news_provider = self._resolve_default("DEFAULT_NEWS_PROVIDER", BaseNewsProvider)
+
+    async def reload_from_config(self, config_repository: ProviderConfigRepository | None = None) -> None:
+        if config_repository is None:
+            from app.admin.runtime import get_provider_config_repository
+
+            config_repository = get_provider_config_repository()
+
+        async with self._get_reload_lock():
+            configs = {config.provider_name: config for config in await config_repository.list_all()}
+            enabled = {name for name, config in configs.items() if config.enabled and name in self.provider_classes}
+
+            for name in list(self._providers):
+                if name not in enabled:
+                    await self._close_provider(name, self._providers.pop(name))
+
+            for name in enabled:
+                config = configs[name]
+                if name not in self._providers:
+                    try:
+                        self._providers[name] = self.provider_classes[name]()
+                    except ImportError as exc:
+                        logger.warning("Provider '%s' not available: %s", name, exc)
+                        continue
+                    except Exception as exc:
+                        logger.error("Failed to initialize provider '%s': %s", name, exc)
+                        continue
+                self._apply_runtime_config(self._providers[name], config)
+
+            self.default_price_provider = self._resolve_default("DEFAULT_PRICE_PROVIDER", BasePriceProvider)
+            self.default_company_provider = self._resolve_default("DEFAULT_COMPANY_PROVIDER", BaseCompanyProvider)
+            self.default_options_provider = self._resolve_default("DEFAULT_OPTIONS_PROVIDER", BaseOptionsProvider)
+            self.default_news_provider = self._resolve_default("DEFAULT_NEWS_PROVIDER", BaseNewsProvider)
+
+    async def _close_provider(self, name: str, provider: object) -> None:
+        close = getattr(provider, "close", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            logger.warning("Error closing provider %s", name, exc_info=True)
+
+    def _apply_runtime_config(self, provider: object, config: ProviderRuntimeConfig) -> None:
+        setattr(provider, "_runtime_config", config)
+        for attr, value in {
+            "timeout_seconds": config.timeout_seconds,
+            "retry_count": config.retry_count,
+            "retry_backoff_seconds": config.retry_backoff_seconds,
+            "rate_limit_per_sec": config.rate_limit_per_sec,
+            "circuit_breaker_enabled": config.circuit_breaker_enabled,
+            "circuit_breaker_failure_threshold": config.circuit_breaker_failure_threshold,
+            "circuit_breaker_reset_seconds": config.circuit_breaker_reset_seconds,
+            "connection_config": config.connection_config,
+        }.items():
+            setattr(provider, attr, value)
 
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
         name = name or self.default_price_provider
@@ -125,13 +188,8 @@ class ProviderRegistry:
 
     async def shutdown(self) -> None:
         """Gracefully close all providers that expose a close() coroutine."""
-        for provider in self._providers.values():
-            close = getattr(provider, "close", None)
-            if close is not None and asyncio.iscoroutinefunction(close):
-                try:
-                    await close()
-                except Exception:
-                    logger.warning("Error closing provider %s", type(provider).__name__, exc_info=True)
+        for name, provider in list(self._providers.items()):
+            await self._close_provider(name, provider)
 
 # Global registry instance
 registry = ProviderRegistry()

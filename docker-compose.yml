@@ -25,6 +25,14 @@ services:
       DEFAULT_NEWS_PROVIDER: ${DEFAULT_NEWS_PROVIDER:-finnhub}
       MCP_ENABLED: ${MCP_ENABLED:-true}
       ENABLED_PROVIDERS: ${ENABLED_PROVIDERS:-}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      KEYS_DB_PATH: /app/data/keys.db
+      ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-false}
+      ADMIN_OIDC_ISSUER: ${ADMIN_OIDC_ISSUER:-}
+      ADMIN_OIDC_CLIENT_ID: ${ADMIN_OIDC_CLIENT_ID:-}
+      ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:-}
+    volumes:
+      - keys-db:/app/data
     # command is inherited from Dockerfile (uv run python -m app.main)
     healthcheck:
       test: [
@@ -41,3 +49,6 @@ services:
 networks:
   market-data-hub:
     driver: bridge
+
+volumes:
+  keys-db:
