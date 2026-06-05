@@ -103,6 +103,7 @@ All agent configs live in `.github/agents/`. One config consumed by GitHub Copil
 | `architect.agent.md` | System design, cross-component interfaces, delegation | Feature spanning 2+ components |
 | `ibkr.agent.md` | `app/providers/ibkr.py`, IBKR config keys | IBKR connection, options, NaN, subscription errors |
 | `lseg.agent.md` | `app/providers/lseg.py`, LSEG config keys | RIC lookup, session, caching, rate limiting |
+| `schwab.agent.md` | `app/providers/schwab.py`, SCHWAB_* config keys | Schwab OAuth2 token, price history, quote fetch, `schwab-py` |
 | `finnhub.agent.md` | `app/providers/finnhub.py`, `mock_news.py` | News, sentiment, Finnhub |
 | `fastapi.agent.md` | `app/api/`, `app/models/`, `app/dependencies.py` | Routes, Pydantic models, DI, CSV export |
 | `mcp.agent.md` | MCP tools in `app/api/mcp.py`, SSE on app port | Exposing data to LLM clients via MCP |
