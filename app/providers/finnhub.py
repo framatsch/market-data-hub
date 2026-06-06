@@ -203,6 +203,59 @@ class FinnhubProvider(BaseNewsProvider):
     # API Methods
     # ========================================================================
 
+    async def test_connection(self) -> dict:
+        """Validate Finnhub API key with a lightweight quote request."""
+        if not self._api_key:
+            return {
+                "status_code": 401,
+                "success": False,
+                "message": "Invalid Finnhub API key",
+                "details": {"reason": "missing api key"},
+            }
+
+        try:
+            client = await self._get_client()
+            response = await client.get(
+                "/quote",
+                params={"symbol": "AAPL", "token": self._api_key},
+            )
+
+            if response.status_code == 200:
+                return {
+                    "status_code": 200,
+                    "success": True,
+                    "message": "Finnhub API key valid",
+                    "details": {"endpoint": "/quote", "symbol": "AAPL"},
+                }
+            if response.status_code in (401, 403):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Invalid Finnhub API key",
+                    "details": {"status_code": response.status_code, "response": response.text[:500]},
+                }
+
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Finnhub service unavailable",
+                "details": {"status_code": response.status_code, "response": response.text[:500]},
+            }
+        except httpx.TimeoutException as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Finnhub service unavailable",
+                "details": {"error": str(exc), "reason": "timeout"},
+            }
+        except Exception as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Finnhub service unavailable",
+                "details": {"error": str(exc)},
+            }
+
     async def get_company_news(
         self,
         symbol: str,

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any
@@ -13,6 +14,7 @@ from app.api.admin_auth import AdminPrincipal, admin_auth
 from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderRuntimeConfig
 from app.admin.runtime import get_key_repository, get_provider_config_repository, get_settings_repository
 from app.config import settings
+from app.models.connection import ConnectionTestResult
 from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
 from app.providers.registry import registry
 from app.utils.secrets import unwrap_secret
@@ -25,6 +27,7 @@ except ImportError:  # pragma: no cover
 
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
+logger = logging.getLogger(__name__)
 
 _SCHWAB_TOKEN_LIFETIME_DAYS = 7
 
@@ -319,6 +322,120 @@ async def update_admin_provider_config(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await registry.reload_from_config(repo)
     return config.model_dump()
+
+
+@router.post(
+    "/test-connection/{provider_name}",
+    response_model=ConnectionTestResult,
+    responses={
+        200: {
+            "description": "Connection test executed",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "success": {
+                            "summary": "Provider reachable",
+                            "value": {
+                                "status_code": 200,
+                                "success": True,
+                                "message": "Connected to IBKR",
+                                "details": {"host": "127.0.0.1", "port": 4001},
+                            },
+                        },
+                        "auth_failed": {
+                            "summary": "Authentication failed",
+                            "value": {
+                                "status_code": 401,
+                                "success": False,
+                                "message": "Authentication failed",
+                                "details": {"error": "Invalid credentials"},
+                            },
+                        },
+                        "service_unavailable": {
+                            "summary": "Service unavailable",
+                            "value": {
+                                "status_code": 503,
+                                "success": False,
+                                "message": "Connection test timeout",
+                                "details": {"timeout_seconds": 10.0},
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        401: {"description": "Not authenticated"},
+        404: {"description": "Provider not found or not enabled"},
+        500: {"description": "Unexpected provider test error"},
+    },
+)
+async def test_admin_provider_connection(provider_name: str, _principal: PrincipalDep) -> ConnectionTestResult:
+    provider_key = provider_name.lower()
+    try:
+        provider_config = await get_provider_config_repository().get(provider_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Provider not found") from exc
+
+    if not provider_config.enabled:
+        raise HTTPException(status_code=404, detail="Provider not enabled")
+
+    provider = registry.get_provider_instance(provider_key)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    test_connection = getattr(provider, "test_connection", None)
+    if not callable(test_connection):
+        raise HTTPException(status_code=500, detail="Provider does not support connection testing")
+
+    try:
+        result_payload = await asyncio.wait_for(test_connection(), timeout=10.0)
+    except asyncio.TimeoutError:
+        timeout_result = ConnectionTestResult(
+            status_code=503,
+            success=False,
+            message="Connection test timeout",
+            details={"provider": provider_key, "timeout_seconds": 10.0},
+        )
+        logger.warning(
+            "Connection test failed for provider=%s status_code=%s message=%s",
+            provider_key,
+            timeout_result.status_code,
+            timeout_result.message,
+        )
+        return timeout_result
+    except Exception as exc:
+        logger.warning(
+            "Connection test raised exception for provider=%s: %s",
+            provider_key,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"provider": provider_key, "error": str(exc)},
+        ) from exc
+
+    try:
+        result = ConnectionTestResult.model_validate(result_payload)
+    except Exception as exc:
+        logger.warning(
+            "Connection test returned invalid payload for provider=%s: %s",
+            provider_key,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"provider": provider_key, "error": "Invalid test_connection() response format"},
+        ) from exc
+
+    if not result.success:
+        logger.warning(
+            "Connection test failed for provider=%s status_code=%s message=%s",
+            provider_key,
+            result.status_code,
+            result.message,
+        )
+
+    return result
 
 
 @router.put("/providers/ibkr/gateway")

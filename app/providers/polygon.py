@@ -42,6 +42,50 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     async def close(self):
         await self._client.aclose()
 
+    async def test_connection(self) -> dict:
+        """Validate Polygon API key with a lightweight previous-close request."""
+        try:
+            response = await self._client.get(
+                "/v2/aggs/ticker/AAPL/prev",
+                params={"apiKey": self.api_key, "adjusted": "true"},
+            )
+
+            if response.status_code == 200:
+                return {
+                    "status_code": 200,
+                    "success": True,
+                    "message": "Polygon API key valid",
+                    "details": {"endpoint": "/v2/aggs/ticker/AAPL/prev"},
+                }
+            if response.status_code in (401, 403):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Invalid Polygon API key",
+                    "details": {"status_code": response.status_code, "response": response.text[:500]},
+                }
+
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Polygon service unavailable",
+                "details": {"status_code": response.status_code, "response": response.text[:500]},
+            }
+        except httpx.TimeoutException as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Polygon service unavailable",
+                "details": {"error": str(exc), "reason": "timeout"},
+            }
+        except Exception as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Polygon service unavailable",
+                "details": {"error": str(exc)},
+            }
+
     def _format_ticker(self, symbol: str, sec_type: str) -> str:
         """Format symbol for Polygon API."""
         symbol = symbol.upper()
@@ -350,4 +394,3 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         except Exception as e:
             logger.error(f"Polygon Ticker Search error: {e}")
             raise ProviderError(f"Polygon Ticker Search error: {e}")
-

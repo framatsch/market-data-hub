@@ -313,6 +313,43 @@ async def test_get_last_price_403_clears_client_and_raises_connection_error(prov
     assert provider._paused is True
 
 
+@pytest.mark.asyncio
+async def test_test_connection_success(provider: SchwabProvider):
+    client = Mock()
+    client.get_accounts = AsyncMock(return_value=_Response(200, {}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    result = await provider.test_connection()
+
+    assert result["status_code"] == 200
+    assert result["success"] is True
+    assert result["message"] == "Schwab OAuth token valid"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_auth_failure(provider: SchwabProvider):
+    client = Mock()
+    client.get_accounts = AsyncMock(return_value=_Response(401, {}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    result = await provider.test_connection()
+
+    assert result["status_code"] == 401
+    assert result["success"] is False
+    assert result["message"] == "Schwab OAuth token expired or invalid"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_service_unavailable(provider: SchwabProvider):
+    provider._get_client = AsyncMock(side_effect=Exception("down"))
+
+    result = await provider.test_connection()
+
+    assert result["status_code"] == 503
+    assert result["success"] is False
+    assert result["message"] == "Schwab service unavailable"
+
+
 # ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------

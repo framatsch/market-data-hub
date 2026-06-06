@@ -151,3 +151,63 @@ async def test_get_historical_prices_rejects_unsupported_interval():
 
         assert "Unsupported Prixe interval" in exc_info.value.message
         mock_client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_test_connection_success():
+    with patch("app.providers.prixe.httpx.AsyncClient") as mock_async_client:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(
+            return_value=httpx.Response(
+                200,
+                request=httpx.Request("POST", "https://api.prixe.io/api/last_sold"),
+                json={"data": {"symbol": "AAPL", "last_sold": "100.0"}},
+            )
+        )
+        mock_client.aclose = AsyncMock()
+        mock_async_client.return_value = mock_client
+
+        provider = PrixeProvider()
+        result = await provider.test_connection()
+
+        assert result["status_code"] == 200
+        assert result["success"] is True
+        assert result["message"] == "Prixe API key valid"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_auth_failure():
+    with patch("app.providers.prixe.httpx.AsyncClient") as mock_async_client:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(
+            return_value=httpx.Response(
+                401,
+                request=httpx.Request("POST", "https://api.prixe.io/api/last_sold"),
+                json={"detail": "unauthorized"},
+            )
+        )
+        mock_client.aclose = AsyncMock()
+        mock_async_client.return_value = mock_client
+
+        provider = PrixeProvider()
+        result = await provider.test_connection()
+
+        assert result["status_code"] == 401
+        assert result["success"] is False
+        assert result["message"] == "Invalid Prixe API key"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_service_unavailable():
+    with patch("app.providers.prixe.httpx.AsyncClient") as mock_async_client:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=Exception("down"))
+        mock_client.aclose = AsyncMock()
+        mock_async_client.return_value = mock_client
+
+        provider = PrixeProvider()
+        result = await provider.test_connection()
+
+        assert result["status_code"] == 503
+        assert result["success"] is False
+        assert result["message"] == "Prixe service unavailable"

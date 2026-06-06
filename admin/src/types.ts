@@ -35,6 +35,14 @@ export interface CredentialMetadata {
   set: boolean;
   updated_at?: string;
 }
+
+export interface ConnectionTestResult {
+  status_code: number;
+  success: boolean;
+  message: string;
+  details: Record<string, unknown>;
+}
+
 export interface SystemDefaults {
   default_price_provider?: string;
   default_company_provider?: string;

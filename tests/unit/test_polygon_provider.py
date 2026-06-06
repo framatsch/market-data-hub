@@ -53,6 +53,45 @@ async def test_get_last_price_success(polygon_provider):
     assert result.price == Decimal("150.0")
     assert result.provider == "polygon"
 
+
+@pytest.mark.asyncio
+async def test_test_connection_success(polygon_provider):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "ok"
+    polygon_provider._client.get.return_value = mock_resp
+
+    result = await polygon_provider.test_connection()
+
+    assert result["status_code"] == 200
+    assert result["success"] is True
+    assert result["message"] == "Polygon API key valid"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_auth_failure(polygon_provider):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.text = "forbidden"
+    polygon_provider._client.get.return_value = mock_resp
+
+    result = await polygon_provider.test_connection()
+
+    assert result["status_code"] == 401
+    assert result["success"] is False
+    assert result["message"] == "Invalid Polygon API key"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_service_unavailable(polygon_provider):
+    polygon_provider._client.get.side_effect = Exception("down")
+
+    result = await polygon_provider.test_connection()
+
+    assert result["status_code"] == 503
+    assert result["success"] is False
+    assert result["message"] == "Polygon service unavailable"
+
 @pytest.mark.asyncio
 async def test_get_last_price_404(polygon_provider):
     mock_resp = MagicMock()
@@ -176,7 +215,6 @@ async def test_get_option_chain(polygon_provider):
     assert chain.underlying_symbol == "AAPL"
     assert len(chain.options) == 1
     assert chain.options[0].symbol == "O:AAPL240119C00150000"
-
 
 
 

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import asyncio
 
 import pytest
 from fastapi import FastAPI
@@ -108,6 +109,9 @@ def test_admin_settings_capabilities(client, monkeypatch) -> None:
         async def get_last_price(self, symbol, market_data_type=None, sec_type="stock"):
             raise NotImplementedError
 
+        async def test_connection(self):
+            return {"status_code": 200, "success": True, "message": "ok", "details": {}}
+
     class OptionsProvider(PriceProvider, BaseOptionsProvider):
         async def get_option_chain(self, symbol, expiry, min_strike=None, max_strike=None, right=None, market_data_type=None):
             raise NotImplementedError
@@ -118,6 +122,9 @@ def test_admin_settings_capabilities(client, monkeypatch) -> None:
     class NewsProvider(BaseNewsProvider):
         async def get_company_news(self, symbol, from_date, to_date, limit=20, offset=0, language="en", category=None):
             raise NotImplementedError
+
+        async def test_connection(self):
+            return {"status_code": 200, "success": True, "message": "ok", "details": {}}
 
     registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
     original = registry._providers.copy()
@@ -216,3 +223,61 @@ def test_alert_webhook_rejects_loopback_literal(client) -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "webhook_url must resolve to a public internet address"
+
+
+def test_admin_test_connection_success(client, monkeypatch) -> None:
+    class FakeProvider:
+        async def test_connection(self):
+            return {
+                "status_code": 200,
+                "success": True,
+                "message": "Connected to IBKR",
+                "details": {"host": "127.0.0.1", "port": 4001},
+            }
+
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+    monkeypatch.setattr(registry, "get_provider_instance", lambda _: FakeProvider())
+
+    response = client.post("/api/admin/test-connection/ibkr")
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["status_code"] == 200
+
+
+def test_admin_test_connection_invalid_provider_returns_404(client) -> None:
+    response = client.post("/api/admin/test-connection/not-a-provider")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Provider not found"
+
+
+def test_admin_test_connection_requires_auth_when_enabled(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", True)
+
+    response = client.post("/api/admin/test-connection/ibkr")
+
+    assert response.status_code == 401
+
+
+def test_admin_test_connection_timeout_returns_503_payload(client, monkeypatch) -> None:
+    class SlowProvider:
+        async def test_connection(self):
+            await asyncio.sleep(11)
+            return {
+                "status_code": 200,
+                "success": True,
+                "message": "late",
+                "details": {},
+            }
+
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+    monkeypatch.setattr(registry, "get_provider_instance", lambda _: SlowProvider())
+
+    response = client.post("/api/admin/test-connection/ibkr")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status_code"] == 503
+    assert body["success"] is False
+    assert body["message"] == "Connection test timeout"

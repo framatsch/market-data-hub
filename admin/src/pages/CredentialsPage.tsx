@@ -22,7 +22,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import EditIcon from '@mui/icons-material/Edit';
 import { fetcher } from '../lib/api';
-import type { CredentialMetadata } from '../types';
+import type { CredentialMetadata, ConnectionTestResult } from '../types';
 
 export default function CredentialsPage() {
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
@@ -97,7 +97,38 @@ function CredentialSection({
   const [isEditing, setIsEditing] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
   const queryClient = useQueryClient();
+
+  const resolveConnectionResultTone = (result: ConnectionTestResult): 'success' | 'error' | 'warning' => {
+    if (result.success && result.status_code === 200) {
+      return 'success';
+    }
+    if ([400, 401, 403, 404, 500, 503].includes(result.status_code)) {
+      return 'error';
+    }
+    return 'warning';
+  };
+
+  const handleTestConnection = async () => {
+    setIsTestingConnection(true);
+    try {
+      const result = await fetcher<ConnectionTestResult>(`/api/admin/test-connection/${provider}`, {
+        method: 'POST',
+      });
+      setConnectionTestResult(result);
+    } catch (err: any) {
+      setConnectionTestResult({
+        status_code: 500,
+        success: false,
+        message: err.message || 'Connection test failed',
+        details: { provider },
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
 
   const handleToggleEdit = () => {
     setIsEditing(!isEditing);
@@ -142,7 +173,28 @@ function CredentialSection({
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', pr: 2 }}>
           <Typography sx={{ fontWeight: 600, flexGrow: 1 }}>{provider.toUpperCase()}</Typography>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Button
+              size="small"
+              variant="outlined"
+              color="primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleTestConnection();
+              }}
+              onFocus={(e) => e.stopPropagation()}
+              disabled={isTestingConnection}
+              sx={{ minWidth: 130 }}
+            >
+              {isTestingConnection ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CircularProgress size={14} />
+                  Testing...
+                </Box>
+              ) : (
+                'Test Connection'
+              )}
+            </Button>
             {creds.map((cred) => (
               <Chip
                 key={cred.credential_name}
@@ -157,6 +209,60 @@ function CredentialSection({
       </AccordionSummary>
       <AccordionDetails>
         <Divider sx={{ mb: 2 }} />
+        {connectionTestResult ? (
+          <Box
+            sx={(theme) => {
+              const tone = resolveConnectionResultTone(connectionTestResult);
+              const palette =
+                tone === 'success'
+                  ? theme.palette.success
+                  : tone === 'error'
+                    ? theme.palette.error
+                    : theme.palette.warning;
+              return {
+                mb: 2,
+                p: 2,
+                borderRadius: 1,
+                border: `1px solid ${palette.main}`,
+                backgroundColor: palette.light,
+                color: palette.contrastText,
+              };
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+              <Chip
+                label={`Status ${connectionTestResult.status_code}`}
+                size="small"
+                color={resolveConnectionResultTone(connectionTestResult)}
+                sx={{ fontWeight: 700 }}
+              />
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {connectionTestResult.message}
+              </Typography>
+            </Box>
+            {Object.keys(connectionTestResult.details || {}).length > 0 ? (
+              <Box component="details" sx={{ mt: 1 }}>
+                <Typography component="summary" variant="caption" sx={{ cursor: 'pointer', fontWeight: 600 }}>
+                  Provider details
+                </Typography>
+                <Box
+                  component="pre"
+                  sx={{
+                    mt: 1,
+                    mb: 0,
+                    p: 1,
+                    borderRadius: 1,
+                    backgroundColor: 'rgba(0, 0, 0, 0.12)',
+                    overflowX: 'auto',
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  {JSON.stringify(connectionTestResult.details, null, 2)}
+                </Box>
+              </Box>
+            ) : null}
+          </Box>
+        ) : null}
         {isEditing ? (
           <Box component="form" sx={{ mt: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>

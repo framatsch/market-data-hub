@@ -221,6 +221,58 @@ class TestQuoteCaching:
         assert result is None
 
 
+@pytest.mark.asyncio
+async def test_test_connection_success(monkeypatch):
+    provider = LSEGProvider()
+
+    class _FakeData:
+        df = [1]
+
+    class _FakeResponse:
+        data = _FakeData()
+
+    class _FakeDefinition:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def get_data(self):
+            return _FakeResponse()
+
+    monkeypatch.setattr(provider, "_create_session", lambda: None)
+    monkeypatch.setattr(provider, "_throttle", lambda: None)
+
+    with patch("app.providers.lseg.historical_pricing.summaries.Definition", _FakeDefinition):
+        result = await provider.test_connection()
+
+    assert result["status_code"] == 200
+    assert result["success"] is True
+    assert result["message"] == "LSEG session active"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_auth_failure(monkeypatch):
+    provider = LSEGProvider()
+    monkeypatch.setattr(provider, "_create_session", lambda: (_ for _ in ()).throw(Exception("authentication failed")))
+
+    result = await provider.test_connection()
+
+    assert result["status_code"] == 401
+    assert result["success"] is False
+    assert result["message"] == "LSEG authentication failed"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_service_unavailable(monkeypatch):
+    provider = LSEGProvider()
+    monkeypatch.setattr(provider, "_create_session", lambda: (_ for _ in ()).throw(Exception("service unavailable")))
+
+    result = await provider.test_connection()
+
+    assert result["status_code"] == 503
+    assert result["success"] is False
+    assert result["message"] == "LSEG service unavailable"
+
+
 class TestRateLimiting:
     """Test rate limiting and throttling."""
 

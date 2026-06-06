@@ -40,6 +40,54 @@ class PrixeProvider(BasePriceProvider):
             await self._client.aclose()
             self._client = None
 
+    async def test_connection(self) -> dict:
+        """Validate Prixe API key with a lightweight last_sold request."""
+        if not self._api_key:
+            return {
+                "status_code": 401,
+                "success": False,
+                "message": "Invalid Prixe API key",
+                "details": {"reason": "missing api key"},
+            }
+
+        client = await self._get_client()
+        try:
+            response = await client.post("/api/last_sold", json={"symbol": "AAPL"})
+            if response.status_code == 200:
+                return {
+                    "status_code": 200,
+                    "success": True,
+                    "message": "Prixe API key valid",
+                    "details": {"endpoint": "/api/last_sold", "symbol": "AAPL"},
+                }
+            if response.status_code in (401, 403):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Invalid Prixe API key",
+                    "details": {"status_code": response.status_code, "response": response.text[:500]},
+                }
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Prixe service unavailable",
+                "details": {"status_code": response.status_code, "response": response.text[:500]},
+            }
+        except httpx.TimeoutException as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Prixe service unavailable",
+                "details": {"error": str(exc), "reason": "timeout"},
+            }
+        except Exception as exc:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Prixe service unavailable",
+                "details": {"error": str(exc)},
+            }
+
     async def get_last_price(
         self,
         symbol: str,

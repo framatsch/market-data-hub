@@ -368,6 +368,63 @@ class SchwabProvider(BasePriceProvider):
     # Public interface
     # ------------------------------------------------------------------
 
+    async def test_connection(self) -> dict:
+        """Validate Schwab OAuth token with a lightweight account request."""
+        try:
+            await self._check_rate_limit()
+            client = await self._get_client()
+            response = await asyncio.wait_for(
+                client.get_accounts(),
+                timeout=self.timeout_seconds,
+            )
+
+            if response.status_code == _HTTP_OK:
+                return {
+                    "status_code": 200,
+                    "success": True,
+                    "message": "Schwab OAuth token valid",
+                    "details": {"endpoint": "get_accounts"},
+                }
+
+            if response.status_code in (_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN):
+                self._mark_paused()
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Schwab OAuth token expired or invalid",
+                    "details": {"status_code": response.status_code},
+                }
+
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Schwab service unavailable",
+                "details": {"status_code": response.status_code},
+            }
+        except asyncio.TimeoutError:
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Schwab service unavailable",
+                "details": {"reason": "timeout", "timeout_seconds": self.timeout_seconds},
+            }
+        except Exception as exc:
+            error_message = str(exc)
+            lowered = error_message.lower()
+            if any(token in lowered for token in ("token", "unauthor", "forbidden", "expired", "invalid")):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Schwab OAuth token expired or invalid",
+                    "details": {"error": error_message},
+                }
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "Schwab service unavailable",
+                "details": {"error": error_message},
+            }
+
     async def get_historical_prices(
         self,
         symbol: str,

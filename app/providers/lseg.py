@@ -19,6 +19,7 @@ from typing import List, Optional, Dict, Tuple, TypeVar, Callable
 from decimal import Decimal
 from collections import deque
 import time
+import asyncio
 import logging
 import pandas as pd
 
@@ -119,6 +120,55 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # ========================================================================
     # Session Management
     # ========================================================================
+
+    async def test_connection(self) -> dict:
+        """Validate LSEG credentials by opening a session and issuing a lightweight request."""
+        return await asyncio.to_thread(self._test_connection_sync)
+
+    def _test_connection_sync(self) -> dict:
+        try:
+            self._create_session()
+            self._throttle()
+            response = historical_pricing.summaries.Definition(
+                universe="AAPL.O",
+                interval=historical_pricing.Intervals.DAILY,
+                count=1,
+            ).get_data()
+
+            rows = 0
+            if getattr(response, "data", None) is not None and getattr(response.data, "df", None) is not None:
+                rows = len(response.data.df)
+
+            return {
+                "status_code": 200,
+                "success": True,
+                "message": "LSEG session active",
+                "details": {"instrument": "AAPL.O", "rows": rows},
+            }
+        except Exception as exc:
+            error_message = str(exc)
+            lowered = error_message.lower()
+            if any(token in lowered for token in ("auth", "unauthor", "forbidden", "invalid credential", "signon")):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "LSEG authentication failed",
+                    "details": {"error": error_message},
+                }
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "LSEG service unavailable",
+                "details": {"error": error_message},
+            }
+        finally:
+            if self._session is not None:
+                try:
+                    self._session.close()
+                except Exception:
+                    logger.debug("Failed closing LSEG session after test_connection", exc_info=True)
+                self._session = None
+                self._session_created_at = None
 
     def _get_session(self):
         """Get or create Refinitiv session with smart refresh."""

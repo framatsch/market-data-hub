@@ -41,6 +41,11 @@ class BasePriceProvider(ABC):
         """Fetch latest price quote."""
         pass
 
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test provider connectivity and return status_code/success/message/details."""
+        pass
+
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status."""
         raise NotImplementedError("Market status not implemented for this provider")
@@ -59,6 +64,11 @@ class BaseCompanyProvider(ABC):
     @abstractmethod
     async def search_companies(self, query: str) -> List[CompanySummary]:
         """Search for companies."""
+        pass
+
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test provider connectivity and return status_code/success/message/details."""
         pass
 
 class BaseOptionsProvider(ABC):
@@ -83,6 +93,11 @@ class BaseOptionsProvider(ABC):
     @abstractmethod
     async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
         """Fetch specific option quote."""
+        pass
+
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test provider connectivity and return status_code/success/message/details."""
         pass
 
 
@@ -124,6 +139,11 @@ class BaseNewsProvider(ABC):
             DataNotFoundError: If symbol not found
             ProviderError: If news retrieval fails
         """
+        pass
+
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test provider connectivity and return status_code/success/message/details."""
         pass
 
 

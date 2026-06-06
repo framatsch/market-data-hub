@@ -74,3 +74,40 @@ async def test_check_rate_limit(finnhub_provider):
     finnhub_provider._request_times.clear()
     assert await finnhub_provider._check_rate_limit() is True
 
+
+@pytest.mark.asyncio
+async def test_test_connection_success(finnhub_provider):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "ok"
+
+    with patch("httpx.AsyncClient.get", return_value=mock_resp):
+        result = await finnhub_provider.test_connection()
+
+    assert result["status_code"] == 200
+    assert result["success"] is True
+    assert result["message"] == "Finnhub API key valid"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_auth_failure(finnhub_provider):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+    mock_resp.text = "unauthorized"
+
+    with patch("httpx.AsyncClient.get", return_value=mock_resp):
+        result = await finnhub_provider.test_connection()
+
+    assert result["status_code"] == 401
+    assert result["success"] is False
+    assert result["message"] == "Invalid Finnhub API key"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_service_unavailable(finnhub_provider):
+    with patch("httpx.AsyncClient.get", side_effect=Exception("boom")):
+        result = await finnhub_provider.test_connection()
+
+    assert result["status_code"] == 503
+    assert result["success"] is False
+    assert result["message"] == "Finnhub service unavailable"

@@ -111,6 +111,14 @@ class MockNewsProvider(BaseNewsProvider):
         ],
     }
 
+    async def test_connection(self) -> dict:
+        return {
+            "status_code": 200,
+            "success": True,
+            "message": "Mock provider ready",
+            "details": {"provider": "mock"},
+        }
+
     async def get_company_news(
         self,
         symbol: str,

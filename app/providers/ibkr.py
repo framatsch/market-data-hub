@@ -153,6 +153,56 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             self.ib.disconnect()
             self._connected = False
 
+    async def test_connection(self) -> dict:
+        """Validate connectivity to IBKR TWS/Gateway."""
+        was_connected = self.ib.isConnected()
+        try:
+            if was_connected:
+                return {
+                    "status_code": 200,
+                    "success": True,
+                    "message": "Connected to IBKR",
+                    "details": {
+                        "host": self.host,
+                        "port": self.port,
+                        "client_id": self.client_id,
+                        "already_connected": True,
+                    },
+                }
+
+            await self.ib.connectAsync(self.host, self.port, self.client_id)
+            return {
+                "status_code": 200,
+                "success": True,
+                "message": "Connected to IBKR",
+                "details": {
+                    "host": self.host,
+                    "port": self.port,
+                    "client_id": self.client_id,
+                    "already_connected": False,
+                },
+            }
+        except Exception as exc:
+            error_message = str(exc)
+            lowered = error_message.lower()
+            if any(token in lowered for token in ("auth", "credential", "login", "unauthorized", "forbidden")):
+                return {
+                    "status_code": 401,
+                    "success": False,
+                    "message": "Authentication failed",
+                    "details": {"error": error_message},
+                }
+
+            return {
+                "status_code": 503,
+                "success": False,
+                "message": "IBKR TWS/Gateway not reachable",
+                "details": {"error": error_message},
+            }
+        finally:
+            if not was_connected and self.ib.isConnected():
+                self.ib.disconnect()
+
     def _is_valid(self, val) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
 
