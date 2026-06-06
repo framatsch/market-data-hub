@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import asyncio
 import logging
+import asyncio
 from typing import Dict, Optional, cast
 
 from app.admin.provider_config_repository import ProviderConfigRepository, ProviderRuntimeConfig
@@ -54,7 +54,7 @@ class ProviderRegistry:
 
     def __init__(self):
         self._providers: Dict[str, object] = {}
-        self._reload_lock: Optional[asyncio.Lock] = None
+        self._reload_lock = asyncio.Lock()
         self.default_price_provider: str = "ibkr"
         self.default_company_provider: str = "finnhub"
         self.default_options_provider: str = "ibkr"
@@ -62,8 +62,6 @@ class ProviderRegistry:
         self._initialize_providers()
 
     def _get_reload_lock(self) -> asyncio.Lock:
-        if self._reload_lock is None:
-            self._reload_lock = asyncio.Lock()
         return self._reload_lock
 
     def _resolve_default(self, configured: str, setting_key: str, base_class: type) -> str:
@@ -173,18 +171,25 @@ class ProviderRegistry:
             logger.warning("Error closing provider %s", name, exc_info=True)
 
     def _apply_runtime_config(self, provider: object, config: ProviderRuntimeConfig) -> None:
-        setattr(provider, "_runtime_config", config)
-        for attr, value in {
-            "timeout_seconds": config.timeout_seconds,
-            "retry_count": config.retry_count,
-            "retry_backoff_seconds": config.retry_backoff_seconds,
-            "rate_limit_per_sec": config.rate_limit_per_sec,
-            "circuit_breaker_enabled": config.circuit_breaker_enabled,
-            "circuit_breaker_failure_threshold": config.circuit_breaker_failure_threshold,
-            "circuit_breaker_reset_seconds": config.circuit_breaker_reset_seconds,
-            "connection_config": config.connection_config,
-        }.items():
-            setattr(provider, attr, value)
+        configure = getattr(provider, "configure", None)
+        if callable(configure):
+            configure(config)
+        else:
+            setattr(provider, "_runtime_config", config)
+
+    def is_provider_paused(self, name: str) -> bool:
+        return bool(getattr(self._providers.get(name), "is_paused", False))
+
+    def unpause_provider(self, name: str) -> None:
+        unpause = getattr(self._providers.get(name), "unpause", None)
+        if callable(unpause):
+            unpause()
+
+    def get_provider_instance(self, name: str) -> object | None:
+        return self._providers.get(name)
+
+    def list_provider_instances(self) -> dict[str, object]:
+        return dict(self._providers)
 
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
         name = name or self.default_price_provider

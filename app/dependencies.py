@@ -23,7 +23,6 @@ from app.services.company_service import CompanyService
 from app.services.options_service import OptionsService
 from app.services.news_service import NewsService, news_service
 from app.providers.registry import get_provider as _get_provider
-from app.providers.finnhub import FinnhubProvider
 
 @lru_cache
 def get_price_service() -> PriceService:
@@ -49,9 +48,3 @@ NewsServiceDep = Annotated[NewsService, Depends(get_news_service)]
 
 def get_provider(provider_type: str, name: str | None = None):
     return _get_provider(provider_type, name)
-
-
-def get_company_provider() -> FinnhubProvider:
-    """Return the provider used for company/news data (use Finnhub only)."""
-    # Always use Finnhub for news/company data (LSEG removed)
-    return FinnhubProvider()

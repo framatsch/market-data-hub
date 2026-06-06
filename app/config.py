@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from typing import Literal
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -80,10 +80,12 @@ class Settings(BaseSettings):
     SCHWAB_ALERT_WEBHOOK_FORMAT: Literal["slack", "generic"] = "slack"
 
     # Admin Auth
-    ADMIN_AUTH_ENABLED: bool = False
+    # Set ADMIN_AUTH_ENABLED=false only for local development.
+    ADMIN_AUTH_ENABLED: bool = True
     ADMIN_OIDC_ISSUER: str = ""
     ADMIN_OIDC_CLIENT_ID: str = ""
     ADMIN_OIDC_CLIENT_SECRET: SecretStr = SecretStr("")
+    ADMIN_OIDC_REDIRECT_URI: str = ""
 
     # Polygon.io Provider
     POLYGON_API_KEY: SecretStr = SecretStr("stub-key")
@@ -101,5 +103,14 @@ class Settings(BaseSettings):
     PROVIDER_MAX_RETRIES: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _validate_production_admin_auth(self) -> "Settings":
+        if self.APP_ENV == "prod" and not self.ADMIN_AUTH_ENABLED:
+            raise ValueError("ADMIN_AUTH_ENABLED=false is only allowed outside production")
+        if self.APP_ENV == "prod" and self.ADMIN_AUTH_ENABLED:
+            if not self.ADMIN_OIDC_ISSUER or not self.ADMIN_OIDC_CLIENT_ID:
+                raise ValueError("ADMIN_OIDC_ISSUER and ADMIN_OIDC_CLIENT_ID are required when admin auth is enabled in production")
+        return self
 
 settings = Settings()

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.api.admin_auth import AdminAuth, AdminPrincipal, admin_auth
@@ -106,6 +106,30 @@ def test_token_exchange_proxies_to_oidc(client, monkeypatch) -> None:
     assert response.json() == {"access_token": "token", "expires_in": 3600}
 
 
+def test_token_exchange_rejects_redirect_uri_mismatch(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ADMIN_OIDC_ISSUER", "https://auth.example/application/o/mdh")
+    monkeypatch.setattr(settings, "ADMIN_OIDC_CLIENT_ID", "mdh-admin")
+    monkeypatch.setattr(settings, "ADMIN_OIDC_REDIRECT_URI", "https://admin.example/callback")
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("token endpoint should not be called")
+
+    monkeypatch.setattr("app.api.routes_admin.httpx.AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/api/admin/auth/token",
+        json={
+            "code": "code",
+            "code_verifier": "verifier",
+            "redirect_uri": "https://evil.example/callback",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "redirect_uri does not match configured admin redirect URI"
+
+
 async def test_admin_auth_refreshes_jwks_on_unknown_kid(monkeypatch) -> None:
     auth = AdminAuth()
     auth._jwks = {"keys": [{"kid": "old"}]}
@@ -117,4 +141,19 @@ async def test_admin_auth_refreshes_jwks_on_unknown_kid(monkeypatch) -> None:
     principal = await auth.validate_credentials(SimpleNamespace(credentials="token"))
 
     assert principal.user == "alice"
+    auth._get_jwks.assert_awaited_once_with()
+
+
+async def test_admin_auth_throttles_forced_jwks_refresh(monkeypatch) -> None:
+    auth = AdminAuth()
+    auth._jwks = {"keys": [{"kid": "old"}]}
+    auth._jwks_loaded_at = 1000
+    auth._jwks_force_refreshed_at = 2000
+    auth._get_jwks = AsyncMock(return_value={"keys": [{"kid": "old", "alg": "RS256"}]})
+    monkeypatch.setattr("app.api.admin_auth.time.monotonic", lambda: 2001)
+    monkeypatch.setattr("app.api.admin_auth.jwt.get_unverified_header", lambda token: {"kid": "random"})
+
+    with pytest.raises(HTTPException):
+        await auth.validate_credentials(SimpleNamespace(credentials="token"))
+
     auth._get_jwks.assert_awaited_once_with()

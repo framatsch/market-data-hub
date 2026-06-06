@@ -4,6 +4,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+SETTINGS_ALLOWLIST = frozenset(
+    {
+        "default_price_provider",
+        "default_company_provider",
+        "default_options_provider",
+        "default_news_provider",
+    }
+)
+
+
 class SettingsRepository:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -16,6 +26,7 @@ class SettingsRepository:
         db_parent = Path(self.db_path).expanduser().resolve().parent
         db_parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS system_settings (
@@ -30,6 +41,7 @@ class SettingsRepository:
         return await asyncio.to_thread(self._get_sync, key)
 
     def _get_sync(self, key: str) -> str | None:
+        self._validate_key(key)
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -45,6 +57,7 @@ class SettingsRepository:
         return await asyncio.to_thread(self._set_sync, key, value)
 
     def _set_sync(self, key: str, value: str) -> dict[str, str]:
+        self._validate_key(key)
         updated_at = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
@@ -72,3 +85,8 @@ class SettingsRepository:
                 """
             ).fetchall()
         return {str(row[0]): str(row[1]) for row in rows}
+
+    @staticmethod
+    def _validate_key(key: str) -> None:
+        if key not in SETTINGS_ALLOWLIST:
+            raise ValueError(f"Unknown system setting: {key}")

@@ -46,12 +46,15 @@ class ProviderConfigRepository:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path, check_same_thread=False)
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def _initialize(self) -> None:
         db_parent = Path(self.db_path).expanduser().resolve().parent
         db_parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS provider_config (
@@ -144,22 +147,37 @@ class ProviderConfigRepository:
         return candidate
 
     async def list_all(self) -> list[ProviderRuntimeConfig]:
-        return await asyncio.gather(*(self.get(provider_name) for provider_name in KNOWN_PROVIDERS))
+        return await asyncio.to_thread(self._list_all_sync)
 
-    def _row_to_config(self, row: tuple[Any, ...]) -> ProviderRuntimeConfig:
-        connection_config = json.loads(row[9]) if row[9] else {}
+    def _list_all_sync(self) -> list[ProviderRuntimeConfig]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT provider_name, enabled, timeout_seconds, retry_count,
+                    retry_backoff_seconds, rate_limit_per_sec, circuit_breaker_enabled,
+                    circuit_breaker_failure_threshold, circuit_breaker_reset_seconds,
+                    connection_config_json, updated_at
+                FROM provider_config
+                """
+            ).fetchall()
+        configs = {provider_name: self._default_config(provider_name) for provider_name in KNOWN_PROVIDERS}
+        configs.update({row["provider_name"]: self._row_to_config(row) for row in rows})
+        return [configs[provider_name] for provider_name in KNOWN_PROVIDERS]
+
+    def _row_to_config(self, row: sqlite3.Row) -> ProviderRuntimeConfig:
+        connection_config = json.loads(row["connection_config_json"]) if row["connection_config_json"] else {}
         return ProviderRuntimeConfig(
-            provider_name=row[0],
-            enabled=bool(row[1]),
-            timeout_seconds=float(row[2]),
-            retry_count=int(row[3]),
-            retry_backoff_seconds=float(row[4]),
-            rate_limit_per_sec=float(row[5]),
-            circuit_breaker_enabled=bool(row[6]),
-            circuit_breaker_failure_threshold=int(row[7]),
-            circuit_breaker_reset_seconds=float(row[8]),
+            provider_name=row["provider_name"],
+            enabled=bool(row["enabled"]),
+            timeout_seconds=float(row["timeout_seconds"]),
+            retry_count=int(row["retry_count"]),
+            retry_backoff_seconds=float(row["retry_backoff_seconds"]),
+            rate_limit_per_sec=float(row["rate_limit_per_sec"]),
+            circuit_breaker_enabled=bool(row["circuit_breaker_enabled"]),
+            circuit_breaker_failure_threshold=int(row["circuit_breaker_failure_threshold"]),
+            circuit_breaker_reset_seconds=float(row["circuit_breaker_reset_seconds"]),
             connection_config=connection_config,
-            updated_at=row[10],
+            updated_at=row["updated_at"],
         )
 
     def _default_config(self, provider_name: str) -> ProviderRuntimeConfig:

@@ -161,7 +161,14 @@ def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> N
 
 
 def test_alert_webhook_update_and_test(client, monkeypatch) -> None:
-    response = client.put("/api/admin/alerts/webhook", json={"webhook_url": "https://hooks.example/test", "format": "slack"})
+    monkeypatch.setattr(
+        "app.utils.webhooks.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    response = client.put(
+        "/api/admin/alerts/webhook",
+        json={"webhook_url": "https://hooks.example/test", "format": "slack"},
+    )
     assert response.status_code == 200
 
     class FakeAsyncClient:
@@ -183,3 +190,29 @@ def test_alert_webhook_update_and_test(client, monkeypatch) -> None:
     test_response = client.post("/api/admin/alerts/test")
     assert test_response.status_code == 200
     assert test_response.json() == {"status": "sent"}
+
+
+def test_alert_webhook_rejects_non_https_url(client) -> None:
+    response = client.put("/api/admin/alerts/webhook", json={"webhook_url": "http://hooks.example/test"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "webhook_url must use https://"
+
+
+def test_alert_webhook_rejects_private_resolved_address(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.utils.webhooks.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("10.0.0.5", 443))],
+    )
+
+    response = client.put("/api/admin/alerts/webhook", json={"webhook_url": "https://hooks.example/test"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "webhook_url must resolve to a public internet address"
+
+
+def test_alert_webhook_rejects_loopback_literal(client) -> None:
+    response = client.put("/api/admin/alerts/webhook", json={"webhook_url": "https://127.0.0.1/test"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "webhook_url must resolve to a public internet address"

@@ -27,6 +27,7 @@ Authentication model:
 
 import asyncio
 import logging
+import os
 import tempfile
 import time
 from collections import deque
@@ -38,7 +39,6 @@ from typing import Any, Optional
 from app.config import settings
 from app.models.price import PriceBar, PriceQuote
 from app.providers.base import BasePriceProvider
-from app.utils.secrets import unwrap_secret
 from app.utils.errors import (
     DataNotFoundError,
     DataValidationError,
@@ -46,6 +46,8 @@ from app.utils.errors import (
     ProviderError,
     ProviderTimeoutError,
 )
+from app.utils.secrets import unwrap_secret
+from app.utils.webhooks import validate_webhook_url
 
 try:
     from schwab.auth import easy_client
@@ -88,24 +90,40 @@ class SchwabProvider(BasePriceProvider):
         self._client: Any = None
         self._paused = False
         self._temp_token_path: str | None = None
-        # Locks are created lazily inside the running event loop (Python 3.12+ safe).
-        self._client_lock: Optional[asyncio.Lock] = None
-        self._rate_limit_lock: Optional[asyncio.Lock] = None
+        self._client_lock = asyncio.Lock()
+        self._rate_limit_lock = asyncio.Lock()
         self._request_times: deque[float] = deque()  # no maxlen — managed manually
+        self.timeout_seconds = settings.SCHWAB_TIMEOUT_SECONDS
+        self.rate_limit_per_sec = settings.SCHWAB_RATE_LIMIT_PER_SEC
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _get_client_lock(self) -> asyncio.Lock:
-        if self._client_lock is None:
-            self._client_lock = asyncio.Lock()
         return self._client_lock
 
     def _get_rate_limit_lock(self) -> asyncio.Lock:
-        if self._rate_limit_lock is None:
-            self._rate_limit_lock = asyncio.Lock()
         return self._rate_limit_lock
+
+    def configure(self, config: Any) -> None:
+        super().configure(config)
+        self.timeout_seconds = config.timeout_seconds
+        self.rate_limit_per_sec = config.rate_limit_per_sec
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def _cleanup_temp_token_file(self) -> None:
+        if self._temp_token_path is None:
+            return
+        try:
+            Path(self._temp_token_path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to remove Schwab temp token file", exc_info=True)
+        finally:
+            self._temp_token_path = None
 
     async def _load_repository_credential(self, credential_name: str) -> str | None:
         try:
@@ -128,11 +146,13 @@ class SchwabProvider(BasePriceProvider):
     async def _resolve_token_path(self) -> str:
         token_json = await self._load_repository_credential("token_json")
         if token_json is not None:
-            temp_file = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
-            with temp_file:
+            self._cleanup_temp_token_file()
+            fd, path = tempfile.mkstemp(suffix=".json")
+            os.chmod(path, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
                 temp_file.write(token_json)
-            self._temp_token_path = temp_file.name
-            return temp_file.name
+            self._temp_token_path = path
+            return path
 
         if Path(settings.SCHWAB_TOKEN_PATH).exists():
             return settings.SCHWAB_TOKEN_PATH
@@ -154,7 +174,8 @@ class SchwabProvider(BasePriceProvider):
             if self._client is not None:
                 return self._client
 
-            if easy_client is None:
+            client_factory = easy_client
+            if client_factory is None:
                 raise ProviderConnectionError(
                     "schwab-py is not installed. Install dependencies and retry.",
                     details={"dependency": "schwab-py"},
@@ -167,7 +188,7 @@ class SchwabProvider(BasePriceProvider):
                 # easy_client() is a synchronous factory: reads the token file and
                 # returns an async httpx client when asyncio=True. It does NOT perform
                 # network I/O during construction, so asyncio.to_thread is safe here.
-                return easy_client(
+                return client_factory(
                     api_key=key_value,
                     app_secret=secret_value,
                     callback_url=settings.SCHWAB_CALLBACK_URL,
@@ -178,11 +199,13 @@ class SchwabProvider(BasePriceProvider):
             try:
                 self._client = await asyncio.to_thread(_create_client)
             except FileNotFoundError:
+                self._cleanup_temp_token_file()
                 raise ProviderConnectionError(
                     "Schwab token not found. Re-authorize Schwab through the admin UI.",
                     details={"hint": "Configure schwab.token_json or set SCHWAB_TOKEN_PATH."},
                 )
             except Exception as exc:
+                self._cleanup_temp_token_file()
                 raise ProviderConnectionError(
                     "Failed to authenticate with Schwab. Re-authorize through the admin UI.",
                     details={"hint": f"Auth error: {type(exc).__name__}"},
@@ -192,7 +215,7 @@ class SchwabProvider(BasePriceProvider):
 
     async def _check_rate_limit(self) -> None:
         """Sliding-window rate limiter — async-safe via asyncio.Lock."""
-        limit = settings.SCHWAB_RATE_LIMIT_PER_SEC
+        limit = self.rate_limit_per_sec
         if limit <= 0:
             return
 
@@ -291,18 +314,21 @@ class SchwabProvider(BasePriceProvider):
             volume=int(quote["totalVolume"]) if quote.get("totalVolume") is not None else None,
         )
 
-    def _handle_error_status(self, status_code: int, symbol: str, context: str) -> None:
+    def _mark_paused(self) -> bool:
+        was_initialized = self._client is not None
+        if was_initialized:
+            self._paused = True
+        self._client = None
+        return was_initialized
+
+    async def _handle_error_status(self, status_code: int, symbol: str, context: str) -> None:
         """Map Schwab HTTP error codes to appropriate AppError types."""
         if status_code == _HTTP_RATE_LIMITED:
             raise ProviderTimeoutError("schwab", details={"status_code": status_code})
         if status_code in (_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN):
-            was_initialized = self._client is not None
+            was_initialized = self._mark_paused()
             if was_initialized:
-                self._paused = True
-                asyncio.create_task(
-                    self._fire_webhook("Schwab token expired - re-authorization required via MDH Admin UI")
-                )
-            self._client = None
+                await self._fire_webhook("Schwab token expired - re-authorization required via MDH Admin UI")
             raise ProviderConnectionError(
                 "Schwab token has expired or is invalid. Re-authorize through the admin UI.",
                 details={"hint": "Token rotation required every 7 days."},
@@ -318,11 +344,16 @@ class SchwabProvider(BasePriceProvider):
         )
         if not webhook_url:
             return
+        try:
+            validate_webhook_url(webhook_url)
+        except ValueError:
+            logger.warning("Skipping Schwab webhook with unsafe URL")
+            return
         payload = {"text": message} if settings.SCHWAB_ALERT_WEBHOOK_FORMAT == "slack" else {"message": message}
         try:
             import httpx
 
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
                 response = await client.post(webhook_url, json=payload)
                 response.raise_for_status()
         except Exception:
@@ -331,6 +362,7 @@ class SchwabProvider(BasePriceProvider):
     def unpause(self) -> None:
         self._paused = False
         self._client = None
+        self._cleanup_temp_token_file()
 
     # ------------------------------------------------------------------
     # Public interface
@@ -374,16 +406,16 @@ class SchwabProvider(BasePriceProvider):
                     end_datetime=end,
                     need_extended_hours_data=True,
                 ),
-                timeout=settings.SCHWAB_TIMEOUT_SECONDS,
+                timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
-                details={"reason": "request timeout", "timeout_seconds": settings.SCHWAB_TIMEOUT_SECONDS},
+                details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
             )
 
         if response.status_code != _HTTP_OK:
-            self._handle_error_status(response.status_code, symbol, "historical price")
+            await self._handle_error_status(response.status_code, symbol, "historical price")
 
         bars = self._parse_ohlcv(response.json(), symbol)
         if not bars:
@@ -403,16 +435,16 @@ class SchwabProvider(BasePriceProvider):
         try:
             response = await asyncio.wait_for(
                 client.get_quotes([symbol]),
-                timeout=settings.SCHWAB_TIMEOUT_SECONDS,
+                timeout=self.timeout_seconds,
             )
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
-                details={"reason": "request timeout", "timeout_seconds": settings.SCHWAB_TIMEOUT_SECONDS},
+                details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
             )
 
         if response.status_code != _HTTP_OK:
-            self._handle_error_status(response.status_code, symbol, "quote")
+            await self._handle_error_status(response.status_code, symbol, "quote")
 
         return self._parse_quote(symbol, response.json())
 
@@ -430,3 +462,4 @@ class SchwabProvider(BasePriceProvider):
                     await maybe_coro
             finally:
                 self._client = None
+                self._cleanup_temp_token_file()

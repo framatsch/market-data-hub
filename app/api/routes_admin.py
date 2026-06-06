@@ -15,8 +15,8 @@ from app.admin.runtime import get_key_repository, get_provider_config_repository
 from app.config import settings
 from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
 from app.providers.registry import registry
-from app.providers.schwab import SchwabProvider
 from app.utils.secrets import unwrap_secret
+from app.utils.webhooks import validate_webhook_url
 
 try:
     from schwab.auth import client_from_received_url
@@ -25,6 +25,8 @@ except ImportError:  # pragma: no cover
 
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
+
+_SCHWAB_TOKEN_LIFETIME_DAYS = 7
 
 
 class TokenExchangeRequest(BaseModel):
@@ -82,12 +84,22 @@ class AlertWebhookUpdate(BaseModel):
     format: str = "slack"
 
 
-@router.get("/auth/url")
-async def get_admin_auth_url(code_challenge: Annotated[str, Query(min_length=43, max_length=128)]) -> dict[str, str]:
+def _require_oidc_config() -> str:
     if not settings.ADMIN_OIDC_ISSUER or not settings.ADMIN_OIDC_CLIENT_ID:
         raise HTTPException(status_code=503, detail="Admin OIDC is not configured")
+    return settings.ADMIN_OIDC_ISSUER.rstrip("/")
 
-    issuer = settings.ADMIN_OIDC_ISSUER.rstrip("/")
+
+def _validate_webhook_url(webhook_url: str) -> None:
+    try:
+        validate_webhook_url(webhook_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/auth/url")
+async def get_admin_auth_url(code_challenge: Annotated[str, Query(min_length=43, max_length=128)]) -> dict[str, str]:
+    issuer = _require_oidc_config()
     params = {
         "client_id": settings.ADMIN_OIDC_CLIENT_ID,
         "response_type": "code",
@@ -95,23 +107,25 @@ async def get_admin_auth_url(code_challenge: Annotated[str, Query(min_length=43,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
+    if settings.ADMIN_OIDC_REDIRECT_URI:
+        params["redirect_uri"] = settings.ADMIN_OIDC_REDIRECT_URI
     return {"auth_url": f"{issuer}/authorize?{urlencode(params)}"}
 
 
 @router.post("/auth/token")
 async def exchange_admin_auth_token(payload: TokenExchangeRequest) -> dict[str, Any]:
-    if not settings.ADMIN_OIDC_ISSUER or not settings.ADMIN_OIDC_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="Admin OIDC is not configured")
-
-    issuer = settings.ADMIN_OIDC_ISSUER.rstrip("/")
+    issuer = _require_oidc_config()
     data = {
         "grant_type": "authorization_code",
         "client_id": settings.ADMIN_OIDC_CLIENT_ID,
         "code": payload.code,
         "code_verifier": payload.code_verifier,
     }
-    if payload.redirect_uri:
-        data["redirect_uri"] = payload.redirect_uri
+    redirect_uri = settings.ADMIN_OIDC_REDIRECT_URI or payload.redirect_uri
+    if settings.ADMIN_OIDC_REDIRECT_URI and payload.redirect_uri and payload.redirect_uri != settings.ADMIN_OIDC_REDIRECT_URI:
+        raise HTTPException(status_code=400, detail="redirect_uri does not match configured admin redirect URI")
+    if redirect_uri:
+        data["redirect_uri"] = redirect_uri
     client_secret = unwrap_secret(settings.ADMIN_OIDC_CLIENT_SECRET)
     if client_secret:
         data["client_secret"] = client_secret
@@ -188,10 +202,10 @@ async def update_admin_credentials(
 
 
 def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]:
-    provider = registry._providers.get(name)
+    provider = registry.get_provider_instance(name)
     if not config.enabled:
         return {"name": name, "enabled": False, "status": "disabled", "error": None}
-    if isinstance(provider, SchwabProvider) and getattr(provider, "_paused", False):
+    if registry.is_provider_paused(name):
         return {
             "name": name,
             "enabled": True,
@@ -236,7 +250,7 @@ async def get_admin_settings_capabilities(_principal: PrincipalDep) -> dict[str,
         "companies": [],
         "news": [],
     }
-    for name, provider in sorted(registry._providers.items()):
+    for name, provider in sorted(registry.list_provider_instances().items()):
         if isinstance(provider, BasePriceProvider):
             capabilities["prices"].append(name)
         if isinstance(provider, BaseOptionsProvider):
@@ -361,12 +375,10 @@ async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _princip
         raise HTTPException(status_code=400, detail=f"Invalid callback URL: {exc}") from exc
 
     await key_repo.save("schwab", "token_json", token_json)
-    provider = registry._providers.get("schwab")
-    if isinstance(provider, SchwabProvider):
-        provider.unpause()
+    registry.unpause_provider("schwab")
     return {
         "status": "ok",
-        "token_expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        "token_expires_at": (datetime.now(timezone.utc) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat(),
     }
 
 
@@ -377,20 +389,19 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
     if token_json is None and Path(settings.SCHWAB_TOKEN_PATH).exists():
         storage = "file-fallback"
         token_json = "configured"
-    provider = registry._providers.get("schwab")
-    paused = isinstance(provider, SchwabProvider) and getattr(provider, "_paused", False)
+    paused = registry.is_provider_paused("schwab")
     if not token_json:
         return {"status": "not_configured", "paused": paused, "token_configured": False}
     if paused:
         return {"status": "expired", "paused": True, "token_configured": True, "storage": storage, "expires_at": None, "days_remaining": 0}
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)
     return {
         "status": "active",
         "paused": False,
         "token_configured": True,
         "storage": storage,
         "expires_at": expires_at.isoformat(),
-        "days_remaining": 7,
+        "days_remaining": _SCHWAB_TOKEN_LIFETIME_DAYS,
     }
 
 
@@ -398,6 +409,7 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
 async def update_alert_webhook(payload: AlertWebhookUpdate, _principal: PrincipalDep) -> dict[str, Any]:
     if payload.format not in {"slack", "generic"}:
         raise HTTPException(status_code=422, detail="format must be slack or generic")
+    _validate_webhook_url(payload.webhook_url)
     await get_key_repository().save("schwab", "alert_webhook_url", payload.webhook_url)
     repo = get_provider_config_repository()
     config = await repo.get("schwab")
@@ -411,7 +423,8 @@ async def test_alert_webhook(_principal: PrincipalDep) -> dict[str, str]:
     webhook_url = await get_key_repository().get("schwab", "alert_webhook_url")
     if not webhook_url:
         raise HTTPException(status_code=503, detail="Alert webhook URL not configured")
-    async with httpx.AsyncClient(timeout=10) as client:
+    _validate_webhook_url(webhook_url)
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         response = await client.post(webhook_url, json={"text": "Market Data Hub test alert"})
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Webhook returned HTTP {response.status_code}")

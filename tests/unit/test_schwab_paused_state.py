@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -38,12 +39,15 @@ async def test_paused_provider_raises_before_client_init(monkeypatch) -> None:
 
 async def test_token_loaded_from_key_repository(monkeypatch, tmp_path) -> None:
     set_admin_runtime(
-        key_repository=FakeKeyRepository(
-            {
-                ("schwab", "api_key"): "repo-key",
-                ("schwab", "app_secret"): "repo-secret",
-                ("schwab", "token_json"): '{"access_token": "token"}',
-            }
+        key_repository=cast(
+            Any,
+            FakeKeyRepository(
+                {
+                    ("schwab", "api_key"): "repo-key",
+                    ("schwab", "app_secret"): "repo-secret",
+                    ("schwab", "token_json"): '{"access_token": "token"}',
+                }
+            ),
         )
     )
     captured = {}
@@ -60,6 +64,37 @@ async def test_token_loaded_from_key_repository(monkeypatch, tmp_path) -> None:
     assert captured["api_key"] == "repo-key"
     assert captured["app_secret"] == "repo-secret"
     assert Path(captured["token_path"]).read_text() == '{"access_token": "token"}'
+    assert Path(captured["token_path"]).stat().st_mode & 0o777 == 0o600
+
+    await provider.close()
+    assert not Path(captured["token_path"]).exists()
+
+
+async def test_temp_token_removed_when_easy_client_fails(monkeypatch) -> None:
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository(
+                {
+                    ("schwab", "api_key"): "repo-key",
+                    ("schwab", "app_secret"): "repo-secret",
+                    ("schwab", "token_json"): '{"access_token": "token"}',
+                }
+            ),
+        )
+    )
+
+    def fake_easy_client(**kwargs):
+        assert Path(kwargs["token_path"]).exists()
+        raise RuntimeError("expired")
+
+    monkeypatch.setattr(schwab_module, "easy_client", fake_easy_client)
+    provider = SchwabProvider()
+
+    with pytest.raises(ProviderConnectionError):
+        await provider._get_client()
+
+    assert provider._temp_token_path is None
 
 
 async def test_unauthorized_with_initialized_client_pauses_and_fires_webhook(monkeypatch) -> None:
@@ -68,11 +103,24 @@ async def test_unauthorized_with_initialized_client_pauses_and_fires_webhook(mon
     provider._fire_webhook = AsyncMock()
 
     with pytest.raises(ProviderConnectionError):
-        provider._handle_error_status(401, "AAPL", "quote")
+        await provider._handle_error_status(401, "AAPL", "quote")
 
     assert provider._paused is True
     assert provider._client is None
-    provider._fire_webhook.assert_called_once()
+    provider._fire_webhook.assert_awaited_once()
+
+
+async def test_unauthorized_without_initialized_client_does_not_pause() -> None:
+    provider = SchwabProvider()
+    provider._client = None
+    provider._fire_webhook = AsyncMock()
+
+    with pytest.raises(ProviderConnectionError):
+        await provider._handle_error_status(401, "AAPL", "quote")
+
+    assert provider._paused is False
+    assert provider._client is None
+    provider._fire_webhook.assert_not_called()
 
 
 async def test_unpause_clears_paused_state_and_client() -> None:
@@ -88,6 +136,10 @@ async def test_unpause_clears_paused_state_and_client() -> None:
 
 async def test_fire_webhook_uses_configured_url(monkeypatch) -> None:
     monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("https://hooks.example/test"))
+    monkeypatch.setattr(
+        "app.utils.webhooks.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
     sent = {}
 
     class FakeAsyncClient:
@@ -110,3 +162,31 @@ async def test_fire_webhook_uses_configured_url(monkeypatch) -> None:
     await SchwabProvider()._fire_webhook("message")
 
     assert sent == {"url": "https://hooks.example/test", "json": {"text": "message"}}
+
+
+async def test_fire_webhook_skips_non_https_url(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("http://hooks.example/test"))
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("HTTP client should not be created")
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
+
+    await SchwabProvider()._fire_webhook("message")
+
+
+async def test_fire_webhook_skips_private_resolved_address(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("https://hooks.example/test"))
+    monkeypatch.setattr(
+        "app.utils.webhooks.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("172.16.0.10", 443))],
+    )
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("HTTP client should not be created")
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
+
+    await SchwabProvider()._fire_webhook("message")

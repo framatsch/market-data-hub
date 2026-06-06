@@ -23,6 +23,12 @@ class FakePriceProvider(BasePriceProvider):
         raise NotImplementedError
 
 
+class CustomConfigureProvider(FakePriceProvider):
+    def configure(self, config) -> None:
+        self.configured_timeout = config.timeout_seconds
+        self.timeout_seconds = 999
+
+
 class TestRegistry(ProviderRegistry):
     provider_classes = {"ibkr": FakePriceProvider, "finnhub": FakePriceProvider}
 
@@ -62,6 +68,24 @@ async def test_registry_reload_applies_runtime_config(tmp_path) -> None:
     provider = cast(FakePriceProvider, registry._providers["ibkr"])
     assert getattr(provider, "timeout_seconds") == 22
     assert getattr(provider, "retry_count") == 6
+
+
+async def test_registry_reload_does_not_override_provider_configure(tmp_path) -> None:
+    class CustomRegistry(TestRegistry):
+        provider_classes = {"ibkr": CustomConfigureProvider}
+
+        def _initialize_providers(self):
+            self._providers = {"ibkr": CustomConfigureProvider()}
+
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    await repo.save("ibkr", {"enabled": True, "timeout_seconds": 22})
+    registry = CustomRegistry()
+
+    await registry.reload_from_config(repo)
+
+    provider = cast(CustomConfigureProvider, registry._providers["ibkr"])
+    assert provider.configured_timeout == 22
+    assert provider.timeout_seconds == 999
 
 
 async def test_registry_reload_uses_database_default(tmp_path) -> None:

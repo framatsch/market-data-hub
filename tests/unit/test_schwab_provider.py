@@ -296,6 +296,7 @@ async def test_get_last_price_401_clears_client_and_raises_connection_error(prov
 
     assert "expired" in exc.value.message.lower() or "invalid" in exc.value.message.lower()
     assert provider._client is None  # must be cleared so next call re-authenticates
+    assert provider._paused is True
 
 
 @pytest.mark.asyncio
@@ -309,6 +310,7 @@ async def test_get_last_price_403_clears_client_and_raises_connection_error(prov
         await provider.get_last_price("AAPL")
 
     assert provider._client is None
+    assert provider._paused is True
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +396,19 @@ async def test_close_sync_close_method(provider: SchwabProvider):
     await provider.close()
 
     assert provider._client is None
+
+
+@pytest.mark.asyncio
+async def test_close_removes_temp_token_file(provider: SchwabProvider, tmp_path: Path):
+    temp_token = tmp_path / "repo-token.json"
+    temp_token.write_text('{"access_token": "token"}', encoding="utf-8")
+    provider._temp_token_path = str(temp_token)
+    provider._client = None
+
+    await provider.close()
+
+    assert provider._temp_token_path is None
+    assert not temp_token.exists()
 
 
 # ---------------------------------------------------------------------------

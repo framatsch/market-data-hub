@@ -17,7 +17,7 @@
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from app.models.price import PriceBar, PriceQuote
 from app.models.company import CompanyProfile, CompanySummary
@@ -26,6 +26,11 @@ from app.models.news import NewsArticle
 from app.models.common import MarketStatus
 
 class BasePriceProvider(ABC):
+    def configure(self, config: Any) -> None:
+        """Apply runtime configuration from the admin repository."""
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
+
     @abstractmethod
     async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
         """Fetch historical price bars."""
@@ -41,6 +46,11 @@ class BasePriceProvider(ABC):
         raise NotImplementedError("Market status not implemented for this provider")
 
 class BaseCompanyProvider(ABC):
+    def configure(self, config: Any) -> None:
+        """Apply runtime configuration from the admin repository."""
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
+
     @abstractmethod
     async def get_company_profile(self, symbol: str) -> CompanyProfile:
         """Fetch company profile."""
@@ -52,6 +62,11 @@ class BaseCompanyProvider(ABC):
         pass
 
 class BaseOptionsProvider(ABC):
+    def configure(self, config: Any) -> None:
+        """Apply runtime configuration from the admin repository."""
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
+
     @abstractmethod
     async def get_option_chain(
         self,
@@ -73,6 +88,11 @@ class BaseOptionsProvider(ABC):
 
 class BaseNewsProvider(ABC):
     """Abstract base class for news data providers."""
+
+    def configure(self, config: Any) -> None:
+        """Apply runtime configuration from the admin repository."""
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
 
     @abstractmethod
     async def get_company_news(
@@ -105,3 +125,17 @@ class BaseNewsProvider(ABC):
             ProviderError: If news retrieval fails
         """
         pass
+
+
+def _apply_runtime_config_defaults(provider: object, config: Any) -> None:
+    for attr in (
+        "timeout_seconds",
+        "retry_count",
+        "retry_backoff_seconds",
+        "rate_limit_per_sec",
+        "circuit_breaker_enabled",
+        "circuit_breaker_failure_threshold",
+        "circuit_breaker_reset_seconds",
+        "connection_config",
+    ):
+        setattr(provider, attr, getattr(config, attr))
