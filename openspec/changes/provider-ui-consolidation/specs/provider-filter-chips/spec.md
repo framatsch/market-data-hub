@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Provider Status Filter Chips
-The `ProvidersPage` SHALL display a row of filter chips above the provider list. The available filter options SHALL be: All, Active, Inactive, Healthy, Not Configured. Multiple chips MAY be selectable simultaneously (additive OR filter). "All" deselects all other chips.
+The `ProvidersPage` SHALL display a row of filter chips above the provider list. The available filter options SHALL be: All, Active, Inactive, Healthy, Not Configured. Multiple chips MAY be selectable simultaneously (additive OR filter: a provider matches if it satisfies ANY selected filter). "All" deselects all other chips.
 
 #### Scenario: Default state
 - **WHEN** the Providers page loads
@@ -19,13 +19,32 @@ The `ProvidersPage` SHALL display a row of filter chips above the provider list.
 - **WHEN** the user selects the "Healthy" chip
 - **THEN** only providers with `status: "healthy"` SHALL be shown
 
-#### Scenario: Filter by Not Configured
+#### Scenario: Filter by Not Configured — API key providers
 - **WHEN** the user selects the "Not Configured" chip
-- **THEN** only providers whose credentials are all `set: false` SHALL be shown
+- **AND** a provider is finnhub, polygon, lseg, or schwab
+- **THEN** that provider SHALL be included if ALL of its credentials have `set: false` in `GET /api/admin/credentials`
+
+#### Scenario: Filter by Not Configured — IBKR
+- **WHEN** the user selects the "Not Configured" chip
+- **AND** the provider is IBKR
+- **THEN** IBKR SHALL be included if `connection_config.account_id === "DU123456"` (the placeholder default)
+- **NOTE**: host `127.0.0.1` and port `4001` are valid defaults for a local Gateway setup and SHALL NOT be used as "not configured" signals
+
+#### Scenario: Filter by Not Configured — mock and prixe
+- **WHEN** the user selects the "Not Configured" chip
+- **THEN** mock and prixe providers SHALL NEVER match this filter (they have no configurable credentials)
 
 #### Scenario: Selecting All clears other filters
 - **WHEN** any filter is active and the user clicks "All"
 - **THEN** all filters SHALL be cleared and all providers SHALL be shown
+
+#### Scenario: No chips selected behaves as All
+- **WHEN** no chip is selected (e.g. user deselects the last active chip)
+- **THEN** all providers SHALL be shown (equivalent to "All")
+
+#### Scenario: Mutually exhaustive combination
+- **WHEN** both "Active" and "Inactive" chips are selected simultaneously
+- **THEN** all providers SHALL be shown (the combination is functionally equivalent to "All")
 
 #### Scenario: No results state
 - **WHEN** no providers match the active filter(s)

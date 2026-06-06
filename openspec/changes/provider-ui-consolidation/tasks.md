@@ -1,69 +1,85 @@
-## 1. Backend — Schwab OAuth Callback Endpoint
+## 1. Backend — Schwab OAuth Automatic Callback
 
-- [ ] 1.1 Add `GET /api/admin/schwab/callback` endpoint in `app/api/routes_admin.py` (or equivalent Schwab admin routes file) accepting `code` and `state` query params
-- [ ] 1.2 Implement token exchange logic in `app/providers/schwab.py`: use stored PKCE code verifier (or client credentials flow per Schwab API) to exchange `code` for `access_token` + `refresh_token`
-- [ ] 1.3 Persist the new tokens and expiry to the existing Schwab credential store
-- [ ] 1.4 Return HTML response on success: "Authorization successful. You may close this tab."
-- [ ] 1.5 Return HTML error response on failure (invalid code, expired, etc.) with clear error message
-- [ ] 1.6 Verify `GET /api/admin/schwab/auth/status` immediately reflects updated token after successful callback
+- [ ] 1.1 Add in-memory state store in `app/api/routes_admin.py`: `_schwab_pending_states: dict[str, tuple[AuthContext, datetime]]` and `_schwab_callback_error: dict[str, tuple[str, datetime]]`
+- [ ] 1.2 Update `GET /api/admin/schwab/auth/url`: replace direct URL construction with `schwab.auth.get_auth_context(api_key, callback_url=settings.SCHWAB_CALLBACK_URL)`, store `(auth_context, now())` in `_schwab_pending_states`, evict entries older than 10 min, return `{"auth_url": auth_context.authorization_url}`
+- [ ] 1.3 Add **unauthenticated** `GET /api/admin/schwab/callback` endpoint (no `PrincipalDep`): accepts `code: str` and `state: str` query params
+- [ ] 1.4 In the callback endpoint: validate `state` against `_schwab_pending_states` (reject if missing/expired → write to `_schwab_callback_error` → return HTML 400 error page)
+- [ ] 1.5 On valid state: call `client_from_received_url(api_key, app_secret, auth_context=stored_auth_context, received_url=str(request.url), token_write_func=...)`, save `token_json`, unpause provider, clear `_schwab_callback_error`; return HTML 200 success page
+- [ ] 1.6 On token exchange exception: write `(str(exc), now())` to `_schwab_callback_error`, return HTML 400 error page
+- [ ] 1.7 Update `GET /api/admin/schwab/auth/status`: check `_schwab_callback_error` for recent errors (< 5 min); if found, return `{"status": "callback_error", "error": "...", "paused": true}`
+- [ ] 1.8 Mark existing `POST /api/admin/schwab/auth/callback` as deprecated (`deprecated=True` on router decorator); add note in docstring; do NOT remove yet
 
-## 2. Backend — Cleanup Alerts Endpoints (optional deprecation)
+## 2. Backend — IBKR Gateway Update Extended
 
-- [ ] 2.1 Mark `GET /api/admin/alerts/webhook`, `PUT /api/admin/alerts/webhook`, `POST /api/admin/alerts/test` as deprecated in the OpenAPI schema (add `deprecated=True` to route decorators)
-- [ ] 2.2 Verify structured logging emits WARN-level entries with `event: schwab_token_expiry` and `days_remaining: N` when token is < 7 days from expiry (add or confirm existing log statement in `app/providers/schwab.py`)
+- [ ] 2.1 Extend `IbkrGatewayUpdate` Pydantic model in `routes_admin.py` to accept all 6 fields: `host: str`, `port: int`, `client_id: int | None = None`, `account_id: str | None = None`, `env: Literal["live", "paper"] | None = None`, `market_data_type: int | None = None`
+- [ ] 2.2 Update `update_ibkr_gateway` handler to merge all provided (non-None) fields into `connection_config` (partial update — omitted fields preserved)
+- [ ] 2.3 Update `SCHWAB_CALLBACK_URL` default in `app/config.py` from `https://127.0.0.1:8182` to `http://localhost:8000/api/admin/schwab/callback`
 
-## 3. Frontend — New Shared Components
+## 3. Backend — Cleanup Alerts Endpoints
 
-- [ ] 3.1 Create `admin/src/components/provider/ProviderDetailsPanel.tsx` — base panel with MUI `Tabs` ("Configuration" | "Authentication"), accepts `authSection: ReactNode` slot prop
-- [ ] 3.2 Create `admin/src/components/provider/ProviderConfigSection.tsx` — extracts existing config form fields (Timeout, Retry, Circuit Breaker, Connection JSON) from `ProviderConfigForm` into standalone component; accepts `providerName` + callbacks
-- [ ] 3.3 Create `admin/src/components/provider/ApiKeyAuthSection.tsx` — renders credential fields for a given provider from `GET /api/admin/credentials` cache; password inputs, configured/not-set chips, Save button (`PUT /api/admin/credentials/{provider}`), Test Connection button. Used for: finnhub, polygon, lseg, schwab.
-- [ ] 3.4 Create `admin/src/components/provider/IbkrConnectionSection.tsx` — renders IBKR-specific connection fields (Host, Port). Reads pre-filled values from `GET /api/admin/providers/ibkr/config` → `connection_config.host` and `connection_config.port`. Saves via `PUT /api/admin/providers/ibkr/gateway`. Includes Test Connection button.
+- [ ] 3.1 Mark `GET /api/admin/alerts/webhook`, `PUT /api/admin/alerts/webhook`, `POST /api/admin/alerts/test` as deprecated (`deprecated=True` on route decorators)
+- [ ] 3.2 Verify structured logging emits WARN-level log entries with `event: schwab_token_expiry` and `days_remaining: N` when token is near expiry (confirm or add to `app/providers/schwab.py`)
 
-## 4. Frontend — Schwab OAuth Section
+## 4. Frontend — New Shared Components
 
-- [ ] 4.1 Create `admin/src/components/provider/SchwabOAuthSection.tsx` — shows token status (ACTIVE/EXPIRED/MISSING), days remaining, expires at; fetches from `GET /api/admin/schwab/auth/status` with query key `['schwab-status']`
-- [ ] 4.2 Implement "Re-authorize" button: calls `GET /api/admin/schwab/auth/url`, opens URL in new tab via `window.open(auth_url)`
-- [ ] 4.3 Implement polling logic in `SchwabOAuthSection`: after `window.open`, poll `GET /api/admin/schwab/auth/status` every 2s for max 60s; on `status: "active"` show success snackbar and stop; on timeout show error message + "Try Again" button
-- [ ] 4.4 Add color coding to status display: green for ACTIVE (> 3 days), orange for ACTIVE (≤ 3 days), red for EXPIRED/MISSING
+- [ ] 4.1 Create `admin/src/components/provider/ProviderDetailsPanel.tsx` — base panel with MUI `Tabs` ("Configuration" | "Connection / Auth"), accepts `authSection: ReactNode` slot prop and `hideConnectionJson?: boolean` prop
+- [ ] 4.2 Create `admin/src/components/provider/ProviderConfigSection.tsx` — extracts config form fields (Timeout, Retry, Circuit Breaker, Connection JSON textarea); when `hideConnectionJson={true}`, suppresses the JSON textarea; accepts `providerName` + callbacks
+- [ ] 4.3 Create `admin/src/components/provider/ApiKeyAuthSection.tsx` — renders credential fields from `GET /api/admin/credentials` cache with key `['credentials']`; accepts optional `visibleCredentials?: string[]` prop to filter shown fields; password inputs, configured/not-set chips, "Save Credentials" button (omits blank fields from payload), Test Connection button
 
-## 5. Frontend — Provider Details Integration
+## 5. Frontend — IBKR Connection Section
 
-- [ ] 5.1 Refactor `ProvidersPage.tsx`: replace `ProviderConfigForm` usage with `ProviderDetailsPanel` that receives `ProviderConfigSection` + appropriate auth section based on provider type
-- [ ] 5.2 Implement auth section routing in `ProviderSection`: 
-  - `schwab` → `<><ApiKeyAuthSection providerName="schwab" /><SchwabOAuthSection /></>` (stacked)
-  - `ibkr` → `<IbkrConnectionSection />` (host/port, no API keys)
-  - default (finnhub, polygon, lseg) → `<ApiKeyAuthSection providerName={provider.name} />`
-- [ ] 5.3 Verify accordion expand/collapse still works correctly with the new tabbed layout inside `AccordionDetails`
+- [ ] 5.1 Create `admin/src/components/provider/IbkrConnectionSection.tsx` — renders 6 fields: host (text), port (number), client_id (number), account_id (text), env (Select: live/paper), market_data_type (Select: 1/2/3/4 with labels); pre-fills from `GET /api/admin/providers/ibkr/config` → `connection_config`
+- [ ] 5.2 "Save" button calls `PUT /api/admin/providers/ibkr/gateway` with all 6 fields; shows success snackbar "IBKR gateway connection updated"
+- [ ] 5.3 "Test Connection" button calls `POST /api/admin/test-connection/ibkr`, shows inline result
 
-## 6. Frontend — Provider Filter Chips
+## 6. Frontend — Schwab OAuth Section
 
-- [ ] 6.1 Add filter chip state to `ProvidersPage.tsx`: `useState<Set<string>>` for active filter keys (`'all'`, `'active'`, `'inactive'`, `'healthy'`, `'not-configured'`)
-- [ ] 6.2 Render MUI `Chip` row above provider list with: All, Active, Inactive, Healthy, Not Configured
-- [ ] 6.3 Implement `filterProviders(providers, activeFilters, credentials)` pure function that applies client-side filtering logic
-- [ ] 6.4 "Not Configured" filter requires credential metadata — ensure `GET /api/admin/credentials` is fetched on `ProvidersPage` and joined with provider list for filter evaluation
-- [ ] 6.5 Render "No providers match the selected filters" empty state when filter result is empty
+- [ ] 6.1 Create `admin/src/components/provider/SchwabOAuthSection.tsx` — fetches from `GET /api/admin/schwab/auth/status` with React Query key `['schwab', 'status']`; displays status (ACTIVE/EXPIRED/NOT_CONFIGURED/CALLBACK_ERROR), days remaining, expires at with color coding (green >3d, orange ≤3d, red otherwise)
+- [ ] 6.2 "Re-authorize" button: calls `GET /api/admin/schwab/auth/url`, opens returned URL with `window.open(auth_url)`, enters "Waiting for authorization..." state with spinner
+- [ ] 6.3 Polling: after `window.open`, poll `['schwab', 'status']` every 2s up to 60s; on `status: "active"` → success snackbar + stop; on `status: "callback_error"` → error snackbar with `error` field + stop; on timeout → "Authorization timed out or was cancelled." + "Try Again" button
 
-## 7. Frontend — Navigation Cleanup
+## 7. Frontend — Provider Details Integration
 
-- [ ] 7.1 Remove `CredentialsPage.tsx` from `admin/src/pages/`
-- [ ] 7.2 Remove `SchwabAuthPage.tsx` from `admin/src/pages/`
-- [ ] 7.3 Remove `AlertsPage.tsx` from `admin/src/pages/`
-- [ ] 7.4 Update `admin/src/layout/Sidebar.tsx`: remove menu items Credentials, Schwab Auth, Alerts; keep Dashboard, Providers, Settings
-- [ ] 7.5 Update `admin/src/router.tsx`: remove routes `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts`; add redirect or 404 for old paths
-- [ ] 7.6 Update `admin/src/types.ts`: add any new TypeScript interfaces needed (`SchwabAuthStatus`, `AuthConfigType`, etc.)
+- [ ] 7.1 Refactor `ProvidersPage.tsx`: replace `ProviderConfigForm` usage with `ProviderDetailsPanel`; pass `hideConnectionJson={provider.name === 'ibkr'}`
+- [ ] 7.2 Implement auth section routing in `ProviderSection`:
+  - `schwab` → `<><ApiKeyAuthSection providerName="schwab" visibleCredentials={["api_key", "app_secret"]} /><SchwabOAuthSection /></>`
+  - `ibkr` → `<IbkrConnectionSection />`
+  - default → `<ApiKeyAuthSection providerName={provider.name} />`
+- [ ] 7.3 Verify accordion expand/collapse still works correctly with the new tabbed layout inside `AccordionDetails`
 
-## 8. Frontend — Dashboard Schwab Alert Update
+## 8. Frontend — Provider Filter Chips
 
-- [ ] 8.1 Update `DashboardPage.tsx` Schwab expiry alert: change "Re-authorize" button navigation target from `/admin/schwab-auth` to `/admin/providers` (user expands Schwab accordion manually, or add `?expand=schwab` query param)
-- [ ] 8.2 Optionally: implement `?expand=schwab` URL param handling in `ProvidersPage` to auto-expand the Schwab accordion on load
+- [ ] 8.1 Add filter state to `ProvidersPage.tsx`: `useState<Set<string>>` with keys `'all'|'active'|'inactive'|'healthy'|'not-configured'`
+- [ ] 8.2 Render MUI `Chip` row above provider list: All, Active, Inactive, Healthy, Not Configured
+- [ ] 8.3 Implement `filterProviders(providers, activeFilters, credentials)` pure function:
+  - `active`: `provider.enabled === true`
+  - `inactive`: `provider.enabled === false`
+  - `healthy`: `provider.status === "healthy"`
+  - `not-configured`: finnhub/polygon/lseg/schwab → all credentials `set: false`; ibkr → `connection_config.account_id === "DU123456"`; mock/prixe → never match
+- [ ] 8.4 Fetch `GET /api/admin/credentials` on `ProvidersPage` (key `['credentials']`) for "Not Configured" filter evaluation
+- [ ] 8.5 Render "No providers match the selected filters" empty state when filter result is empty
 
-## 9. Testing & Verification
+## 9. Frontend — Navigation Cleanup + Auto-Expand
 
-- [ ] 9.1 Run `uv run ruff check app/` — ensure no lint errors in backend changes
-- [ ] 9.2 Run `uv run pytest --maxfail=1 --disable-warnings` — ensure all existing tests pass
-- [ ] 9.3 Manual smoke test: configure LSEG API key via Provider Details → Authentication tab
-- [ ] 9.4 Manual smoke test: configure IBKR Gateway host/port via Provider Details → Authentication tab (`IbkrConnectionSection`)
-- [ ] 9.5 Manual smoke test: Schwab Re-authorize flow — click button, complete OAuth, verify token status updates automatically
-- [ ] 9.6 Manual smoke test: Provider filter chips — verify each filter shows correct subset
-- [ ] 9.7 Verify navigation shows exactly 3 items (Dashboard, Providers, Settings)
-- [ ] 9.8 Verify `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts` redirect or 404
+- [ ] 9.1 Remove `CredentialsPage.tsx`, `SchwabAuthPage.tsx`, `AlertsPage.tsx` from `admin/src/pages/`
+- [ ] 9.2 Update `admin/src/layout/Sidebar.tsx`: keep only Dashboard, Providers, Settings
+- [ ] 9.3 Update `admin/src/router.tsx`: remove routes `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts`; add redirect or 404 for old paths
+- [ ] 9.4 Update `admin/src/types.ts`: add `SchwabAuthStatus` interface (`status`, `paused`, `days_remaining?`, `expires_at?`, `error?`); update `Provider` to include `connection_config`
+- [ ] 9.5 Implement `?expand=<provider_name>` in `ProvidersPage`: read `useSearchParams()` on mount; if `expand` param is set, auto-expand that provider's accordion and activate the "Connection / Auth" tab
+
+## 10. Frontend — Dashboard Schwab Alert Update
+
+- [ ] 10.1 Update `DashboardPage.tsx` Schwab expiry alert: change "Re-authorize" button navigation target to `/admin/providers?expand=schwab`
+
+## 11. Testing & Verification
+
+- [ ] 11.1 Run `uv run ruff check app/` — ensure no lint errors in backend changes
+- [ ] 11.2 Run `uv run pytest --maxfail=1 --disable-warnings` — ensure all existing tests pass
+- [ ] 11.3 Manual smoke test: configure LSEG API key via Providers → expand LSEG → Connection / Auth tab → enter key → Save
+- [ ] 11.4 Manual smoke test: configure IBKR host/port/client_id via Providers → expand IBKR → Connection / Auth tab → all 6 fields pre-filled → edit and Save
+- [ ] 11.5 Manual smoke test: Schwab Re-authorize — click "Re-authorize", complete OAuth in new tab, verify polling detects `status: "active"` and shows success snackbar
+- [ ] 11.6 Manual smoke test: Schwab Re-authorize error — use invalid credentials, verify polling detects `status: "callback_error"` and shows error snackbar (no 60s wait)
+- [ ] 11.7 Manual smoke test: Dashboard Schwab alert "Re-authorize" → navigates to `/admin/providers?expand=schwab` → Schwab accordion auto-expanded with "Connection / Auth" tab active
+- [ ] 11.8 Manual smoke test: Provider filter chips — verify each filter shows correct subset; verify IBKR "Not Configured" triggers on `account_id=DU123456`
+- [ ] 11.9 Verify navigation shows exactly 3 items (Dashboard, Providers, Settings)
+- [ ] 11.10 Verify `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts` redirect or 404

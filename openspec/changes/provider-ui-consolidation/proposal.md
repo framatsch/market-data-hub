@@ -1,41 +1,40 @@
 ## Why
 
-Die Admin-UI hat mehrere separate Navigationseinträge (Credentials, Schwab Auth, Alerts) die konzeptionell zur Provider-Konfiguration gehören. Das zwingt den Nutzer, zwischen Seiten zu wechseln, um einen einzigen Provider vollständig einzurichten. Die Schwab-Seite ist zudem eine Sackgasse mit manuellem Copy-Paste-OAuth-Flow, obwohl ein automatischer Backend-Callback möglich ist.
+The admin UI has several separate navigation entries (Credentials, Schwab Auth, Alerts) that conceptually belong to provider configuration. This forces the user to switch between pages to fully set up a single provider. The Schwab page is also a dead-end with a manual copy-paste OAuth flow, even though an automatic backend callback would be possible.
 
 ## What Changes
 
-- **Entfernt**: Seitenleisteneintrag „Credentials" (eigene Seite) — API Keys werden in Provider Details integriert
-- **Entfernt**: Seitenleisteneintrag „Schwab Auth" (eigene Seite) — OAuth-Flow wird in Schwab Provider Details integriert
-- **Entfernt**: Seitenleisteneintrag „Alerts" (eigene Seite) — Webhook-Konfiguration wird komplett entfernt; Schwab Token Ablauf wird via Log-File/Grafana überwacht
-- **Entfernt**: `AlertsPage.tsx`, `SchwabAuthPage.tsx`, `CredentialsPage.tsx`
-- **Neu**: Abstrakte `AuthSection`-Komponenten (3 Varianten):
-  - `ApiKeyAuthSection` — editierbare API Key-Liste (für finnhub, polygon, lseg, Schwab)
-  - `IbkrConnectionSection` — Host/Port Konfiguration für IBKR Gateway (keine API Keys!)
-  - `SchwabOAuthSection` — OAuth-Status + „Re-authorize"-Button mit automatischem Browser-Redirect-Flow
-- **Neu**: `ProviderDetails`-Basiskomponente die von allen Providern geteilt wird (Config + Auth in einem)
-- **Neu**: `SchwabProviderDetails` erbt `ProviderDetails`, ergänzt um OAuth-spezifische Sektionen
-- **Neu**: Chip-Filter auf der `ProvidersPage` (Alle / Aktiv / Inaktiv / Healthy / Nicht konfiguriert)
-- **Neu**: Automatischer Schwab OAuth-Callback via Backend-Redirect (`/api/admin/schwab/callback`) — kein manuelles Copy-Paste mehr
-- **Geändert**: Navigation: nur noch Dashboard, Providers, Settings
-- **Geändert**: `SettingsPage` — behält Default-Provider-Einstellungen, verliert Logo-URL nicht **BREAKING** nur für Alerts-Nutzer die Webhook-URL konfiguriert haben
+- **Removed**: Sidebar entry "Credentials" (separate page) — API Keys are integrated into Provider Details
+- **Removed**: Sidebar entry "Schwab Auth" (separate page) — OAuth flow is integrated into Schwab Provider Details
+- **Removed**: Sidebar entry "Alerts" (separate page) — Webhook configuration is completely removed; Schwab token expiry is monitored via log file / Grafana
+- **Removed**: `AlertsPage.tsx`, `SchwabAuthPage.tsx`, `CredentialsPage.tsx`
+- **New**: Abstract `AuthSection` components (3 variants):
+  - `ApiKeyAuthSection` — editable API key list (for finnhub, polygon, lseg, Schwab)
+  - `IbkrConnectionSection` — Host/Port configuration for IBKR Gateway (no API keys!)
+  - `SchwabOAuthSection` — OAuth status + "Re-authorize" button with automatic browser redirect flow
+- **New**: `ProviderDetailsPanel` — base component shared by all providers (Config + Auth in one)
+- **New**: Chip filter on `ProvidersPage` (All / Active / Inactive / Healthy / Not Configured)
+- **New**: Automatic Schwab OAuth callback via backend redirect (`/api/admin/schwab/callback`) — no more manual copy-paste
+- **Changed**: Navigation: only Dashboard, Providers, Settings
+- **Changed**: `SettingsPage` — retains default provider settings, keeps Logo URL; **BREAKING** only for Alert users who had a webhook URL configured
 
 ## Capabilities
 
 ### New Capabilities
 
-- `provider-details-ui`: Einheitliche Provider-Details-Komponente mit Config + Auth-Abschnitt, nutzbar von allen Providern; Schwab-Variante erbt und erweitert diese Basis
-- `api-key-auth-ui`: Inline API Key Verwaltung innerhalb Provider Details (Liste aller Keys, editierbar, speicherbar)
-- `ibkr-connection-ui`: IBKR-spezifische Host/Port Konfiguration im Authentication-Tab (keine API Keys, stattdessen Gateway-Verbindungsparameter)
-- `schwab-oauth-auto-flow`: Automatischer OAuth2-Redirect-Flow für Schwab Token Refresh — Backend fängt Callback ab, kein manuelles URL-Copy-Paste
-- `provider-filter-chips`: Status-Filter-Chips auf der Provider-Übersicht (Alle / Aktiv / Inaktiv / Healthy / Nicht konfiguriert)
+- `provider-details-ui`: Unified Provider Details component with Config + Auth sections, usable by all providers; Schwab variant extends the base
+- `api-key-auth-ui`: Inline API Key management within Provider Details (list of all keys, editable, saveable)
+- `ibkr-connection-ui`: IBKR-specific Host/Port configuration in the Authentication tab (no API keys, gateway connection parameters instead)
+- `schwab-oauth-auto-flow`: Automatic OAuth2 redirect flow for Schwab token refresh — backend intercepts callback, no manual URL copy-paste
+- `provider-filter-chips`: Status filter chips on the Provider overview (All / Active / Inactive / Healthy / Not Configured)
 
 ### Modified Capabilities
 
-- `configurable-providers`: Navigation und Edit-Interface ändern sich grundlegend; Credentials wandern in Provider Details
+- `configurable-providers`: Navigation and edit interface fundamentally change; Credentials move into Provider Details
 
 ## Impact
 
-- **Frontend**: `admin/src/` — Sidebar, Router, alle Pages außer Dashboard und Settings werden restrukturiert; 3 Seiten entfernt, neue Komponenten unter `components/provider/`
-- **Backend**: Neuer Endpoint `GET /api/admin/schwab/callback?code=...&state=...` für automatischen OAuth-Callback; bestehende Schwab-Auth-Endpoints bleiben als Basis
-- **Backend**: `DELETE /api/admin/alerts/webhook` oder Endpunkte können entfernt werden (kein UI mehr)
-- **Keine DB-Migration**: Credentials-Speicher und Provider-Config bleiben unverändert
+- **Frontend**: `admin/src/` — Sidebar, Router, all pages except Dashboard and Settings restructured; 3 pages removed, new components under `components/provider/`
+- **Backend**: New endpoint `GET /api/admin/schwab/callback?code=...&state=...` for automatic OAuth callback; existing Schwab auth endpoints remain as base
+- **Backend**: `DELETE /api/admin/alerts/webhook` or endpoints can be removed (no UI anymore)
+- **No DB migration**: Credential storage and Provider Config remain unchanged
