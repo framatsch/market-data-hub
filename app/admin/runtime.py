@@ -1,30 +1,35 @@
 from app.admin.crypto import CryptoService
 from app.admin.key_repository import KeyRepository
 from app.admin.provider_config_repository import ProviderConfigRepository
+from app.admin.settings_repository import SettingsRepository
 from app.config import settings
 
 
 _crypto_service: CryptoService | None = None
 _key_repository: KeyRepository | None = None
 _provider_config_repository: ProviderConfigRepository | None = None
+_settings_repository: SettingsRepository | None = None
 
 
 def initialize_admin_runtime() -> None:
-    global _crypto_service, _key_repository, _provider_config_repository
+    global _crypto_service, _key_repository, _provider_config_repository, _settings_repository
     _crypto_service = CryptoService(settings.APP_ENCRYPTION_KEY)
     _key_repository = KeyRepository(settings.KEYS_DB_PATH, _crypto_service)
     _provider_config_repository = ProviderConfigRepository(settings.KEYS_DB_PATH)
+    _settings_repository = SettingsRepository(settings.KEYS_DB_PATH)
 
 
 def set_admin_runtime(
     crypto_service: CryptoService | None = None,
     key_repository: KeyRepository | None = None,
     provider_config_repository: ProviderConfigRepository | None = None,
+    settings_repository: SettingsRepository | None = None,
 ) -> None:
-    global _crypto_service, _key_repository, _provider_config_repository
+    global _crypto_service, _key_repository, _provider_config_repository, _settings_repository
     _crypto_service = crypto_service
     _key_repository = key_repository
     _provider_config_repository = provider_config_repository
+    _settings_repository = settings_repository
 
 
 def get_crypto_service() -> CryptoService:
@@ -43,3 +48,9 @@ def get_provider_config_repository() -> ProviderConfigRepository:
     if _provider_config_repository is None:
         raise RuntimeError("Admin runtime is not initialized")
     return _provider_config_repository
+
+
+def get_settings_repository() -> SettingsRepository:
+    if _settings_repository is None:
+        raise RuntimeError("Admin runtime is not initialized")
+    return _settings_repository

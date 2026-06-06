@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     from app.admin.runtime import initialize_admin_runtime
 
     initialize_admin_runtime()
+    await registry.reload_from_config()
     
     # --- STARTUP PROTOCOL OVERVIEW ---
     active_providers = list(registry._providers.keys())

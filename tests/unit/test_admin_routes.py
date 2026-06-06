@@ -7,9 +7,11 @@ from fastapi.testclient import TestClient
 from app.admin.crypto import CryptoService
 from app.admin.key_repository import KeyRepository
 from app.admin.provider_config_repository import ProviderConfigRepository
+from app.admin.settings_repository import SettingsRepository
 from app.admin.runtime import set_admin_runtime
 from app.api.routes_admin import router
 from app.config import settings
+from app.providers.base import BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
 from app.providers.schwab import SchwabProvider
 
 
@@ -17,11 +19,13 @@ from app.providers.schwab import SchwabProvider
 def client(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", False)
     key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    key_repo = KeyRepository(str(tmp_path / "keys.db"), CryptoService(key))
-    config_repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
-    set_admin_runtime(key_repository=key_repo, provider_config_repository=config_repo)
+    db_path = str(tmp_path / "keys.db")
+    key_repo = KeyRepository(db_path, CryptoService(key))
+    config_repo = ProviderConfigRepository(db_path)
+    settings_repo = SettingsRepository(db_path)
+    set_admin_runtime(key_repository=key_repo, provider_config_repository=config_repo, settings_repository=settings_repo)
 
-    async def noop_reload(repo):
+    async def noop_reload(*args):
         return None
 
     monkeypatch.setattr("app.api.routes_admin.registry.reload_from_config", noop_reload)
@@ -70,6 +74,67 @@ def test_provider_config_validation(client) -> None:
     response = client.put("/api/admin/providers/schwab/config", json={"timeout_seconds": -1})
 
     assert response.status_code == 422
+
+
+def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+    monkeypatch.setattr(registry, "default_price_provider", "ibkr")
+    monkeypatch.setattr(registry, "default_company_provider", "ibkr")
+    monkeypatch.setattr(registry, "default_options_provider", "ibkr")
+    monkeypatch.setattr(registry, "default_news_provider", "finnhub")
+
+    response = client.get("/api/admin/settings/defaults")
+
+    assert response.status_code == 200
+    assert response.json()["default_news_provider"] == "finnhub"
+
+    async def fake_reload(config_repo, settings_repo):
+        assert await settings_repo.get("default_price_provider") == "lseg"
+        registry.default_price_provider = "lseg"
+
+    monkeypatch.setattr(registry, "reload_from_config", fake_reload)
+
+    update = client.put("/api/admin/settings/defaults", json={"default_price_provider": "LSEG"})
+
+    assert update.status_code == 200
+    assert update.json()["default_price_provider"] == "lseg"
+
+
+def test_admin_settings_capabilities(client, monkeypatch) -> None:
+    class PriceProvider(BasePriceProvider):
+        async def get_historical_prices(self, symbol, interval, start, end, sec_type="stock"):
+            raise NotImplementedError
+
+        async def get_last_price(self, symbol, market_data_type=None, sec_type="stock"):
+            raise NotImplementedError
+
+    class OptionsProvider(PriceProvider, BaseOptionsProvider):
+        async def get_option_chain(self, symbol, expiry, min_strike=None, max_strike=None, right=None, market_data_type=None):
+            raise NotImplementedError
+
+        async def get_option_quote(self, symbol, option_id, market_data_type=None):
+            raise NotImplementedError
+
+    class NewsProvider(BaseNewsProvider):
+        async def get_company_news(self, symbol, from_date, to_date, limit=20, offset=0, language="en", category=None):
+            raise NotImplementedError
+
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+    original = registry._providers.copy()
+    monkeypatch.setattr(registry, "_providers", {"ibkr": OptionsProvider(), "finnhub": NewsProvider()})
+
+    try:
+        response = client.get("/api/admin/settings/capabilities")
+    finally:
+        registry._providers = original
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "prices": ["ibkr"],
+        "options": ["ibkr"],
+        "companies": [],
+        "news": ["finnhub"],
+    }
 
 
 def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> None:

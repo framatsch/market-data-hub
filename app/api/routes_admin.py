@@ -11,8 +11,9 @@ from pydantic import BaseModel
 
 from app.api.admin_auth import AdminPrincipal, admin_auth
 from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderRuntimeConfig
-from app.admin.runtime import get_key_repository, get_provider_config_repository
+from app.admin.runtime import get_key_repository, get_provider_config_repository, get_settings_repository
 from app.config import settings
+from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
 from app.providers.registry import registry
 from app.providers.schwab import SchwabProvider
 from app.utils.secrets import unwrap_secret
@@ -58,6 +59,13 @@ class ProviderConfigUpdate(BaseModel):
     circuit_breaker_failure_threshold: int | None = None
     circuit_breaker_reset_seconds: float | None = None
     connection_config: dict[str, Any] | None = None
+
+
+class SystemDefaultsUpdate(BaseModel):
+    default_price_provider: str | None = None
+    default_company_provider: str | None = None
+    default_options_provider: str | None = None
+    default_news_provider: str | None = None
 
 
 class IbkrGatewayUpdate(BaseModel):
@@ -193,6 +201,51 @@ def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]
     if provider is None:
         return {"name": name, "enabled": True, "status": "unavailable", "error": "Provider not loaded"}
     return {"name": name, "enabled": True, "status": "healthy", "error": None}
+
+
+def _system_defaults() -> dict[str, str]:
+    return {
+        "default_price_provider": registry.default_price_provider,
+        "default_company_provider": registry.default_company_provider,
+        "default_options_provider": registry.default_options_provider,
+        "default_news_provider": registry.default_news_provider,
+    }
+
+
+@router.get("/settings/defaults")
+async def get_admin_settings_defaults(_principal: PrincipalDep) -> dict[str, str]:
+    return _system_defaults()
+
+
+@router.put("/settings/defaults")
+async def update_admin_settings_defaults(payload: SystemDefaultsUpdate, _principal: PrincipalDep) -> dict[str, str]:
+    values = payload.model_dump(exclude_unset=True)
+    settings_repo = get_settings_repository()
+    for key, value in values.items():
+        if value is not None:
+            await settings_repo.set(key, value.lower())
+    await registry.reload_from_config(get_provider_config_repository(), settings_repo)
+    return _system_defaults()
+
+
+@router.get("/settings/capabilities")
+async def get_admin_settings_capabilities(_principal: PrincipalDep) -> dict[str, list[str]]:
+    capabilities = {
+        "prices": [],
+        "options": [],
+        "companies": [],
+        "news": [],
+    }
+    for name, provider in sorted(registry._providers.items()):
+        if isinstance(provider, BasePriceProvider):
+            capabilities["prices"].append(name)
+        if isinstance(provider, BaseOptionsProvider):
+            capabilities["options"].append(name)
+        if isinstance(provider, BaseCompanyProvider):
+            capabilities["companies"].append(name)
+        if isinstance(provider, BaseNewsProvider):
+            capabilities["news"].append(name)
+    return capabilities
 
 
 @router.get("/providers")

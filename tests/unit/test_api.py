@@ -21,7 +21,7 @@ from datetime import datetime, date
 from decimal import Decimal
 
 from app.main import app
-from app.dependencies import get_price_service, get_company_service, get_options_service, get_news_provider
+from app.dependencies import get_price_service, get_company_service, get_options_service, get_news_service
 from app.models.price import PriceQuote, PriceBar
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.options import OptionChain, OptionQuote
@@ -40,15 +40,14 @@ def mock_options_service():
     return MagicMock()
 
 @pytest.fixture
-def mock_news_provider():
+def mock_news_service():
     return MagicMock()
 @pytest.fixture
-def client(mock_price_service, mock_company_service, mock_options_service, mock_news_provider):
+def client(mock_price_service, mock_company_service, mock_options_service, mock_news_service):
     app.dependency_overrides[get_price_service] = lambda: mock_price_service
     app.dependency_overrides[get_company_service] = lambda: mock_company_service
     app.dependency_overrides[get_options_service] = lambda: mock_options_service
-    from app.dependencies import get_news_provider_dep
-    app.dependency_overrides[get_news_provider_dep] = lambda: mock_news_provider
+    app.dependency_overrides[get_news_service] = lambda: mock_news_service
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -112,8 +111,9 @@ def test_get_option_quote(client, mock_options_service):
     assert response.status_code == 200
     assert response.json()["data"]["symbol"] == "AAPL240119C00150000"
 
-def test_get_company_news(client, mock_news_provider):
-    mock_news_provider.get_company_news = AsyncMock(return_value=[
+def test_get_company_news(client, mock_news_service):
+    mock_news_service.registry.default_news_provider = "mock"
+    mock_news_service.get_company_news = AsyncMock(return_value=[
         NewsArticle(article_id="1", title="Test News", url="http://test.com", 
                     published_at=datetime.now(), source="test", summary="...")
     ])

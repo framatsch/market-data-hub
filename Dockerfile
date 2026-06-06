@@ -1,10 +1,11 @@
 FROM node:20-alpine AS node-builder
 
 WORKDIR /build
+COPY admin/package*.json ./admin/
+RUN cd admin && npm ci
 
-# Frontend sources are added by the admin-ui-frontend change. Keep this stage
-# no-op-safe until then so backend-only Docker builds continue to work.
-RUN mkdir -p /build/admin/dist
+COPY admin/ ./admin/
+RUN cd admin && npm run build
 
 FROM python:3.12-slim
 

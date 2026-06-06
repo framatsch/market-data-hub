@@ -14,3 +14,9 @@ poetry.lock
 # graphify analysis artifacts
 .graphify_*
 graphify-out/3.11.9
+admin/dist/
+admin/node_modules/
+
+# Generated files (never commit)
+.coverage
+keys.db

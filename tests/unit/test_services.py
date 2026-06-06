@@ -22,9 +22,11 @@ from decimal import Decimal
 from app.services.price_service import PriceService
 from app.services.company_service import CompanyService
 from app.services.options_service import OptionsService
+from app.services.news_service import NewsService
 from app.models.price import PriceQuote, PriceBar
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.options import OptionChain, OptionQuote
+from app.models.news import NewsArticle
 from app.models.common import MarketStatus
 
 @pytest.fixture
@@ -42,6 +44,10 @@ def company_service(mock_registry):
 @pytest.fixture
 def options_service(mock_registry):
     return OptionsService(registry=mock_registry)
+
+@pytest.fixture
+def news_service(mock_registry):
+    return NewsService(registry=mock_registry)
 
 # ... (previous service tests) ...
 
@@ -150,3 +156,57 @@ async def test_get_market_status(price_service, mock_registry):
     assert result.market == "open"
     mock_registry.get_price_provider.assert_called_with("test")
     mock_provider.get_market_status.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_get_company_news(news_service, mock_registry):
+    mock_provider = MagicMock()
+    mock_provider.get_company_news = AsyncMock(return_value=[
+        NewsArticle(
+            article_id="test:1",
+            title="Apple News",
+            summary="Summary",
+            published_at=datetime.now(),
+            source="Test",
+            url="https://example.com/news/1",
+            full_text=None,
+            category=None,
+            image=None,
+            sentiment=None,
+        )
+    ])
+    mock_registry.get_news_provider.return_value = mock_provider
+
+    from_date = date(2024, 1, 1)
+    to_date = date(2024, 1, 2)
+    result = await news_service.get_company_news(
+        "AAPL",
+        from_date,
+        to_date,
+        provider_name="test",
+        limit=10,
+        offset=5,
+        language="de",
+        category="earnings",
+    )
+
+    assert len(result) == 1
+    mock_registry.get_news_provider.assert_called_with("test")
+    mock_provider.get_company_news.assert_awaited_once_with(
+        symbol="AAPL",
+        from_date=from_date,
+        to_date=to_date,
+        limit=10,
+        offset=5,
+        language="de",
+        category="earnings",
+    )
+
+@pytest.mark.asyncio
+async def test_get_company_news_uses_default_provider(news_service, mock_registry):
+    mock_provider = MagicMock()
+    mock_provider.get_company_news = AsyncMock(return_value=[])
+    mock_registry.get_news_provider.return_value = mock_provider
+
+    await news_service.get_company_news("AAPL", date(2024, 1, 1), date(2024, 1, 2))
+
+    mock_registry.get_news_provider.assert_called_with(None)

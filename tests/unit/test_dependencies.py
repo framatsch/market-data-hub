@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.dependencies import (
     get_price_service, get_company_service, 
-    get_options_service, get_news_provider_dep
+    get_options_service, get_news_service
 )
 
 def test_get_price_service():
@@ -33,13 +33,7 @@ def test_get_options_service():
     service = get_options_service()
     assert service is not None
 
-def test_get_news_provider_dep():
-    provider = get_news_provider_dep("mock")
-    from app.providers.mock_news import MockNewsProvider
-    assert isinstance(provider, MockNewsProvider)
-
-def test_get_news_provider_dep_invalid():
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as exc:
-        get_news_provider_dep("invalid")
-    assert exc.value.status_code == 400
+def test_get_news_service():
+    from app.services.news_service import NewsService
+    service = get_news_service()
+    assert isinstance(service, NewsService)

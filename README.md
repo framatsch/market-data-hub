@@ -149,7 +149,6 @@ Configuration via environment variables (see `.env.example`):
 | `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
 | `APP_ENV` | `dev` | Environment: dev, test, prod |
 | `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
-| `DEFAULT_PRICE_PROVIDER` | `ibkr` | Default provider: ibkr, lseg, polygon, prixe |
 | `PRIXE_API_KEY` | *(empty)* | Prixe API key (Bearer token) |
 | `PRIXE_BASE_URL` | `https://api.prixe.io` | Prixe API base URL |
 | `SCHWAB_API_KEY` | *(empty)* |  app key — leave empty to disable provider |
@@ -260,6 +259,29 @@ curl http://localhost:8000/providers | python -m json.tool
 # Fetch historical daily prices via 
 curl "http://localhost:8000/prices/history/AAPL?interval=1d&period=1y&provider="
 ```
+
+## Admin UI
+
+Market Data Hub includes a web-based Admin UI for managing providers, credentials, and monitoring system status.
+
+### Accessing the Admin UI
+- **URL:** `http://localhost:8000/admin`
+- **Dashboard:** Real-time provider status and configuration summary.
+- **Provider Management:** Enable/disable providers and hot-reload runtime configuration (timeout, retries, rate limits, circuit breakers).
+- **Credential Management:** Securely update API keys and secrets (stored encrypted in SQLite).
+- **Schwab Authorization:** Guided step-by-step workflow for the 7-day manual OAuth2 re-authorization.
+- **Alerts:** Configure Slack/JSON webhooks for system notifications.
+
+### Local Development Setup (Frontend)
+The Admin UI is built with React, TypeScript, and Vite.
+
+```bash
+cd admin
+npm install
+npm run dev
+```
+
+The Vite dev server proxies `/api` requests to the FastAPI backend on port 8000.
 
 ## Running Modes
 

@@ -20,7 +20,7 @@ import io
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
-from app.dependencies import CompanyServiceDep, NewsProviderDep
+from app.dependencies import CompanyServiceDep, NewsServiceDep
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import ResponseEnvelope
 from app.models.news import NewsResponse, NewsMetadata
@@ -55,8 +55,8 @@ async def get_company_profile(
 @router.get("/{symbol}/news", response_model=NewsResponse)
 async def get_company_news(
     symbol: str,
-    news_provider: NewsProviderDep,
-    provider: str = Query("lseg", description="Data provider (lseg, ibkr)"),
+    service: NewsServiceDep,
+    provider: Optional[str] = Query(None, description="Data provider (finnhub, lseg, ibkr, mock)"),
     days: Optional[int] = Query(None, description="Last N days (overrides from/to dates)"),
     from_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     to_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
@@ -85,7 +85,8 @@ async def get_company_news(
     - IBKR provider: `?provider=ibkr`
     """
     symbol = symbol.upper()
-    provider = provider.lower()
+    provider = provider.lower() if provider else None
+    response_provider = provider or service.registry.default_news_provider
 
     # 1. Determine date range (priority: days > explicit dates > default)
     if days:
@@ -100,10 +101,11 @@ async def get_company_news(
         from_date_calc = to_date_calc - timedelta(days=30)
 
     # 2. Fetch news articles
-    articles = await news_provider.get_company_news(
+    articles = await service.get_company_news(
         symbol=symbol,
         from_date=from_date_calc,
         to_date=to_date_calc,
+        provider_name=provider,
         limit=limit,
         offset=offset,
         language=language,
@@ -133,7 +135,7 @@ async def get_company_news(
             limit=limit,
             offset=offset,
             has_more=has_more,
-            provider=provider,
+            provider=response_provider,
             from_date=from_date_calc,
             to_date=to_date_calc
         )

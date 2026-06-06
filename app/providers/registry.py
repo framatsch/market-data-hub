@@ -19,6 +19,7 @@ import logging
 from typing import Dict, Optional, cast
 
 from app.admin.provider_config_repository import ProviderConfigRepository, ProviderRuntimeConfig
+from app.admin.settings_repository import SettingsRepository
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
 from app.providers.ibkr import IBKRProvider
@@ -31,6 +32,13 @@ from app.providers.prixe import PrixeProvider
 from app.utils.errors import InvalidProviderError
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PROVIDER_FALLBACKS = {
+    "default_price_provider": "ibkr",
+    "default_company_provider": "finnhub",
+    "default_options_provider": "ibkr",
+    "default_news_provider": "finnhub",
+}
 
 
 class ProviderRegistry:
@@ -58,23 +66,37 @@ class ProviderRegistry:
             self._reload_lock = asyncio.Lock()
         return self._reload_lock
 
-    def _resolve_default(self, config_key: str, base_class: type) -> str:
+    def _resolve_default(self, configured: str, setting_key: str, base_class: type) -> str:
         """Check if the configured default is loaded and valid; fall back otherwise."""
-        configured = getattr(settings, config_key)
         if configured in self._providers and isinstance(self._providers[configured], base_class):
             return configured
         for name, provider in self._providers.items():
             if isinstance(provider, base_class):
                 logger.warning(
                     "%s '%s' is not enabled or does not implement %s. Falling back to '%s'.",
-                    config_key, configured, base_class.__name__, name,
+                    setting_key, configured, base_class.__name__, name,
                 )
                 return name
         logger.error(
             "%s '%s' is not enabled and no alternative provider implements %s.",
-            config_key, configured, base_class.__name__,
+            setting_key, configured, base_class.__name__,
         )
         return configured
+
+    def _apply_default_settings(self, system_settings: dict[str, str] | None = None) -> None:
+        values = {**DEFAULT_PROVIDER_FALLBACKS, **(system_settings or {})}
+        self.default_price_provider = self._resolve_default(
+            values["default_price_provider"], "default_price_provider", BasePriceProvider
+        )
+        self.default_company_provider = self._resolve_default(
+            values["default_company_provider"], "default_company_provider", BaseCompanyProvider
+        )
+        self.default_options_provider = self._resolve_default(
+            values["default_options_provider"], "default_options_provider", BaseOptionsProvider
+        )
+        self.default_news_provider = self._resolve_default(
+            values["default_news_provider"], "default_news_provider", BaseNewsProvider
+        )
 
     def _initialize_providers(self):
         # Parse enabled providers from config
@@ -95,20 +117,29 @@ class ProviderRegistry:
             except Exception as e:
                 logger.error(f"Failed to initialize provider '{name}': {e}")
 
-        # Resolve effective defaults against actually loaded providers
-        self.default_price_provider = self._resolve_default("DEFAULT_PRICE_PROVIDER", BasePriceProvider)
-        self.default_company_provider = self._resolve_default("DEFAULT_COMPANY_PROVIDER", BaseCompanyProvider)
-        self.default_options_provider = self._resolve_default("DEFAULT_OPTIONS_PROVIDER", BaseOptionsProvider)
-        self.default_news_provider = self._resolve_default("DEFAULT_NEWS_PROVIDER", BaseNewsProvider)
+        # Resolve effective defaults against actually loaded providers.
+        self._apply_default_settings()
 
-    async def reload_from_config(self, config_repository: ProviderConfigRepository | None = None) -> None:
+    async def reload_from_config(
+        self,
+        config_repository: ProviderConfigRepository | None = None,
+        settings_repository: SettingsRepository | None = None,
+    ) -> None:
         if config_repository is None:
             from app.admin.runtime import get_provider_config_repository
 
             config_repository = get_provider_config_repository()
+        if settings_repository is None:
+            try:
+                from app.admin.runtime import get_settings_repository
+
+                settings_repository = get_settings_repository()
+            except RuntimeError:
+                settings_repository = None
 
         async with self._get_reload_lock():
             configs = {config.provider_name: config for config in await config_repository.list_all()}
+            system_settings = await settings_repository.get_all() if settings_repository is not None else {}
             enabled = {name for name, config in configs.items() if config.enabled and name in self.provider_classes}
 
             for name in list(self._providers):
@@ -128,10 +159,7 @@ class ProviderRegistry:
                         continue
                 self._apply_runtime_config(self._providers[name], config)
 
-            self.default_price_provider = self._resolve_default("DEFAULT_PRICE_PROVIDER", BasePriceProvider)
-            self.default_company_provider = self._resolve_default("DEFAULT_COMPANY_PROVIDER", BaseCompanyProvider)
-            self.default_options_provider = self._resolve_default("DEFAULT_OPTIONS_PROVIDER", BaseOptionsProvider)
-            self.default_news_provider = self._resolve_default("DEFAULT_NEWS_PROVIDER", BaseNewsProvider)
+            self._apply_default_settings(system_settings)
 
     async def _close_provider(self, name: str, provider: object) -> None:
         close = getattr(provider, "close", None)

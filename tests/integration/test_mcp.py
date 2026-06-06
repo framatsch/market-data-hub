@@ -159,7 +159,7 @@ class TestMCPFlow:
                         "method": "tools/call",
                         "params": {
                             "name": "get_last_price",
-                            "arguments": {"symbol": "AAPL"}
+                            "arguments": {"symbol": "AAPL", "provider": "lseg"}
                         }
                     }
                     response = await async_client.post(f"/mcp/messages?session_id={session_id}", json=payload)

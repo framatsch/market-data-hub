@@ -21,14 +21,12 @@ class TestProviderFallback:
         """Given ENABLED_PROVIDERS=lseg and DEFAULT_PRICE_PROVIDER=ibkr,
         the registry should fall back to lseg for price and log a warning."""
         settings.ENABLED_PROVIDERS = "lseg"
-        saved = settings.DEFAULT_PRICE_PROVIDER
-        settings.DEFAULT_PRICE_PROVIDER = "ibkr"
         try:
             with caplog.at_level(logging.WARNING):
                 reg = ProviderRegistry()
 
             assert reg.default_price_provider == "lseg"
-            assert "DEFAULT_PRICE_PROVIDER" in caplog.text
+            assert "default_price_provider" in caplog.text
             assert "ibkr" in caplog.text
             assert "lseg" in caplog.text
 
@@ -36,41 +34,36 @@ class TestProviderFallback:
             from app.providers.lseg import LSEGProvider
             assert isinstance(provider, LSEGProvider)
         finally:
-            settings.DEFAULT_PRICE_PROVIDER = saved
+            pass
 
     def test_company_provider_falls_back_when_default_not_enabled(self, caplog):
         """Given ENABLED_PROVIDERS=lseg and DEFAULT_COMPANY_PROVIDER=finnhub,
         the registry should fall back to lseg for company data."""
         settings.ENABLED_PROVIDERS = "lseg"
-        saved = settings.DEFAULT_COMPANY_PROVIDER
-        settings.DEFAULT_COMPANY_PROVIDER = "finnhub"
         try:
             with caplog.at_level(logging.WARNING):
                 reg = ProviderRegistry()
 
             assert reg.default_company_provider == "lseg"
-            assert "DEFAULT_COMPANY_PROVIDER" in caplog.text
+            assert "default_company_provider" in caplog.text
 
             provider = reg.get_company_provider()
             from app.providers.lseg import LSEGProvider
             assert isinstance(provider, LSEGProvider)
         finally:
-            settings.DEFAULT_COMPANY_PROVIDER = saved
+            pass
 
     def test_options_provider_throws_when_no_alternative(self):
         """Given ENABLED_PROVIDERS=lseg (no options support) and
         DEFAULT_OPTIONS_PROVIDER=ibkr, get_options_provider should raise."""
         settings.ENABLED_PROVIDERS = "lseg"
-        saved = settings.DEFAULT_OPTIONS_PROVIDER
-        settings.DEFAULT_OPTIONS_PROVIDER = "ibkr"
         try:
             reg = ProviderRegistry()
             from app.utils.errors import InvalidProviderError
             with pytest.raises(InvalidProviderError):
                 reg.get_options_provider()
         finally:
-            settings.DEFAULT_OPTIONS_PROVIDER = saved
-
+            pass
     def test_all_providers_enabled_uses_configured_defaults(self):
         """When all providers are enabled, defaults should stay as configured."""
         settings.ENABLED_PROVIDERS = ""

@@ -23,6 +23,7 @@ async def test_lifespan():
     # Mock registry shutdown
     mock_registry = MagicMock()
     mock_registry.shutdown = AsyncMock()
+    mock_registry.reload_from_config = AsyncMock()
     
     with patch("app.providers.registry.registry", mock_registry):
         async with lifespan(app):
