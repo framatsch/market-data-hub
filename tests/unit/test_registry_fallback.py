@@ -67,13 +67,11 @@ class TestProviderFallback:
     def test_all_providers_enabled_uses_configured_defaults(self):
         """When all providers are enabled, defaults should stay as configured."""
         settings.ENABLED_PROVIDERS = ""
-        # Settings defaults: price=ibkr, company=finnhub, options=ibkr
-        # Note: finnhub only implements BaseNewsProvider, not BaseCompanyProvider,
-        # so company falls back to 'ibkr' (first loaded provider implementing it)
+        # Settings defaults: price=ibkr, company=ibkr, options=ibkr, news=finnhub
         reg = ProviderRegistry()
 
         assert reg.default_price_provider == "ibkr"
-        assert reg.default_company_provider == "ibkr"  # finnhub doesn't implement BaseCompanyProvider
+        assert reg.default_company_provider == "ibkr"
         assert reg.default_options_provider == "ibkr"
         assert reg.default_news_provider == "finnhub"
 
@@ -125,6 +123,5 @@ class TestProviderFallback:
         
         # Should not raise
         await reg.shutdown()
-
 
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Box, 
   Typography, 
@@ -10,13 +11,13 @@ import {
   MenuItem,
   Snackbar,
   Alert,
-  CircularProgress
+  CircularProgress,
+  TextField
 } from '@mui/material';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetcher } from '../lib/api';
 import type { SystemDefaults, ProviderCapabilities } from '../types';
 
-export function SettingsPage() {
+export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -27,6 +28,7 @@ export function SettingsPage() {
     default_options_provider: '',
     default_company_provider: '',
     default_news_provider: '',
+    logo_url: '',
   });
 
   const { data: currentDefaults, isLoading: isLoadingDefaults } = useQuery<SystemDefaults>({
@@ -63,6 +65,7 @@ export function SettingsPage() {
         default_options_provider: currentDefaults.default_options_provider || '',
         default_company_provider: currentDefaults.default_company_provider || '',
         default_news_provider: currentDefaults.default_news_provider || '',
+        logo_url: currentDefaults.logo_url || '',
       });
     }
   }, [currentDefaults]);
@@ -152,6 +155,17 @@ export function SettingsPage() {
               ))}
             </Select>
           </FormControl>
+
+          <TextField
+            fullWidth
+            margin="normal"
+            label="Custom Logo URL"
+            placeholder="/admin/logo.svg"
+            value={defaults.logo_url || ''}
+            onChange={(e) => setDefaults({ ...defaults, logo_url: e.target.value })}
+            size="small"
+            helperText="Path or absolute URL to override the default Market Data Hub logo"
+          />
 
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
             <Button 

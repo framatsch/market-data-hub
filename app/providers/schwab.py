@@ -349,7 +349,22 @@ class SchwabProvider(BasePriceProvider):
         except ValueError:
             logger.warning("Skipping Schwab webhook with unsafe URL")
             return
-        payload = {"text": message} if settings.SCHWAB_ALERT_WEBHOOK_FORMAT == "slack" else {"message": message}
+
+        try:
+            from app.admin.runtime import get_provider_config_repository
+            repo = get_provider_config_repository()
+            config = await repo.get("schwab")
+            webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
+        except Exception:
+            webhook_format = settings.SCHWAB_ALERT_WEBHOOK_FORMAT
+
+        if webhook_format == "discord":
+            payload = {"content": message}
+        elif webhook_format == "slack":
+            payload = {"text": message}
+        else:
+            payload = {"message": message}
+
         try:
             import httpx
 

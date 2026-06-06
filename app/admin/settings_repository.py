@@ -10,6 +10,7 @@ SETTINGS_ALLOWLIST = frozenset(
         "default_company_provider",
         "default_options_provider",
         "default_news_provider",
+        "logo_url",
     }
 )
 

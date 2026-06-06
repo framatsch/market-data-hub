@@ -3,10 +3,15 @@ export interface Provider {
   enabled: boolean;
   status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled';
   error?: string;
-  config_summary: {
+  config_summary?: {
     timeout_seconds: number;
     retry_count: number;
     rate_limit_per_sec: number;
+  };
+  config?: {
+    timeout_seconds?: number;
+    retry_count?: number;
+    rate_limit_per_sec?: number;
   };
 }
 
@@ -48,6 +53,7 @@ export interface SystemDefaults {
   default_company_provider?: string;
   default_options_provider?: string;
   default_news_provider?: string;
+  logo_url?: string;
 }
 
 export interface ProviderCapabilities {

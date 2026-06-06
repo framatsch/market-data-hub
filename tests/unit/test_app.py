@@ -36,3 +36,11 @@ def test_list_providers(client):
 def test_404_handling(client):
     response = client.get("/non-existent-path")
     assert response.status_code == 404
+
+
+def test_admin_route_registered(client):
+    response = client.get("/admin")
+    # Accept 200 when UI bundle exists, or explicit 404 payload when not built
+    assert response.status_code in (200, 404)
+    if response.status_code == 404:
+        assert response.json()["detail"] == "Admin UI not built"

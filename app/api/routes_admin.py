@@ -71,6 +71,7 @@ class SystemDefaultsUpdate(BaseModel):
     default_company_provider: str | None = None
     default_options_provider: str | None = None
     default_news_provider: str | None = None
+    logo_url: str | None = None
 
 
 class IbkrGatewayUpdate(BaseModel):
@@ -231,7 +232,10 @@ def _system_defaults() -> dict[str, str]:
 
 @router.get("/settings/defaults")
 async def get_admin_settings_defaults(_principal: PrincipalDep) -> dict[str, str]:
-    return _system_defaults()
+    defaults = _system_defaults()
+    logo_url = await get_settings_repository().get("logo_url")
+    defaults["logo_url"] = logo_url or ""
+    return defaults
 
 
 @router.put("/settings/defaults")
@@ -240,9 +244,16 @@ async def update_admin_settings_defaults(payload: SystemDefaultsUpdate, _princip
     settings_repo = get_settings_repository()
     for key, value in values.items():
         if value is not None:
-            await settings_repo.set(key, value.lower())
+            if key == "logo_url":
+                await settings_repo.set(key, value)
+            else:
+                await settings_repo.set(key, value.lower())
     await registry.reload_from_config(get_provider_config_repository(), settings_repo)
-    return _system_defaults()
+    
+    defaults = _system_defaults()
+    logo_url = await settings_repo.get("logo_url")
+    defaults["logo_url"] = logo_url or ""
+    return defaults
 
 
 @router.get("/settings/capabilities")
@@ -273,6 +284,11 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
         {
             **_provider_status(name, configs[name]),
             "config": configs[name].model_dump(),
+            "config_summary": {
+                "timeout_seconds": configs[name].timeout_seconds,
+                "retry_count": configs[name].retry_count,
+                "rate_limit_per_sec": configs[name].rate_limit_per_sec,
+            },
         }
         for name in KNOWN_PROVIDERS
     ]
@@ -522,10 +538,22 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
     }
 
 
+@router.get("/alerts/webhook")
+async def get_alert_webhook(_principal: PrincipalDep) -> dict[str, Any]:
+    webhook_url = await get_key_repository().get("schwab", "alert_webhook_url")
+    repo = get_provider_config_repository()
+    config = await repo.get("schwab")
+    webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
+    return {
+        "webhook_url": webhook_url or "",
+        "format": webhook_format
+    }
+
+
 @router.put("/alerts/webhook")
 async def update_alert_webhook(payload: AlertWebhookUpdate, _principal: PrincipalDep) -> dict[str, Any]:
-    if payload.format not in {"slack", "generic"}:
-        raise HTTPException(status_code=422, detail="format must be slack or generic")
+    if payload.format not in {"slack", "generic", "discord"}:
+        raise HTTPException(status_code=422, detail="format must be slack, generic, or discord")
     _validate_webhook_url(payload.webhook_url)
     await get_key_repository().save("schwab", "alert_webhook_url", payload.webhook_url)
     repo = get_provider_config_repository()
@@ -541,8 +569,20 @@ async def test_alert_webhook(_principal: PrincipalDep) -> dict[str, str]:
     if not webhook_url:
         raise HTTPException(status_code=503, detail="Alert webhook URL not configured")
     _validate_webhook_url(webhook_url)
+    
+    repo = get_provider_config_repository()
+    config = await repo.get("schwab")
+    webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
+    
+    if webhook_format == "discord":
+        payload = {"content": "Market Data Hub test alert"}
+    elif webhook_format == "slack":
+        payload = {"text": "Market Data Hub test alert"}
+    else:
+        payload = {"message": "Market Data Hub test alert"}
+
     async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-        response = await client.post(webhook_url, json={"text": "Market Data Hub test alert"})
+        response = await client.post(webhook_url, json=payload)
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Webhook returned HTTP {response.status_code}")
     return {"status": "sent"}

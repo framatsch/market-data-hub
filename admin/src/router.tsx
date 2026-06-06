@@ -6,7 +6,7 @@ import CredentialsPage from './pages/CredentialsPage';
 import SchwabAuthPage from './pages/SchwabAuthPage';
 import AlertsPage from './pages/AlertsPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
-import { SettingsPage } from './pages/SettingsPage';
+import SettingsPage from './pages/SettingsPage';
 import AuthGuard from './components/AuthGuard';
 
 export const router = createBrowserRouter([

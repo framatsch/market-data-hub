@@ -77,10 +77,10 @@ cp .env.example .env
 #   LSEG_PASSWORD=your-password
 
 # 3. Run HTTP server
-python -m app.main http
+python -m app.main
 
 # 4. Access Swagger docs
-# Open http://localhost:8000/docs
+# Open http://localhost:9000/docs
 ```
 
 ### Option 2: Docker Compose (Recommended for Local Dev)
@@ -94,13 +94,21 @@ cp .env.example .env
 docker-compose up
 
 # 3. Access Swagger docs
-# Open http://localhost:8000/docs
+# Open http://localhost:9000/docs
 
 # View logs
 docker-compose logs -f
 
 # Stop
 docker-compose down
+```
+
+By default, MDH now listens on port `9000` to avoid collisions with other local services.
+
+You can override the port in `.env`:
+
+```bash
+APP_PORT=9100
 ```
 
 ### Option 3: Kubernetes Deployment
@@ -265,7 +273,7 @@ curl "http://localhost:8000/prices/history/AAPL?interval=1d&period=1y&provider="
 Market Data Hub includes a web-based Admin UI for managing providers, credentials, and monitoring system status.
 
 ### Accessing the Admin UI
-- **URL:** `http://localhost:8000/admin`
+- **URL:** `http://localhost:9000/admin`
 - **Dashboard:** Real-time provider status and configuration summary.
 - **Provider Management:** Enable/disable providers and hot-reload runtime configuration (timeout, retries, rate limits, circuit breakers).
 - **Credential Management:** Securely update API keys and secrets (stored encrypted in SQLite).
@@ -282,6 +290,30 @@ npm run dev
 ```
 
 The Vite dev server proxies `/api` requests to the FastAPI backend on port 8000.
+
+### Docker Compose UI Hot Reload (without `--build`)
+
+If you run backend via Docker Compose and want `/admin` to update after UI edits without rebuilding the image each time:
+
+```bash
+# Terminal 1: build UI continuously to admin/dist
+cd admin
+npm run build:watch
+
+# Terminal 2: run backend container once
+cd ..
+docker compose up
+```
+
+`docker-compose.yml` binds `./admin/dist` to `/app/static/admin`, so refreshing `http://localhost:9000/admin` picks up new UI assets directly.
+
+For a one-shot UI refresh trigger (instead of watch mode):
+
+```bash
+cd admin && npm run build
+```
+
+No `docker compose up --build` required for UI-only changes.
 
 ## Running Modes
 

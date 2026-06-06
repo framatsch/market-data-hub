@@ -45,6 +45,11 @@ export default function DashboardPage() {
     }
   };
 
+  const getConfigValue = (
+    provider: Provider,
+    key: 'timeout_seconds' | 'retry_count' | 'rate_limit_per_sec'
+  ) => provider.config_summary?.[key] ?? provider.config?.[key];
+
   const isLoading = providersQuery.isLoading || schwabStatusQuery.isLoading;
   const isError = providersQuery.isError;
 
@@ -90,8 +95,12 @@ export default function DashboardPage() {
                 <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 3 }} />
               </Grid>
             ))
-          : providersQuery.data?.map((provider) => (
-              <Grid size={{ xs: 12, md: 4 }} key={provider.name}>
+          : providersQuery.data?.map((provider) => {
+              const timeout = getConfigValue(provider, 'timeout_seconds');
+              const retries = getConfigValue(provider, 'retry_count');
+              const rateLimit = getConfigValue(provider, 'rate_limit_per_sec');
+
+              return (<Grid size={{ xs: 12, md: 4 }} key={provider.name}>
                 <Card>
                   <CardHeader
                     title={provider.name.toUpperCase()}
@@ -111,13 +120,13 @@ export default function DashboardPage() {
                     </Box>
                     <Box>
                       <Typography variant="caption" sx={{ display: 'block' }}>
-                        Timeout: {provider.config_summary.timeout_seconds}s
+                        Timeout: {timeout ?? 'N/A'}{typeof timeout === 'number' ? 's' : ''}
                       </Typography>
                       <Typography variant="caption" sx={{ display: 'block' }}>
-                        Retries: {provider.config_summary.retry_count}
+                        Retries: {retries ?? 'N/A'}
                       </Typography>
                       <Typography variant="caption" sx={{ display: 'block' }}>
-                        Rate Limit: {provider.config_summary.rate_limit_per_sec}/s
+                        Rate Limit: {rateLimit ?? 'N/A'}{typeof rateLimit === 'number' ? '/s' : ''}
                       </Typography>
                     </Box>
                     {provider.name === 'schwab' && schwabStatusQuery.data?.days_remaining !== undefined && (
@@ -137,8 +146,8 @@ export default function DashboardPage() {
                     )}
                   </CardContent>
                 </Card>
-              </Grid>
-            ))}
+              </Grid>);
+            })}
       </Grid>
     </Box>
   );

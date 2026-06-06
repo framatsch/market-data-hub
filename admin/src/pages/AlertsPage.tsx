@@ -19,6 +19,11 @@ import SendIcon from '@mui/icons-material/Send';
 import { fetcher } from '../lib/api';
 import type { CredentialMetadata } from '../types';
 
+interface WebhookConfig {
+  webhook_url: string;
+  format: string;
+}
+
 export default function AlertsPage() {
   const queryClient = useQueryClient();
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -36,12 +41,18 @@ export default function AlertsPage() {
     queryFn: () => fetcher('/api/admin/credentials'),
   });
 
-  // Extract Schwab webhook URL if it exists
+  const webhookQuery = useQuery<WebhookConfig>({
+    queryKey: ['webhookConfig'],
+    queryFn: () => fetcher('/api/admin/alerts/webhook'),
+  });
+
+  // Pre-fill fields from backend config
   useEffect(() => {
-    if (credentialsQuery.data) {
-      // Backend doesn't currently expose the URL value, just metadata.
+    if (webhookQuery.data) {
+      setWebhookUrl(webhookQuery.data.webhook_url || '');
+      setWebhookFormat(webhookQuery.data.format || 'slack');
     }
-  }, [credentialsQuery.data]);
+  }, [webhookQuery.data]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -50,12 +61,13 @@ export default function AlertsPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: webhookUrl,
+          webhook_url: webhookUrl,
           format: webhookFormat,
         }),
       });
       setSnackbar({ open: true, message: 'Alert configuration saved', severity: 'success' });
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
+      queryClient.invalidateQueries({ queryKey: ['webhookConfig'] });
     } catch (err: any) {
       setSnackbar({ open: true, message: `Failed to save: ${err.message}`, severity: 'error' });
     } finally {
@@ -75,7 +87,9 @@ export default function AlertsPage() {
     }
   };
 
-  if (credentialsQuery.isLoading) return <CircularProgress />;
+  const isLoading = credentialsQuery.isLoading || webhookQuery.isLoading;
+
+  if (isLoading) return <CircularProgress />;
 
   const isConfigured = credentialsQuery.data?.some(
     (c) => c.provider_name === 'schwab' && c.credential_name === 'alert_webhook_url' && c.set
@@ -102,11 +116,11 @@ export default function AlertsPage() {
           <TextField
             fullWidth
             label="Webhook URL"
-            placeholder="https://hooks.slack.com/services/..."
+            placeholder="https://hooks.slack.com/services/... or https://discord.com/api/webhooks/..."
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
             size="small"
-            helperText="The full URL for your Slack or Generic JSON webhook"
+            helperText="The full URL for your Slack, Discord, or Generic JSON webhook"
           />
           <FormControl fullWidth size="small">
             <InputLabel>Notification Format</InputLabel>
@@ -115,7 +129,8 @@ export default function AlertsPage() {
               label="Notification Format"
               onChange={(e) => setWebhookFormat((e.target.value as string))}
             >
-              <MenuItem value="slack">Slack / Discord (Incoming Webhook)</MenuItem>
+              <MenuItem value="slack">Slack (Incoming Webhook)</MenuItem>
+              <MenuItem value="discord">Discord (Incoming Webhook)</MenuItem>
               <MenuItem value="generic">Generic JSON</MenuItem>
             </Select>
           </FormControl>

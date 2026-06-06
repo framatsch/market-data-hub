@@ -5,24 +5,14 @@ services:
       dockerfile: Dockerfile
     image: market-data-hub:latest
     ports:
-      - "9000:8000"
+      - "${APP_PORT:-9000}:${APP_PORT:-9000}"
     env_file:
       - .env
     environment:
-      IBKR_HOST: ${IBKR_HOST:-host.docker.internal}
-      IBKR_PORT: ${IBKR_PORT:-4002}
-      IBKR_CLIENT_ID: ${IBKR_CLIENT_ID:-815}
-      IBKR_MARKET_DATA_TYPE: ${IBKR_MARKET_DATA_TYPE:-2}
-      LSEG_APP_KEY: ${LSEG_APP_KEY}
-      LSEG_USERNAME: ${LSEG_USERNAME}
-      LSEG_PASSWORD: ${LSEG_PASSWORD}
-      POLYGON_API_KEY: ${POLYGON_API_KEY}
-      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-9000}
       APP_ENV: ${APP_ENV:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DEFAULT_PRICE_PROVIDER: ${DEFAULT_PRICE_PROVIDER:-ibkr}
-      DEFAULT_COMPANY_PROVIDER: ${DEFAULT_COMPANY_PROVIDER:-finnhub}
-      DEFAULT_NEWS_PROVIDER: ${DEFAULT_NEWS_PROVIDER:-finnhub}
       MCP_ENABLED: ${MCP_ENABLED:-true}
       ENABLED_PROVIDERS: ${ENABLED_PROVIDERS:-}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
@@ -31,13 +21,42 @@ services:
       ADMIN_OIDC_ISSUER: ${ADMIN_OIDC_ISSUER:-}
       ADMIN_OIDC_CLIENT_ID: ${ADMIN_OIDC_CLIENT_ID:-}
       ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:-}
+
+      IBKR_HOST: ${IBKR_HOST:-host.docker.internal}
+      IBKR_PORT: ${IBKR_PORT:-4002}
+      IBKR_CLIENT_ID: ${IBKR_CLIENT_ID:-815}
+      IBKR_MARKET_DATA_TYPE: ${IBKR_MARKET_DATA_TYPE:-2}
+
+      LSEG_APP_KEY: ${LSEG_APP_KEY}
+      LSEG_USERNAME: ${LSEG_USERNAME}
+      LSEG_PASSWORD: ${LSEG_PASSWORD}
+
+      POLYGON_API_KEY: ${POLYGON_API_KEY}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
+
+      SCHWAB_API_KEY: ${SCHWAB_API_KEY:-}
+      SCHWAB_APP_SECRET: ${SCHWAB_APP_SECRET:-}
+      SCHWAB_CALLBACK_URL: ${SCHWAB_CALLBACK_URL:-https://127.0.0.1:8182}
+      SCHWAB_TOKEN_PATH: ${SCHWAB_TOKEN_PATH:-/tmp/schwab_token.json}
+      SCHWAB_TIMEOUT_SECONDS: ${SCHWAB_TIMEOUT_SECONDS:-30}
+      SCHWAB_RATE_LIMIT_PER_SEC: ${SCHWAB_RATE_LIMIT_PER_SEC:-5}
+      SCHWAB_ASYNCIO: ${SCHWAB_ASYNCIO:-true}
+      SCHWAB_ALERT_WEBHOOK_URL: ${SCHWAB_ALERT_WEBHOOK_URL:-}
+      SCHWAB_ALERT_WEBHOOK_FORMAT: ${SCHWAB_ALERT_WEBHOOK_FORMAT:-slack}
+
+      PRIXE_API_KEY: ${PRIXE_API_KEY:-}
     volumes:
       - keys-db:/app/data
+      # Dev: bind app/ from host so Python changes take effect after docker-compose restart (no --build).
+      - ./app:/app/app
+      # Dev: bind built admin bundle from host.
+      # Run `cd admin && npm run build:watch` once; browser reload picks up changes without docker rebuild.
+      - ./admin/dist:/app/static/admin
     # command is inherited from Dockerfile (uv run python -m app.main)
     healthcheck:
       test: [
         "CMD-SHELL",
-        "curl -f http://localhost:8000/health || exit 1"
+        "curl -f http://localhost:${APP_PORT:-9000}/health || exit 1"
       ]
       interval: 10s
       timeout: 5s

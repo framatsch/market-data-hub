@@ -22,6 +22,9 @@ class FakePriceProvider(BasePriceProvider):
     async def get_market_status(self):
         raise NotImplementedError
 
+    async def test_connection(self) -> dict:
+        return {"success": True, "status_code": 200, "message": "ok", "details": {}}
+
 
 class CustomConfigureProvider(FakePriceProvider):
     def configure(self, config) -> None:

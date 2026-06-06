@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "Market Data Hub"
     APP_ENV: Literal["dev", "test", "prod"] = "dev"
     LOG_LEVEL: str = "INFO"
+    APP_HOST: str = "0.0.0.0"
+    APP_PORT: int = 8000
     
     # Enabled Providers (comma-separated list, empty = all)
     ENABLED_PROVIDERS: str = ""
@@ -77,7 +79,7 @@ class Settings(BaseSettings):
     SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min
     SCHWAB_ASYNCIO: bool = True                    # True = async httpx client from schwab-py
     SCHWAB_ALERT_WEBHOOK_URL: SecretStr = SecretStr("")
-    SCHWAB_ALERT_WEBHOOK_FORMAT: Literal["slack", "generic"] = "slack"
+    SCHWAB_ALERT_WEBHOOK_FORMAT: Literal["slack", "generic", "discord"] = "slack"
 
     # Admin Auth
     # Set ADMIN_AUTH_ENABLED=false only for local development.

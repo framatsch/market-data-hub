@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROVIDER_FALLBACKS = {
     "default_price_provider": "ibkr",
-    "default_company_provider": "finnhub",
+    "default_company_provider": "ibkr",
     "default_options_provider": "ibkr",
     "default_news_provider": "finnhub",
 }

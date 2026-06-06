@@ -199,6 +199,41 @@ def test_alert_webhook_update_and_test(client, monkeypatch) -> None:
     assert test_response.json() == {"status": "sent"}
 
 
+def test_alert_webhook_discord_format(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.utils.webhooks.socket.getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    response = client.put(
+        "/api/admin/alerts/webhook",
+        json={"webhook_url": "https://hooks.example/discord-test", "format": "discord"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "configured", "format": "discord"}
+
+    class FakeDiscordAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json):
+            assert url == "https://hooks.example/discord-test"
+            assert "content" in json
+            assert json["content"] == "Market Data Hub test alert"
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr("app.api.routes_admin.httpx.AsyncClient", FakeDiscordAsyncClient)
+
+    test_response = client.post("/api/admin/alerts/test")
+    assert test_response.status_code == 200
+    assert test_response.json() == {"status": "sent"}
+
+
 def test_alert_webhook_rejects_non_https_url(client) -> None:
     response = client.put("/api/admin/alerts/webhook", json={"webhook_url": "http://hooks.example/test"})
 
@@ -281,3 +316,19 @@ def test_admin_test_connection_timeout_returns_503_payload(client, monkeypatch) 
     assert body["status_code"] == 503
     assert body["success"] is False
     assert body["message"] == "Connection test timeout"
+
+
+def test_list_admin_providers(client) -> None:
+    response = client.get("/api/admin/providers")
+    assert response.status_code == 200
+    providers = response.json()
+    assert len(providers) > 0
+    for p in providers:
+        assert "name" in p
+        assert "enabled" in p
+        assert "status" in p
+        assert "config" in p
+        assert "config_summary" in p
+        assert "timeout_seconds" in p["config_summary"]
+        assert "retry_count" in p["config_summary"]
+        assert "rate_limit_per_sec" in p["config_summary"]
