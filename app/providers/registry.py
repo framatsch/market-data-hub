@@ -14,11 +14,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import logging
 import asyncio
+import logging
 from typing import Dict, Optional, cast
 
-from app.admin.provider_config_repository import ProviderConfigRepository, ProviderRuntimeConfig
+from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderConfigRepository, ProviderRuntimeConfig
 from app.admin.settings_repository import SettingsRepository
 from app.config import settings
 from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
@@ -29,15 +29,15 @@ from app.providers.mock_news import MockNewsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.providers.polygon import PolygonProvider
 from app.providers.prixe import PrixeProvider
-from app.utils.errors import InvalidProviderError
+from app.utils.errors import AppError, InvalidProviderError
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROVIDER_FALLBACKS = {
-    "default_price_provider": "ibkr",
-    "default_company_provider": "ibkr",
-    "default_options_provider": "ibkr",
-    "default_news_provider": "finnhub",
+    "default_price_provider": None,
+    "default_company_provider": None,
+    "default_options_provider": None,
+    "default_news_provider": None,
 }
 
 
@@ -55,33 +55,33 @@ class ProviderRegistry:
     def __init__(self):
         self._providers: Dict[str, object] = {}
         self._reload_lock = asyncio.Lock()
-        self.default_price_provider: str = "ibkr"
-        self.default_company_provider: str = "finnhub"
-        self.default_options_provider: str = "ibkr"
-        self.default_news_provider: str = "finnhub"
+        self.default_price_provider: str | None = None
+        self.default_company_provider: str | None = None
+        self.default_options_provider: str | None = None
+        self.default_news_provider: str | None = None
         self._initialize_providers()
 
     def _get_reload_lock(self) -> asyncio.Lock:
         return self._reload_lock
 
-    def _resolve_default(self, configured: str, setting_key: str, base_class: type) -> str:
-        """Check if the configured default is loaded and valid; fall back otherwise."""
-        if configured in self._providers and isinstance(self._providers[configured], base_class):
-            return configured
-        for name, provider in self._providers.items():
-            if isinstance(provider, base_class):
-                logger.warning(
-                    "%s '%s' is not enabled or does not implement %s. Falling back to '%s'.",
-                    setting_key, configured, base_class.__name__, name,
-                )
-                return name
-        logger.error(
-            "%s '%s' is not enabled and no alternative provider implements %s.",
-            setting_key, configured, base_class.__name__,
-        )
-        return configured
+    def _resolve_default(self, configured: str | None, setting_key: str, base_class: type) -> str | None:
+        """Return configured provider name only when loaded and implementing the expected base class."""
+        if configured is None:
+            return None
 
-    def _apply_default_settings(self, system_settings: dict[str, str] | None = None) -> None:
+        provider = self._providers.get(configured)
+        if provider is not None and isinstance(provider, base_class):
+            return configured
+
+        logger.warning(
+            "%s '%s' is not enabled or does not implement %s.",
+            setting_key,
+            configured,
+            base_class.__name__,
+        )
+        return None
+
+    def _apply_default_settings(self, system_settings: dict[str, str | None] | None = None) -> None:
         values = {**DEFAULT_PROVIDER_FALLBACKS, **(system_settings or {})}
         self.default_price_provider = self._resolve_default(
             values["default_price_provider"], "default_price_provider", BasePriceProvider
@@ -138,6 +138,24 @@ class ProviderRegistry:
         async with self._get_reload_lock():
             configs = {config.provider_name: config for config in await config_repository.list_all()}
             system_settings = await settings_repository.get_all() if settings_repository is not None else {}
+
+            for provider_name in KNOWN_PROVIDERS:
+                existing_config = configs.get(provider_name)
+                if existing_config is None or existing_config.updated_at is None:
+                    configs[provider_name] = await config_repository.save(provider_name, {"enabled": False})
+
+            if settings_repository is not None:
+                default_setting_keys = (
+                    "default_price_provider",
+                    "default_company_provider",
+                    "default_options_provider",
+                    "default_news_provider",
+                )
+                for key in default_setting_keys:
+                    if key not in system_settings:
+                        await settings_repository.set(key, None)
+                        system_settings[key] = None
+
             enabled = {name for name, config in configs.items() if config.enabled and name in self.provider_classes}
 
             for name in list(self._providers):
@@ -192,31 +210,47 @@ class ProviderRegistry:
         return dict(self._providers)
 
     def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
-        name = name or self.default_price_provider
-        provider = self._providers.get(name)
+        if name is None and self.default_price_provider is None:
+            raise AppError("No price provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider_name = name or self.default_price_provider
+        if provider_name is None:
+            raise AppError("No price provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BasePriceProvider):
-            raise InvalidProviderError(name)
+            raise InvalidProviderError(provider_name)
         return cast(BasePriceProvider, provider)
 
     def get_company_provider(self, name: Optional[str] = None) -> BaseCompanyProvider:
-        name = name or self.default_company_provider
-        provider = self._providers.get(name)
+        if name is None and self.default_company_provider is None:
+            raise AppError("No company data provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider_name = name or self.default_company_provider
+        if provider_name is None:
+            raise AppError("No company data provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseCompanyProvider):
-            raise InvalidProviderError(name)
+            raise InvalidProviderError(provider_name)
         return cast(BaseCompanyProvider, provider)
 
     def get_options_provider(self, name: Optional[str] = None) -> BaseOptionsProvider:
-        name = name or self.default_options_provider
-        provider = self._providers.get(name)
+        if name is None and self.default_options_provider is None:
+            raise AppError("No options provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider_name = name or self.default_options_provider
+        if provider_name is None:
+            raise AppError("No options provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseOptionsProvider):
-            raise InvalidProviderError(name)
+            raise InvalidProviderError(provider_name)
         return cast(BaseOptionsProvider, provider)
 
     def get_news_provider(self, name: Optional[str] = None) -> BaseNewsProvider:
-        name = name or self.default_news_provider
-        provider = self._providers.get(name)
+        if name is None and self.default_news_provider is None:
+            raise AppError("No news provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider_name = name or self.default_news_provider
+        if provider_name is None:
+            raise AppError("No news provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+        provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseNewsProvider):
-            raise InvalidProviderError(name)
+            raise InvalidProviderError(provider_name)
         return cast(BaseNewsProvider, provider)
 
     async def shutdown(self) -> None:

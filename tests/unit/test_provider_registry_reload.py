@@ -104,7 +104,19 @@ async def test_registry_reload_uses_database_default(tmp_path) -> None:
     assert registry.default_price_provider == "finnhub"
 
 
-async def test_registry_reload_falls_back_for_invalid_database_default(tmp_path) -> None:
+async def test_registry_reload_uses_ibkr_database_default(tmp_path) -> None:
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
+    await repo.save("ibkr", {"enabled": True})
+    await settings_repo.set("default_price_provider", "ibkr")
+    registry = TestRegistry()
+
+    await registry.reload_from_config(repo, settings_repo)
+
+    assert registry.get_price_provider() is registry.get_provider_instance("ibkr")
+
+
+async def test_registry_reload_returns_none_for_invalid_database_default(tmp_path) -> None:
     repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
     settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
     await repo.save("ibkr", {"enabled": True})
@@ -113,4 +125,39 @@ async def test_registry_reload_falls_back_for_invalid_database_default(tmp_path)
 
     await registry.reload_from_config(repo, settings_repo)
 
-    assert registry.default_price_provider == "ibkr"
+    assert registry.default_price_provider is None
+
+
+async def test_registry_reload_seeds_missing_provider_rows_as_disabled(tmp_path) -> None:
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
+    registry = TestRegistry()
+
+    await registry.reload_from_config(repo, settings_repo)
+
+    configs = {config.provider_name: config for config in await repo.list_all()}
+    assert all(config.enabled is False for config in configs.values())
+
+
+async def test_registry_reload_seeds_default_settings_as_none(tmp_path) -> None:
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
+    registry = TestRegistry()
+
+    await registry.reload_from_config(repo, settings_repo)
+
+    assert await settings_repo.get("default_price_provider") is None
+    assert await settings_repo.get("default_company_provider") is None
+    assert await settings_repo.get("default_options_provider") is None
+    assert await settings_repo.get("default_news_provider") is None
+
+
+async def test_registry_reload_seed_is_idempotent_for_existing_defaults(tmp_path) -> None:
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
+    registry = TestRegistry()
+
+    await settings_repo.set("default_price_provider", "ibkr")
+    await registry.reload_from_config(repo, settings_repo)
+
+    assert await settings_repo.get("default_price_provider") == "ibkr"

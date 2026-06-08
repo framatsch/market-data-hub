@@ -28,18 +28,21 @@ Authentication model:
 import asyncio
 import logging
 import os
+import re
 import tempfile
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional, cast
 
 from app.config import settings
+from app.models.options import OptionChain, OptionQuote
 from app.models.price import PriceBar, PriceQuote
-from app.providers.base import BasePriceProvider
+from app.providers.base import BaseOptionsProvider, BasePriceProvider
 from app.utils.errors import (
+    AppError,
     DataNotFoundError,
     DataValidationError,
     ProviderConnectionError,
@@ -62,9 +65,10 @@ _HTTP_OK = 200
 _HTTP_RATE_LIMITED = 429
 _HTTP_UNAUTHORIZED = 401
 _HTTP_FORBIDDEN = 403
+_OCC_OPTION_SYMBOL_RE = re.compile(r"^([A-Z]+)\s+(\d{6})([CP])(\d{8})$")
 
 
-class SchwabProvider(BasePriceProvider):
+class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     """Schwab Individual Trader API provider.
 
     Supports:
@@ -146,6 +150,22 @@ class SchwabProvider(BasePriceProvider):
     async def _resolve_token_path(self) -> str:
         token_json = await self._load_repository_credential("token_json")
         if token_json is not None:
+            try:
+                import json
+                token_data = json.loads(token_json)
+                token_item = token_data.get("token", token_data)
+                creation_ts = token_item.get("creation_timestamp")
+                if creation_ts:
+                    creation = datetime.fromtimestamp(creation_ts, tz=timezone.utc)
+                    days_remaining = 7 - (datetime.now(timezone.utc) - creation).days
+                    if days_remaining <= 3:
+                        logger.warning(
+                            "Schwab token is near expiry",
+                            extra={"event": "schwab_token_expiry", "days_remaining": max(0, days_remaining)}
+                        )
+            except Exception:
+                pass
+
             self._cleanup_temp_token_file()
             fd, path = tempfile.mkstemp(suffix=".json")
             os.chmod(path, 0o600)
@@ -314,6 +334,84 @@ class SchwabProvider(BasePriceProvider):
             volume=int(quote["totalVolume"]) if quote.get("totalVolume") is not None else None,
         )
 
+    def _parse_option_chain(
+        self,
+        symbol: str,
+        data: dict,
+        expiry: date,
+        min_strike: Optional[Decimal],
+        max_strike: Optional[Decimal],
+    ) -> list[OptionQuote]:
+        options: list[OptionQuote] = []
+
+        option_maps: tuple[tuple[Literal["call", "put"], str], ...] = (
+            ("call", "callExpDateMap"),
+            ("put", "putExpDateMap"),
+        )
+
+        for option_type, map_key in option_maps:
+            exp_date_map = data.get(map_key)
+            if not isinstance(exp_date_map, dict):
+                continue
+
+            for exp_date_key, strike_map in exp_date_map.items():
+                try:
+                    exp_date = date.fromisoformat(str(exp_date_key).split(":", 1)[0])
+                except ValueError:
+                    continue
+
+                if exp_date != expiry:
+                    continue
+                if not isinstance(strike_map, dict):
+                    continue
+
+                for contracts in strike_map.values():
+                    if not isinstance(contracts, list) or not contracts:
+                        continue
+                    contract = contracts[0]
+                    if not isinstance(contract, dict):
+                        continue
+
+                    strike_raw = contract.get("strikePrice")
+                    if strike_raw is None:
+                        continue
+
+                    strike = Decimal(str(strike_raw))
+                    if min_strike is not None and strike < min_strike:
+                        continue
+                    if max_strike is not None and strike > max_strike:
+                        continue
+
+                    last = contract.get("last")
+                    mark = contract.get("mark")
+                    price_raw = last or mark
+                    if price_raw is None:
+                        continue
+
+                    symbol_value = contract.get("symbol") or contract.get("description") or ""
+                    options.append(
+                        OptionQuote(
+                            symbol=str(symbol_value),
+                            underlying_symbol=symbol,
+                            strike=strike,
+                            expiry=expiry,
+                            type=option_type,
+                            price=Decimal(str(price_raw)),
+                            bid=Decimal(str(contract["bid"])) if contract.get("bid") is not None else None,
+                            ask=Decimal(str(contract["ask"])) if contract.get("ask") is not None else None,
+                            volume=int(contract["totalVolume"]) if contract.get("totalVolume") is not None else None,
+                            open_interest=int(contract["openInterest"]) if contract.get("openInterest") is not None else None,
+                            implied_volatility=contract.get("volatility"),  # Schwab uses "volatility" for IV.
+                            delta=contract.get("delta"),
+                            gamma=contract.get("gamma"),
+                            theta=contract.get("theta"),
+                            vega=contract.get("vega"),
+                            provider="schwab",
+                        )
+                    )
+
+        return sorted(options, key=lambda item: (item.type, item.strike))
+
     def _mark_paused(self) -> bool:
         was_initialized = self._client is not None
         if was_initialized:
@@ -373,6 +471,36 @@ class SchwabProvider(BasePriceProvider):
                 response.raise_for_status()
         except Exception:
             logger.warning("Failed to send Schwab token-expiry webhook", exc_info=True)
+
+    def _map_schwab_option_http_error(self, status_code: int, symbol: str, context: str) -> None:
+        if status_code == _HTTP_UNAUTHORIZED:
+            raise ProviderConnectionError(
+                f"Schwab {context} request unauthorized for {symbol}.",
+                details={"status_code": status_code},
+            )
+        if status_code == _HTTP_FORBIDDEN:
+            raise ProviderConnectionError(
+                f"Schwab {context} request forbidden for {symbol}.",
+                details={"status_code": status_code},
+            )
+        if status_code == _HTTP_RATE_LIMITED:
+            raise ProviderTimeoutError("schwab", details={"status_code": status_code})
+        raise ProviderError(
+            f"Schwab {context} request failed for {symbol}.",
+            details={"status_code": status_code},
+        )
+
+    @staticmethod
+    def _parse_occ_symbol(option_id: str) -> tuple[str, date, Literal["call", "put"], Decimal]:
+        match = _OCC_OPTION_SYMBOL_RE.match(option_id)
+        if not match:
+            raise AppError(f"Invalid option symbol: {option_id}", "INVALID_PROVIDER", details={"status_code": 400})
+
+        underlying = match.group(1)
+        expiry = datetime.strptime(match.group(2), "%y%m%d").date()
+        right = "call" if match.group(3) == "C" else "put"
+        strike = Decimal(match.group(4)) / Decimal("1000")
+        return underlying, expiry, right, strike
 
     def unpause(self) -> None:
         self._paused = False
@@ -519,6 +647,114 @@ class SchwabProvider(BasePriceProvider):
             await self._handle_error_status(response.status_code, symbol, "quote")
 
         return self._parse_quote(symbol, response.json())
+
+    async def get_option_chain(
+        self,
+        symbol: str,
+        expiry: date,
+        min_strike: Optional[Decimal] = None,
+        max_strike: Optional[Decimal] = None,
+        right: Optional[Literal["call", "put"]] = None,
+        market_data_type: Optional[int] = None,
+    ) -> OptionChain:
+        del market_data_type  # Schwab options endpoint does not expose data-type selection.
+
+        client = await self._get_client()
+
+        contract_type: Any = {None: "ALL", "call": "CALL", "put": "PUT"}[right]
+        options_ns = getattr(type(client), "Options", None)
+        contract_type_enum = getattr(options_ns, "ContractType", None) if options_ns is not None else None
+        if contract_type_enum is not None:
+            contract_type = {
+                None: contract_type_enum.ALL,
+                "call": contract_type_enum.CALL,
+                "put": contract_type_enum.PUT,
+            }[right]
+
+        response = await asyncio.to_thread(
+            client.get_option_chain,
+            symbol,
+            contract_type=contract_type,
+            from_date=expiry,
+            to_date=expiry,
+        )
+
+        if response.status_code != _HTTP_OK:
+            self._map_schwab_option_http_error(response.status_code, symbol, "option chain")
+
+        options = self._parse_option_chain(symbol, response.json(), expiry, min_strike, max_strike)
+        if right is not None:
+            options = [option for option in options if option.type == right]
+        return OptionChain(underlying_symbol=symbol, expiry=expiry, options=options, provider="schwab")
+
+    async def get_option_quote(
+        self,
+        symbol: str,
+        option_id: str,
+        market_data_type: Optional[int] = None,
+    ) -> OptionQuote:
+        del market_data_type  # Schwab options endpoint does not expose data-type selection.
+
+        client = await self._get_client()
+        response = await asyncio.to_thread(client.get_quotes, [option_id])
+
+        if response.status_code != _HTTP_OK:
+            self._map_schwab_option_http_error(response.status_code, symbol, "option quote")
+
+        payload = response.json()
+        entry = payload.get(option_id)
+        if entry is None:
+            raise DataNotFoundError("OptionContract", option_id)
+
+        quote = entry.get("quote", entry) if isinstance(entry, dict) else {}
+        if not isinstance(quote, dict):
+            raise DataNotFoundError("OptionContract", option_id)
+
+        delta = quote.get("delta")
+        gamma = quote.get("gamma")
+        theta = quote.get("theta")
+        vega = quote.get("vega")
+
+        if all(greek is None for greek in (delta, gamma, theta, vega)):
+            parsed_underlying, parsed_expiry, parsed_right, parsed_strike = self._parse_occ_symbol(option_id)
+            chain = await self.get_option_chain(
+                symbol=parsed_underlying,
+                expiry=parsed_expiry,
+                min_strike=parsed_strike,
+                max_strike=parsed_strike,
+                right=parsed_right,
+            )
+            matches = [opt for opt in chain.options if opt.type == parsed_right and opt.strike == parsed_strike]
+            if not matches:
+                raise DataNotFoundError("OptionContract", option_id)
+            return matches[0]
+
+        parsed_underlying, parsed_expiry, parsed_right, parsed_strike = self._parse_occ_symbol(option_id)
+        parsed_right = cast(Literal["call", "put"], parsed_right)
+        last = quote.get("lastPrice", quote.get("last"))
+        mark = quote.get("mark")
+        price_raw = last or mark
+        if price_raw is None:
+            raise DataNotFoundError("OptionQuote", option_id)
+
+        return OptionQuote(
+            symbol=option_id,
+            underlying_symbol=symbol or parsed_underlying,
+            strike=Decimal(str(quote.get("strikePrice", parsed_strike))),
+            expiry=parsed_expiry,
+            type=parsed_right,
+            price=Decimal(str(price_raw)),
+            bid=Decimal(str(quote["bidPrice"])) if quote.get("bidPrice") is not None else None,
+            ask=Decimal(str(quote["askPrice"])) if quote.get("askPrice") is not None else None,
+            volume=int(quote["totalVolume"]) if quote.get("totalVolume") is not None else None,
+            open_interest=int(quote["openInterest"]) if quote.get("openInterest") is not None else None,
+            implied_volatility=quote.get("volatility"),
+            delta=delta,
+            gamma=gamma,
+            theta=theta,
+            vega=vega,
+            provider="schwab",
+        )
 
     async def close(self) -> None:
         """Gracefully close the underlying schwab-py HTTP session."""

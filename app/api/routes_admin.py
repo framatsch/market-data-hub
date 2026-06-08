@@ -1,13 +1,15 @@
 import asyncio
+import html
 import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.api.admin_auth import AdminPrincipal, admin_auth
@@ -21,15 +23,23 @@ from app.utils.secrets import unwrap_secret
 from app.utils.webhooks import validate_webhook_url
 
 try:
-    from schwab.auth import client_from_received_url
+    from schwab.auth import AuthContext, client_from_received_url, get_auth_context
 except ImportError:  # pragma: no cover
+    AuthContext = Any  # type: ignore[misc,assignment]
     client_from_received_url = None
+    get_auth_context = None
 
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 logger = logging.getLogger(__name__)
 
 _SCHWAB_TOKEN_LIFETIME_DAYS = 7
+_SCHWAB_PENDING_STATE_TTL = timedelta(minutes=10)
+_SCHWAB_CALLBACK_ERROR_TTL = timedelta(minutes=5)
+_SCHWAB_CALLBACK_ERROR_KEY = "schwab_callback_error"
+
+_schwab_pending_states: dict[str, tuple[Any, datetime]] = {}
+_schwab_callback_error: dict[str, tuple[str, datetime]] = {}
 
 
 class TokenExchangeRequest(BaseModel):
@@ -77,6 +87,10 @@ class SystemDefaultsUpdate(BaseModel):
 class IbkrGatewayUpdate(BaseModel):
     host: str
     port: int
+    client_id: int | None = None
+    account_id: str | None = None
+    env: Literal["live", "paper"] | None = None
+    market_data_type: int | None = None
 
 
 class SchwabCallbackRequest(BaseModel):
@@ -99,6 +113,35 @@ def _validate_webhook_url(webhook_url: str) -> None:
         validate_webhook_url(webhook_url)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _evict_expired_schwab_states(now: datetime) -> None:
+    expired_states = [
+        state
+        for state, (_, created_at) in _schwab_pending_states.items()
+        if now - created_at > _SCHWAB_PENDING_STATE_TTL
+    ]
+    for state in expired_states:
+        _schwab_pending_states.pop(state, None)
+
+
+def _set_schwab_callback_error(error_message: str) -> None:
+    _schwab_callback_error[_SCHWAB_CALLBACK_ERROR_KEY] = (error_message, _utcnow())
+
+
+def _get_schwab_callback_error() -> str | None:
+    error_entry = _schwab_callback_error.get(_SCHWAB_CALLBACK_ERROR_KEY)
+    if error_entry is None:
+        return None
+    error_message, created_at = error_entry
+    if _utcnow() - created_at > _SCHWAB_CALLBACK_ERROR_TTL:
+        _schwab_callback_error.pop(_SCHWAB_CALLBACK_ERROR_KEY, None)
+        return None
+    return error_message
 
 
 @router.get("/auth/url")
@@ -223,10 +266,10 @@ def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]
 
 def _system_defaults() -> dict[str, str]:
     return {
-        "default_price_provider": registry.default_price_provider,
-        "default_company_provider": registry.default_company_provider,
-        "default_options_provider": registry.default_options_provider,
-        "default_news_provider": registry.default_news_provider,
+        "default_price_provider": registry.default_price_provider or "",
+        "default_company_provider": registry.default_company_provider or "",
+        "default_options_provider": registry.default_options_provider or "",
+        "default_news_provider": registry.default_news_provider or "",
     }
 
 
@@ -457,20 +500,37 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
 @router.put("/providers/ibkr/gateway")
 async def update_ibkr_gateway(payload: IbkrGatewayUpdate, _principal: PrincipalDep) -> dict[str, Any]:
     repo = get_provider_config_repository()
-    config = await repo.save("ibkr", {"connection_config": {"host": payload.host, "port": payload.port}})
+    existing_config = await repo.get("ibkr")
+    connection_config = dict(existing_config.connection_config or {})
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
+    connection_config.update(updates)
+
+    config = await repo.save("ibkr", {"connection_config": connection_config})
     await registry.reload_from_config(repo)
     return {"name": "ibkr", "connection_config": config.connection_config}
 
 
 @router.get("/schwab/auth/url")
 async def get_schwab_auth_url(_principal: PrincipalDep) -> dict[str, str]:
+    if get_auth_context is None:
+        raise HTTPException(status_code=503, detail="schwab-py is not installed")
+
     key_repo = get_key_repository()
     api_key = await key_repo.get("schwab", "api_key")
     app_secret = await key_repo.get("schwab", "app_secret")
     if not api_key or not app_secret:
         raise HTTPException(status_code=503, detail="Schwab credentials not configured")
-    params = {"client_id": api_key, "redirect_uri": settings.SCHWAB_CALLBACK_URL}
-    return {"auth_url": f"https://api.schwabapi.com/v1/oauth/authorize?{urlencode(params)}"}
+
+    now = _utcnow()
+    _evict_expired_schwab_states(now)
+    auth_context = await asyncio.to_thread(
+        get_auth_context,
+        api_key,
+        callback_url=settings.SCHWAB_CALLBACK_URL,
+    )
+    _schwab_pending_states[auth_context.state] = (auth_context, now)
+
+    return {"auth_url": auth_context.authorization_url}
 
 
 def _extract_token_json(client: Any) -> str:
@@ -484,8 +544,68 @@ def _extract_token_json(client: Any) -> str:
     return token if isinstance(token, str) else json.dumps(token)
 
 
-@router.post("/schwab/auth/callback")
+@router.get("/schwab/callback", response_class=HTMLResponse)
+async def complete_schwab_auth_callback_redirect(request: Request, code: str, state: str) -> HTMLResponse:
+    _ = code
+    if client_from_received_url is None:
+        return HTMLResponse(status_code=503, content="<h1>schwab-py is not installed.</h1>")
+
+    key_repo = get_key_repository()
+    api_key = await key_repo.get("schwab", "api_key")
+    app_secret = await key_repo.get("schwab", "app_secret")
+    if not api_key or not app_secret:
+        _set_schwab_callback_error("Schwab credentials not configured")
+        return HTMLResponse(status_code=400, content="<h1>Schwab credentials not configured.</h1>")
+
+    now = _utcnow()
+    _evict_expired_schwab_states(now)
+    pending = _schwab_pending_states.pop(state, None)
+    if pending is None:
+        _set_schwab_callback_error("Invalid or expired state. Please retry authorization.")
+        return HTMLResponse(
+            status_code=400,
+            content="<h1>Invalid or expired state. Please retry authorization.</h1>",
+        )
+
+    auth_context, created_at = pending
+    if now - created_at > _SCHWAB_PENDING_STATE_TTL:
+        _set_schwab_callback_error("Invalid or expired state. Please retry authorization.")
+        return HTMLResponse(
+            status_code=400,
+            content="<h1>Invalid or expired state. Please retry authorization.</h1>",
+        )
+
+    token_holder: dict[str, str] = {}
+
+    def _token_write_func(token: Any) -> None:
+        token_holder["token_json"] = token if isinstance(token, str) else json.dumps(token)
+
+    try:
+        client = await asyncio.to_thread(
+            client_from_received_url,
+            api_key,
+            app_secret,
+            auth_context=auth_context,
+            received_url=str(request.url),
+            token_write_func=_token_write_func,
+        )
+        token_json = token_holder.get("token_json") or _extract_token_json(client)
+        await key_repo.save("schwab", "token_json", token_json)
+        registry.unpause_provider("schwab")
+        _schwab_callback_error.pop(_SCHWAB_CALLBACK_ERROR_KEY, None)
+        return HTMLResponse(status_code=200, content="<h1>Authorization successful. You may close this tab.</h1>")
+    except Exception as exc:
+        error_message = str(exc)
+        _set_schwab_callback_error(error_message)
+        return HTMLResponse(
+            status_code=400,
+            content=f"<h1>Authorization failed: {html.escape(error_message)}</h1>",
+        )
+
+
+@router.post("/schwab/auth/callback", deprecated=True)
 async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _principal: PrincipalDep) -> dict[str, Any]:
+    """Deprecated: use GET /api/admin/schwab/callback automatic redirect flow."""
     if client_from_received_url is None:
         raise HTTPException(status_code=503, detail="schwab-py is not installed")
     key_repo = get_key_repository()
@@ -517,6 +637,10 @@ async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _princip
 
 @router.get("/schwab/auth/status")
 async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
+    callback_error = _get_schwab_callback_error()
+    if callback_error:
+        return {"status": "callback_error", "error": callback_error, "paused": True}
+
     token_json = await get_key_repository().get("schwab", "token_json")
     storage = "sqlite" if token_json else None
     if token_json is None and Path(settings.SCHWAB_TOKEN_PATH).exists():
@@ -538,7 +662,7 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
     }
 
 
-@router.get("/alerts/webhook")
+@router.get("/alerts/webhook", deprecated=True)
 async def get_alert_webhook(_principal: PrincipalDep) -> dict[str, Any]:
     webhook_url = await get_key_repository().get("schwab", "alert_webhook_url")
     repo = get_provider_config_repository()
@@ -550,7 +674,7 @@ async def get_alert_webhook(_principal: PrincipalDep) -> dict[str, Any]:
     }
 
 
-@router.put("/alerts/webhook")
+@router.put("/alerts/webhook", deprecated=True)
 async def update_alert_webhook(payload: AlertWebhookUpdate, _principal: PrincipalDep) -> dict[str, Any]:
     if payload.format not in {"slack", "generic", "discord"}:
         raise HTTPException(status_code=422, detail="format must be slack, generic, or discord")
@@ -563,7 +687,7 @@ async def update_alert_webhook(payload: AlertWebhookUpdate, _principal: Principa
     return {"status": "configured", "format": payload.format}
 
 
-@router.post("/alerts/test")
+@router.post("/alerts/test", deprecated=True)
 async def test_alert_webhook(_principal: PrincipalDep) -> dict[str, str]:
     webhook_url = await get_key_repository().get("schwab", "alert_webhook_url")
     if not webhook_url:

@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
@@ -23,8 +23,10 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.config import settings
+from app.providers.base import BaseOptionsProvider
 from app.providers.schwab import SchwabProvider
 from app.utils.errors import (
+    AppError,
     DataNotFoundError,
     DataValidationError,
     ProviderConnectionError,
@@ -55,6 +57,88 @@ def provider(monkeypatch, tmp_path: Path) -> SchwabProvider:
     monkeypatch.setattr(settings, "SCHWAB_TIMEOUT_SECONDS", 10)
 
     return SchwabProvider()
+
+
+@pytest.fixture
+def option_chain_response() -> dict:
+    return {
+        "callExpDateMap": {
+            "2024-04-05:7": {
+                "185.0": [
+                    {
+                        "symbol": "AAPL  240405C00185000",
+                        "strikePrice": 185.0,
+                        "bid": 4.1,
+                        "ask": 4.3,
+                        "last": 4.2,
+                        "mark": 4.2,
+                        "totalVolume": 120,
+                        "openInterest": 800,
+                        "volatility": 22.3,
+                        "delta": 0.56,
+                        "gamma": 0.08,
+                        "theta": -0.05,
+                        "vega": 0.11,
+                    }
+                ],
+                "190.0": [
+                    {
+                        "symbol": "AAPL  240405C00190000",
+                        "strikePrice": 190.0,
+                        "bid": 2.1,
+                        "ask": 2.3,
+                        "last": 2.2,
+                        "mark": 2.2,
+                        "totalVolume": 80,
+                        "openInterest": 600,
+                        "volatility": 20.1,
+                        "delta": 0.42,
+                        "gamma": 0.07,
+                        "theta": -0.04,
+                        "vega": 0.10,
+                    }
+                ],
+            }
+        },
+        "putExpDateMap": {
+            "2024-04-05:7": {
+                "185.0": [
+                    {
+                        "symbol": "AAPL  240405P00185000",
+                        "strikePrice": 185.0,
+                        "bid": 3.8,
+                        "ask": 4.0,
+                        "last": 3.9,
+                        "mark": 3.9,
+                        "totalVolume": 110,
+                        "openInterest": 700,
+                        "volatility": 23.0,
+                        "delta": -0.44,
+                        "gamma": 0.09,
+                        "theta": -0.06,
+                        "vega": 0.12,
+                    }
+                ],
+                "190.0": [
+                    {
+                        "symbol": "AAPL  240405P00190000",
+                        "strikePrice": 190.0,
+                        "bid": 5.5,
+                        "ask": 5.8,
+                        "last": 5.7,
+                        "mark": 5.7,
+                        "totalVolume": 65,
+                        "openInterest": 500,
+                        "volatility": 24.1,
+                        "delta": -0.58,
+                        "gamma": 0.10,
+                        "theta": -0.07,
+                        "vega": 0.14,
+                    }
+                ],
+            }
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -477,3 +561,134 @@ def test_decimal_conversion_uses_str_path(provider: SchwabProvider, field: str):
     # Prove the two forms differ for floats that lose precision
     if expected != float_result:
         assert result != float_result, f"{field}: should use str-path, not direct float Decimal"
+
+
+# ---------------------------------------------------------------------------
+# Options support
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_success(provider: SchwabProvider, option_chain_response: dict):
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5))
+
+    assert chain.provider == "schwab"
+    assert len(chain.options) == 4
+    assert chain.options[0].strike == Decimal("185.0")
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_min_strike_filter(provider: SchwabProvider, option_chain_response: dict):
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), min_strike=Decimal("187.0"))
+
+    assert len(chain.options) == 2
+    assert {option.strike for option in chain.options} == {Decimal("190.0")}
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_right_filter_call(provider: SchwabProvider, option_chain_response: dict):
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
+
+    assert len(chain.options) == 2
+    assert all(option.type == "call" for option in chain.options)
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_uses_volatility_for_iv(provider: SchwabProvider, option_chain_response: dict):
+    option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["volatility"] = 22.345
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
+
+    assert chain.options[0].implied_volatility == 22.345
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_last_zero_falls_back_to_mark(provider: SchwabProvider, option_chain_response: dict):
+    option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["last"] = 0
+    option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["mark"] = 4.45
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
+
+    assert chain.options[0].price == Decimal("4.45")
+
+
+@pytest.mark.asyncio
+async def test_get_option_chain_429_raises_timeout(provider: SchwabProvider):
+    client = Mock()
+    client.get_option_chain = Mock(return_value=_Response(429, {}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    with pytest.raises(ProviderTimeoutError) as exc:
+        await provider.get_option_chain("AAPL", date(2024, 4, 5))
+
+    assert exc.value.details["status_code"] == 429
+
+
+@pytest.mark.asyncio
+async def test_get_option_quote_success(provider: SchwabProvider):
+    client = Mock()
+    client.get_quotes = Mock(
+        return_value=_Response(
+            200,
+            {
+                "AAPL  240405C00185000": {
+                    "quote": {
+                        "strikePrice": 185.0,
+                        "bidPrice": 4.1,
+                        "askPrice": 4.3,
+                        "lastPrice": 4.2,
+                        "totalVolume": 120,
+                        "openInterest": 800,
+                        "volatility": 22.3,
+                        "delta": 0.56,
+                        "gamma": 0.08,
+                        "theta": -0.05,
+                        "vega": 0.11,
+                    }
+                }
+            },
+        )
+    )
+    provider._get_client = AsyncMock(return_value=client)
+
+    quote = await provider.get_option_quote("AAPL", "AAPL  240405C00185000")
+
+    assert quote.provider == "schwab"
+    assert quote.symbol == "AAPL  240405C00185000"
+    assert quote.type == "call"
+    assert quote.strike == Decimal("185.0")
+
+
+@pytest.mark.asyncio
+async def test_get_option_quote_invalid_occ_symbol(provider: SchwabProvider):
+    client = Mock()
+    client.get_quotes = Mock(return_value=_Response(200, {"bad-occ": {"quote": {}}}))
+    provider._get_client = AsyncMock(return_value=client)
+
+    with pytest.raises(AppError) as exc:
+        await provider.get_option_quote("AAPL", "bad-occ")
+
+    assert exc.value.code == "INVALID_PROVIDER"
+    assert exc.value.details.get("status_code") == 400
+
+
+def test_schwab_provider_is_options_provider(provider: SchwabProvider):
+    assert isinstance(provider, BaseOptionsProvider)

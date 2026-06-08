@@ -99,10 +99,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for MCP Inspector and other clients
+# Enable CORS for MCP Inspector and other clients.
+# NOTE: allow_origins=["*"] with allow_credentials=True is invalid per the CORS spec —
+# browsers block credentialed requests (Authorization header) when the server responds
+# with a wildcard origin.  Explicit origins are required for credentialed cross-origin
+# requests (e.g. the Vite dev server on :5173 calling the API on :8000).
+# In production the admin SPA is served by FastAPI itself (same-origin), so only
+# the dev server origin needs to be listed here.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=[
+        "http://localhost:5173",   # Vite dev server
+        "http://localhost:4173",   # Vite preview server
+        "http://localhost:8000",   # same-origin explicit
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

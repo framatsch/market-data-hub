@@ -93,6 +93,13 @@ export default function SettingsPage() {
       <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
         Configure global system defaults. These settings define which provider is used when a specific capability is requested without an explicit provider.
       </Typography>
+      <Alert severity="info" sx={{ mb: 2, maxWidth: 900 }}>
+        Schwab OAuth requires registering
+        {' '}
+        <code>/api/admin/schwab/callback</code>
+        {' '}
+        as the redirect_uri in the Schwab Developer Portal.
+      </Alert>
 
       <Paper sx={{ p: 3, maxWidth: 600 }}>
         <form onSubmit={handleSubmit}>

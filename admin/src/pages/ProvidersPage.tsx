@@ -1,37 +1,114 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import {
   Typography,
   Box,
-  Switch,
-  FormControlLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  TextField,
-  Button,
-  Grid,
-  Snackbar,
-  Alert,
   CircularProgress,
   Stack,
-  Divider,
+  Snackbar,
+  Alert,
+  Chip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  IconButton,
+  Collapse,
+  Switch,
+  Tooltip,
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { fetcher } from '../lib/api';
-import type { Provider, ProviderConfig } from '../types';
+import type { Provider } from '../types';
+import { ProviderDetailsPanel } from '../components/provider/ProviderDetailsPanel';
+import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
+import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
+import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
+
+type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';
+
+interface CredentialMeta {
+  provider: string;
+  credential_name: string;
+  set: boolean;
+  masked_value: string | null;
+  updated_at: string | null;
+}
+
+function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMeta[] | undefined) {
+  if (activeFilters.has('all')) return providers;
+
+  return providers.filter(provider => {
+    let match = false;
+    if (activeFilters.has('active') && provider.enabled) match = true;
+    if (activeFilters.has('inactive') && !provider.enabled) match = true;
+    if (activeFilters.has('healthy') && provider.status === 'healthy') match = true;
+
+    if (activeFilters.has('not-configured')) {
+      if (provider.name === 'mock' || provider.name === 'prixe') {
+        // never match
+      } else if (provider.name === 'ibkr') {
+        if (provider.connection_config?.account_id === 'DU123456') {
+          match = true;
+        }
+      } else {
+        const providerCreds = credentials?.filter(c => c.provider === provider.name) || [];
+        if (providerCreds.length > 0 && providerCreds.every(c => !c.set)) {
+          match = true;
+        }
+      }
+    }
+    return match;
+  });
+}
+
+function statusColor(status: string): 'success' | 'warning' | 'error' | 'default' {
+  if (status === 'healthy') return 'success';
+  if (status === 'paused') return 'warning';
+  if (status === 'disabled') return 'default';
+  return 'error';
+}
+
+function renderAuthSection(provider: Provider) {
+  if (provider.name === 'schwab') {
+    return (
+      <>
+        <ApiKeyAuthSection providerName="schwab" visibleCredentials={["api_key", "app_secret"]} />
+        <SchwabOAuthSection />
+      </>
+    );
+  }
+  if (provider.name === 'ibkr') {
+    return <IbkrConnectionSection />;
+  }
+  return <ApiKeyAuthSection providerName={provider.name} />;
+}
 
 export default function ProvidersPage() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
     severity: 'success',
   });
 
+  const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set(['all']));
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+
   const providersQuery = useQuery<Provider[]>({
     queryKey: ['providers'],
     queryFn: () => fetcher('/api/admin/providers'),
+  });
+
+  const credentialsQuery = useQuery<CredentialMeta[]>({
+    queryKey: ['credentials'],
+    queryFn: () => fetcher('/api/admin/credentials'),
   });
 
   const toggleMutation = useMutation({
@@ -55,27 +132,142 @@ export default function ProvidersPage() {
     },
   });
 
+  // Auto-expand from ?expand= URL param
+  useEffect(() => {
+    const expandParam = searchParams.get('expand');
+    if (expandParam) {
+      setExpandedProvider(expandParam);
+    }
+  }, [searchParams]);
+
+  const toggleFilter = (filter: FilterType) => {
+    setActiveFilters(prev => {
+      const next = new Set(prev);
+      if (filter === 'all') return new Set(['all']);
+      next.delete('all');
+      if (next.has(filter)) {
+        next.delete(filter);
+      } else {
+        next.add(filter);
+      }
+      if (next.size === 0) return new Set(['all']);
+      return next;
+    });
+  };
+
+  const handleRowClick = (providerName: string) => {
+    setExpandedProvider(prev => (prev === providerName ? null : providerName));
+  };
+
+  const filteredProviders = providersQuery.data
+    ? filterProviders(providersQuery.data, activeFilters, credentialsQuery.data)
+    : [];
+
+  const expandParam = searchParams.get('expand');
+
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
         Provider Management
       </Typography>
 
-      <Stack spacing={3} sx={{ mt: 3 }}>
-        {providersQuery.isLoading ? (
-          <CircularProgress />
-        ) : (
-          providersQuery.data?.map((provider) => (
-            <ProviderSection
-              key={provider.name}
-              provider={provider}
-              onToggle={(enabled) => toggleMutation.mutate({ name: provider.name, enabled })}
-              onSuccess={(msg) => setSnackbar({ open: true, message: msg, severity: 'success' })}
-              onError={(msg) => setSnackbar({ open: true, message: msg, severity: 'error' })}
-            />
-          ))
-        )}
+      {/* 0.6: Filter chips above the list */}
+      <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 3 }}>
+        {(['all', 'active', 'inactive', 'healthy', 'not-configured'] as FilterType[]).map(filter => (
+          <Chip
+            key={filter}
+            label={filter.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+            onClick={() => toggleFilter(filter)}
+            color={activeFilters.has(filter) ? 'primary' : 'default'}
+            variant={activeFilters.has(filter) ? 'filled' : 'outlined'}
+          />
+        ))}
       </Stack>
+
+      {providersQuery.isLoading ? (
+        <CircularProgress />
+      ) : filteredProviders.length === 0 ? (
+        <Typography color="text.secondary">No providers match the selected filters</Typography>
+      ) : (
+        // 0.1: Table/card list view
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="medium">
+            <TableHead>
+              <TableRow>
+                <TableCell width={48} />
+                <TableCell><Typography variant="subtitle2">Provider</Typography></TableCell>
+                <TableCell><Typography variant="subtitle2">Status</Typography></TableCell>
+                <TableCell align="right"><Typography variant="subtitle2">Enabled</Typography></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredProviders.map((provider) => {
+                const isOpen = expandedProvider === provider.name;
+                const isAutoExpand = expandParam === provider.name;
+                return (
+                  <>
+                    {/* Provider row */}
+                    <TableRow
+                      key={provider.name}
+                      hover
+                      onClick={() => handleRowClick(provider.name)}
+                      sx={{ cursor: 'pointer', '& > *': { borderBottom: isOpen ? 'none' : undefined } }}
+                    >
+                      <TableCell>
+                        <IconButton size="small" aria-label="expand row">
+                          {isOpen ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+                        </IconButton>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                          {provider.name.toUpperCase()}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={provider.status ?? 'unknown'}
+                          color={statusColor(provider.status ?? '')}
+                          size="small"
+                          variant="filled"
+                        />
+                      </TableCell>
+                      <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                        <Tooltip title={provider.enabled ? 'Disable provider' : 'Enable provider'}>
+                          <Switch
+                            checked={provider.enabled}
+                            onChange={(e) => toggleMutation.mutate({ name: provider.name, enabled: e.target.checked })}
+                            size="small"
+                          />
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* 0.2: Inline detail panel row */}
+                    <TableRow key={`${provider.name}-detail`}>
+                      <TableCell colSpan={4} sx={{ p: 0, border: 0 }}>
+                        <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                          <Box sx={{ p: 3, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+                            <ProviderDetailsPanel
+                              providerName={provider.name}
+                              enabled={provider.enabled}
+                              hideConnectionJson={provider.name === 'ibkr'}
+                              authSection={renderAuthSection(provider)}
+                              onSuccess={(msg) => setSnackbar({ open: true, message: msg, severity: 'success' })}
+                              onError={(msg) => setSnackbar({ open: true, message: msg, severity: 'error' })}
+                              onToggle={(enabled) => toggleMutation.mutate({ name: provider.name, enabled })}
+                              defaultTab={isAutoExpand ? 0 : 0}
+                            />
+                          </Box>
+                        </Collapse>
+                      </TableCell>
+                    </TableRow>
+                  </>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       <Snackbar
         open={snackbar.open}
@@ -86,236 +278,6 @@ export default function ProvidersPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </Box>
-  );
-}
-
-function ProviderSection({
-  provider,
-  onToggle,
-  onSuccess,
-  onError,
-}: {
-  provider: Provider;
-  onToggle: (enabled: boolean) => void;
-  onSuccess: (msg: string) => void;
-  onError: (msg: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <Accordion expanded={expanded} onChange={() => setExpanded(!expanded)}>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', pr: 2 }}>
-          <Typography sx={{ flexGrow: 1, fontWeight: 600 }}>
-            {provider.name.toUpperCase()}
-          </Typography>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={provider.enabled}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onToggle(e.target.checked);
-                }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            }
-            label={provider.enabled ? 'Enabled' : 'Disabled'}
-          />
-        </Box>
-      </AccordionSummary>
-      <AccordionDetails>
-        <Divider sx={{ mb: 2 }} />
-        {expanded && (
-          <ProviderConfigForm
-            name={provider.name}
-            onSuccess={onSuccess}
-            onError={onError}
-          />
-        )}
-      </AccordionDetails>
-    </Accordion>
-  );
-}
-
-function ProviderConfigForm({
-  name,
-  onSuccess,
-  onError,
-}: {
-  name: string;
-  onSuccess: (msg: string) => void;
-  onError: (msg: string) => void;
-}) {
-  const queryClient = useQueryClient();
-  const configQuery = useQuery<ProviderConfig>({
-    queryKey: ['providerConfig', name],
-    queryFn: () => fetcher(`/api/admin/providers/${name}/config`),
-  });
-
-  const [formData, setFormData] = useState<Partial<ProviderConfig>>({});
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Initialize form data when query completes
-  if (configQuery.data && Object.keys(formData).length === 0) {
-    setFormData(configQuery.data);
-  }
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : type === 'number' ? parseFloat(value) : value,
-    }));
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    try {
-      await fetcher(`/api/admin/providers/${name}/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      onSuccess(`${name.toUpperCase()} config saved`);
-      queryClient.invalidateQueries({ queryKey: ['providers'] });
-      queryClient.invalidateQueries({ queryKey: ['providerConfig', name] });
-    } catch (err: any) {
-      onError(`Failed to save config: ${err.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (configQuery.isLoading) return <CircularProgress size={24} />;
-
-  return (
-    <Box component="form" onSubmit={handleSave}>
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Timeout (seconds)"
-            name="timeout_seconds"
-            type="number"
-            value={formData.timeout_seconds || ''}
-            onChange={handleChange}
-            size="small"
-            required
-            slotProps={{ htmlInput: { min: 1 } }}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Retry Count"
-            name="retry_count"
-            type="number"
-            value={formData.retry_count ?? ''}
-            onChange={handleChange}
-            size="small"
-            required
-            slotProps={{ htmlInput: { min: 0 } }}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Retry Backoff (seconds)"
-            name="retry_backoff_seconds"
-            type="number"
-            value={formData.retry_backoff_seconds || ''}
-            onChange={handleChange}
-            size="small"
-            required
-            slotProps={{ htmlInput: { min: 0 } }}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Rate Limit (per sec)"
-            name="rate_limit_per_sec"
-            type="number"
-            value={formData.rate_limit_per_sec || ''}
-            onChange={handleChange}
-            size="small"
-            required
-            slotProps={{ htmlInput: { min: 0.1, step: 0.1 } }}
-          />
-        </Grid>
-
-        <Grid size={12}>
-          <Divider sx={{ my: 1 }} />
-          <Typography variant="subtitle2" gutterBottom>Circuit Breaker</Typography>
-        </Grid>
-
-        <Grid size={12}>
-          <FormControlLabel
-            control={
-              <Switch
-                name="circuit_breaker_enabled"
-                checked={!!formData.circuit_breaker_enabled}
-                onChange={handleChange}
-              />
-            }
-            label="Enabled"
-          />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Failure Threshold"
-            name="circuit_breaker_failure_threshold"
-            type="number"
-            value={formData.circuit_breaker_failure_threshold || ''}
-            onChange={handleChange}
-            size="small"
-            disabled={!formData.circuit_breaker_enabled}
-            slotProps={{ htmlInput: { min: 1 } }}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <TextField
-            fullWidth
-            label="Reset Seconds"
-            name="circuit_breaker_reset_seconds"
-            type="number"
-            value={formData.circuit_breaker_reset_seconds || ''}
-            onChange={handleChange}
-            size="small"
-            disabled={!formData.circuit_breaker_enabled}
-            slotProps={{ htmlInput: { min: 1 } }}
-          />
-        </Grid>
-
-        <Grid size={12}>
-          <Divider sx={{ my: 1 }} />
-          <Typography variant="subtitle2" gutterBottom>Connection Config (JSON)</Typography>
-          <TextField
-            fullWidth
-            multiline
-            rows={4}
-            name="connection_config_json"
-            value={formData.connection_config_json || ''}
-            onChange={handleChange}
-            size="small"
-            placeholder='{"host": "localhost", "port": 4001}'
-          />
-        </Grid>
-
-        <Grid size={12} sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={isSaving}
-          >
-            {isSaving ? 'Saving...' : 'Save Configuration'}
-          </Button>
-        </Grid>
-      </Grid>
     </Box>
   );
 }

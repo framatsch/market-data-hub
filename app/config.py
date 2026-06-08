@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # For Kubernetes: mount as envFrom secretRef (see k8s/ or docs/schwab-setup.md).
     SCHWAB_API_KEY: SecretStr = SecretStr("")       # Schwab Individual Trader API key
     SCHWAB_APP_SECRET: SecretStr = SecretStr("")    # Schwab app secret (OAuth2 client secret)
-    SCHWAB_CALLBACK_URL: str = "https://127.0.0.1:8182"  # OAuth2 redirect URI (for token generation only)
+    SCHWAB_CALLBACK_URL: str = "http://localhost:8000/api/admin/schwab/callback"  # OAuth2 redirect URI for backend callback flow
     SCHWAB_TOKEN_PATH: str = "./schwab_token.json"  # Persistent token file; avoid /tmp in containers
     SCHWAB_TIMEOUT_SECONDS: int = 30               # Per-request timeout (applied via asyncio.wait_for)
     SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min

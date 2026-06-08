@@ -86,7 +86,7 @@ async def get_company_news(
     """
     symbol = symbol.upper()
     provider = provider.lower() if provider else None
-    response_provider = provider or service.registry.default_news_provider
+    response_provider = provider or service.registry.default_news_provider or "none"
 
     # 1. Determine date range (priority: days > explicit dates > default)
     if days:

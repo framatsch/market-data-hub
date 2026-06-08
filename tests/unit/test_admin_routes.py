@@ -68,7 +68,9 @@ def test_provider_config_update_and_ibkr_gateway(client) -> None:
 
     gateway = client.put("/api/admin/providers/ibkr/gateway", json={"host": "192.168.1.10", "port": 4001})
     assert gateway.status_code == 200
-    assert gateway.json()["connection_config"] == {"host": "192.168.1.10", "port": 4001}
+    cc = gateway.json()["connection_config"]
+    assert cc["host"] == "192.168.1.10"
+    assert cc["port"] == 4001
 
 
 def test_provider_config_validation(client) -> None:
@@ -79,15 +81,15 @@ def test_provider_config_validation(client) -> None:
 
 def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
     registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
-    monkeypatch.setattr(registry, "default_price_provider", "ibkr")
-    monkeypatch.setattr(registry, "default_company_provider", "ibkr")
-    monkeypatch.setattr(registry, "default_options_provider", "ibkr")
-    monkeypatch.setattr(registry, "default_news_provider", "finnhub")
+    monkeypatch.setattr(registry, "default_price_provider", None)
+    monkeypatch.setattr(registry, "default_company_provider", None)
+    monkeypatch.setattr(registry, "default_options_provider", None)
+    monkeypatch.setattr(registry, "default_news_provider", None)
 
     response = client.get("/api/admin/settings/defaults")
 
     assert response.status_code == 200
-    assert response.json()["default_news_provider"] == "finnhub"
+    assert response.json()["default_news_provider"] == ""
 
     async def fake_reload(config_repo, settings_repo):
         assert await settings_repo.get("default_price_provider") == "lseg"

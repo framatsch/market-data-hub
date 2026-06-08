@@ -205,7 +205,8 @@ def _text_content(data: Any) -> dict:
 async def _tool_get_last_price(args: dict) -> dict:
     symbol = args["symbol"].upper()
     sec_type = args.get("sec_type", "stock")
-    quote = await _price_service().get_latest_price(symbol, sec_type=sec_type)
+    provider = args.get("provider")
+    quote = await _price_service().get_latest_price(symbol, provider_name=provider, sec_type=sec_type)
     if not quote:
         return _text_content(f"No price data found for {symbol} ({sec_type})")
     return _text_content(quote.model_dump())
@@ -215,13 +216,14 @@ async def _tool_get_historical_prices(args: dict) -> dict:
     symbol = args["symbol"].upper()
     interval = args.get("interval", "1d")
     sec_type = args.get("sec_type", "stock")
+    provider = args.get("provider")
     end = datetime.now()
     start = end - timedelta(days=30)
     if "start_date" in args:
         start = datetime.fromisoformat(args["start_date"])
     if "end_date" in args:
         end = datetime.fromisoformat(args["end_date"])
-    bars = await _price_service().get_historical_prices(symbol, interval, start, end, sec_type=sec_type)
+    bars = await _price_service().get_historical_prices(symbol, interval, start, end, provider_name=provider, sec_type=sec_type)
     if not bars:
         return _text_content(f"No historical data found for {symbol} ({sec_type})")
     return _text_content([b.model_dump() for b in bars])
@@ -231,26 +233,30 @@ async def _tool_get_option_chain(args: dict) -> dict:
     symbol = args["symbol"].upper()
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
-    chain = await _options_service().get_option_chain(symbol, expiry)
+    provider = args.get("provider")
+    chain = await _options_service().get_option_chain(symbol, expiry, provider_name=provider)
     return _text_content(chain.model_dump())
 
 
 async def _tool_get_option_quote(args: dict) -> dict:
     symbol = args["symbol"].upper()
     option_id = args["option_id"].upper()
-    quote = await _options_service().get_option_quote(symbol, option_id)
+    provider = args.get("provider")
+    quote = await _options_service().get_option_quote(symbol, option_id, provider_name=provider)
     return _text_content(quote.model_dump())
 
 
 async def _tool_get_company_profile(args: dict) -> dict:
     symbol = args["symbol"].upper()
-    profile = await _company_service().get_company_profile(symbol)
+    provider = args.get("provider")
+    profile = await _company_service().get_company_profile(symbol, provider_name=provider)
     return _text_content(profile.model_dump())
 
 
 async def _tool_search_companies(args: dict) -> dict:
     query = args["query"]
-    results = await _company_service().search_companies(query)
+    provider = args.get("provider")
+    results = await _company_service().search_companies(query, provider_name=provider)
     return _text_content([r.model_dump() for r in results])
 
 
@@ -263,8 +269,8 @@ async def _tool_get_company_news(args: dict) -> dict:
     if "to_date" in args:
         to_date = date.fromisoformat(args["to_date"])
     limit = int(args.get("limit", 20))
-    registry = get_registry()
-    provider = registry.get_news_provider()
+    provider_name = args.get("provider")
+    provider = get_registry().get_news_provider(provider_name)
     articles = await provider.get_company_news(symbol, from_date, to_date, limit=limit)
     return _text_content([a.model_dump() for a in articles])
 

@@ -1,8 +1,8 @@
 export interface Provider {
   name: string;
   enabled: boolean;
-  status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled';
-  error?: string;
+  status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled' | 'unavailable';
+  error?: string | null;
   config_summary?: {
     timeout_seconds: number;
     retry_count: number;
@@ -13,13 +13,15 @@ export interface Provider {
     retry_count?: number;
     rate_limit_per_sec?: number;
   };
+  connection_config?: Record<string, any>;
 }
 
-export interface SchwabStatus {
-  status: 'active' | 'expired' | 'missing';
+export interface SchwabAuthStatus {
+  status: 'active' | 'expired' | 'missing' | 'not_configured' | 'callback_error';
   paused: boolean;
   days_remaining?: number;
   expires_at?: string;
+  error?: string;
 }
 
 export interface ProviderConfig {
@@ -32,6 +34,7 @@ export interface ProviderConfig {
   circuit_breaker_failure_threshold: number;
   circuit_breaker_reset_seconds: number;
   connection_config_json: string;
+  connection_config?: Record<string, any>;
 }
 
 export interface CredentialMetadata {

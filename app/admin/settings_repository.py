@@ -32,11 +32,32 @@ class SettingsRepository:
                 """
                 CREATE TABLE IF NOT EXISTS system_settings (
                     key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
+                    value TEXT,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            columns = conn.execute("PRAGMA table_info(system_settings)").fetchall()
+            value_column = next((column for column in columns if column[1] == "value"), None)
+            if value_column is not None and int(value_column[3]) == 1:
+                conn.execute(
+                    """
+                    CREATE TABLE system_settings_new (
+                        key TEXT PRIMARY KEY,
+                        value TEXT,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO system_settings_new (key, value, updated_at)
+                    SELECT key, value, updated_at
+                    FROM system_settings
+                    """
+                )
+                conn.execute("DROP TABLE system_settings")
+                conn.execute("ALTER TABLE system_settings_new RENAME TO system_settings")
 
     async def get(self, key: str) -> str | None:
         return await asyncio.to_thread(self._get_sync, key)
@@ -52,12 +73,12 @@ class SettingsRepository:
                 """,
                 (key,),
             ).fetchone()
-        return None if row is None else str(row[0])
+        return None if row is None else (None if row[0] is None else str(row[0]))
 
-    async def set(self, key: str, value: str) -> dict[str, str]:
+    async def set(self, key: str, value: str | None) -> dict[str, str | None]:
         return await asyncio.to_thread(self._set_sync, key, value)
 
-    def _set_sync(self, key: str, value: str) -> dict[str, str]:
+    def _set_sync(self, key: str, value: str | None) -> dict[str, str | None]:
         self._validate_key(key)
         updated_at = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -73,10 +94,10 @@ class SettingsRepository:
             )
         return {"key": key, "value": value, "updated_at": updated_at}
 
-    async def get_all(self) -> dict[str, str]:
+    async def get_all(self) -> dict[str, str | None]:
         return await asyncio.to_thread(self._get_all_sync)
 
-    def _get_all_sync(self) -> dict[str, str]:
+    def _get_all_sync(self) -> dict[str, str | None]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -85,7 +106,7 @@ class SettingsRepository:
                 ORDER BY key
                 """
             ).fetchall()
-        return {str(row[0]): str(row[1]) for row in rows}
+        return {str(row[0]): (None if row[1] is None else str(row[1])) for row in rows}
 
     @staticmethod
     def _validate_key(key: str) -> None:
