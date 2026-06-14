@@ -168,6 +168,8 @@ async def _dispatch(method: str, params: dict) -> dict | None:
 
     if method == "tools/call":
         name = params.get("name")
+        if not isinstance(name, str):
+            raise AppError("Tool name must be a string", code="INVALID_PARAMS")
         args = params.get("arguments", {})
         handler = TOOL_HANDLERS.get(name)
         if not handler:
@@ -223,7 +225,14 @@ async def _tool_get_historical_prices(args: dict) -> dict:
         start = datetime.fromisoformat(args["start_date"])
     if "end_date" in args:
         end = datetime.fromisoformat(args["end_date"])
-    bars = await _price_service().get_historical_prices(symbol, interval, start, end, provider_name=provider, sec_type=sec_type)
+    bars = await _price_service().get_historical_prices(
+        symbol,
+        interval,
+        start,
+        end,
+        provider_name=provider,
+        sec_type=sec_type,
+    )
     if not bars:
         return _text_content(f"No historical data found for {symbol} ({sec_type})")
     return _text_content([b.model_dump() for b in bars])
@@ -299,6 +308,10 @@ TOOL_REGISTRY: list[dict] = [
                     "enum": ["stock", "index"],
                     "description": "Security type (default: stock)",
                 },
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -325,6 +338,10 @@ TOOL_REGISTRY: list[dict] = [
                     "description": "ISO date string (default: today)",
                 },
                 "sec_type": {"type": "string", "enum": ["stock", "index"]},
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -341,6 +358,10 @@ TOOL_REGISTRY: list[dict] = [
                     "format": "date",
                     "description": "Option expiry date (ISO format, e.g. 2024-01-19)",
                 },
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -356,6 +377,10 @@ TOOL_REGISTRY: list[dict] = [
                     "type": "string",
                     "description": "Option contract identifier, e.g. AAPL240119C00150000",
                 },
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -367,6 +392,10 @@ TOOL_REGISTRY: list[dict] = [
             "required": ["symbol"],
             "properties": {
                 "symbol": {"type": "string"},
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -378,6 +407,10 @@ TOOL_REGISTRY: list[dict] = [
             "required": ["query"],
             "properties": {
                 "query": {"type": "string", "description": "Search term, e.g. Apple"},
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
+                },
             },
         },
     },
@@ -402,6 +435,10 @@ TOOL_REGISTRY: list[dict] = [
                 "limit": {
                     "type": "integer",
                     "description": "Max articles to return (default: 20)",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Data provider override (e.g. ibkr, lseg)",
                 },
             },
         },
