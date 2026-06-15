@@ -26,6 +26,8 @@ from app.models.news import NewsArticle
 from app.models.common import MarketStatus
 
 class BasePriceProvider(ABC):
+    name = "none"
+
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""
         self._runtime_config = config
@@ -51,6 +53,8 @@ class BasePriceProvider(ABC):
         raise NotImplementedError("Market status not implemented for this provider")
 
 class BaseCompanyProvider(ABC):
+    name = "none"
+
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""
         self._runtime_config = config
@@ -72,6 +76,8 @@ class BaseCompanyProvider(ABC):
         pass
 
 class BaseOptionsProvider(ABC):
+    name = "none"
+
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""
         self._runtime_config = config
@@ -103,6 +109,8 @@ class BaseOptionsProvider(ABC):
 
 class BaseNewsProvider(ABC):
     """Abstract base class for news data providers."""
+
+    name = "none"
 
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""

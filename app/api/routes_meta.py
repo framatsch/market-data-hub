@@ -17,18 +17,42 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Query
+from starlette.responses import Response
+
 from app.models.common import HealthResponse, ResponseEnvelope, MarketStatus
 from app.dependencies import PriceServiceDep
+from app.observability.metrics import metrics_response
 from app.providers.registry import get_registry
 
 router = APIRouter(tags=["Meta"])
 start_time = datetime.now()
+PROMETHEUS_TEXT_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     """Returns service health status."""
     uptime = (datetime.now() - start_time).total_seconds()
     return HealthResponse(status="OK", uptime_seconds=uptime)
+
+
+@router.get(
+    "/metrics",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {
+                "text/plain; version=0.0.4": {
+                    "example": '# HELP mdh_http_requests_total Total HTTP requests handled by Market Data Hub.\n'
+                    '# TYPE mdh_http_requests_total counter\n'
+                }
+            },
+            "description": "Prometheus text exposition format",
+        }
+    },
+)
+async def get_metrics():
+    """Expose Prometheus metrics for scraping."""
+    return Response(content=metrics_response(), headers={"Content-Type": PROMETHEUS_TEXT_CONTENT_TYPE})
 
 @router.get("/market-status", response_model=ResponseEnvelope[MarketStatus])
 async def get_market_status(

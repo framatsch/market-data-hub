@@ -167,6 +167,25 @@ Configuration via environment variables (see `.env.example`):
 | `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
 | `SCHWAB_ASYNCIO` | `true` | Create  async client (`-py` asyncio mode) |
 
+## Observability
+
+MDH exposes Prometheus-compatible request metrics at `GET /metrics` and emits one structured JSON audit log line for each completed API request. Health, metrics, docs, OpenAPI, and admin endpoints are skipped for audit logs.
+
+Metrics use bounded labels only: `provider`, `endpoint`, and `status_class`. Ticker symbols, client IDs, and query parameters are never used as metric labels.
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: market-data-hub
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - localhost:9000
+```
+
+Audit logs are written to stdout as JSON lines with `event="request_completed"` and fields such as `client_id`, `method`, `path`, `provider`, `params`, `status_code`, and `duration_ms`. Set `X-Client-ID` on requests to identify clients; otherwise logs use `anonymous`.
+
 ### LSEG Credentials Setup
 
 To access Refinitiv/LSEG data, obtain credentials from [LSEG Developer Portal](https://developer.lseg.com/):

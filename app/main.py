@@ -30,6 +30,8 @@ from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
 from app.api import routes_admin, routes_meta, routes_prices, routes_companies, routes_options, routes_ws
 from app.logging_config import setup_logging
+from app.observability.audit import setup_structlog
+from app.observability.middleware import ObservabilityMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn.p
 
 # Setup custom logging
 setup_logging()
+setup_structlog()
 
 
 def _public_base_url() -> str:
@@ -118,6 +121,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Starlette applies middleware in reverse registration order, so this runs after CORS.
+app.add_middleware(ObservabilityMiddleware)
 
 # REST routers
 app.include_router(routes_meta.router)

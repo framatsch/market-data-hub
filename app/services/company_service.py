@@ -16,6 +16,8 @@
 
 from typing import List, Optional
 
+import structlog
+
 from app.models.company import CompanyProfile, CompanySummary
 from app.providers.registry import get_registry
 
@@ -25,10 +27,12 @@ class CompanyService:
 
     async def get_company_profile(self, symbol: str, provider_name: Optional[str] = None) -> CompanyProfile:
         provider = self.registry.get_company_provider(provider_name)
+        structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_company_profile(symbol)
 
     async def search_companies(self, query: str, provider_name: Optional[str] = None) -> List[CompanySummary]:
         provider = self.registry.get_company_provider(provider_name)
+        structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.search_companies(query)
 
 company_service = CompanyService()

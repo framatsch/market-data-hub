@@ -109,7 +109,9 @@ class ProviderRegistry:
 
         for name, cls in to_load.items():
             try:
-                self._providers[name] = cls()
+                provider = cls()
+                setattr(provider, "name", name)
+                self._providers[name] = provider
             except ImportError as e:
                 logger.warning(f"Provider '{name}' not available: {e}")
             except Exception as e:
@@ -166,7 +168,9 @@ class ProviderRegistry:
                 config = configs[name]
                 if name not in self._providers:
                     try:
-                        self._providers[name] = self.provider_classes[name]()
+                        provider = self.provider_classes[name]()
+                        setattr(provider, "name", name)
+                        self._providers[name] = provider
                     except ImportError as exc:
                         logger.warning("Provider '%s' not available: %s", name, exc)
                         continue

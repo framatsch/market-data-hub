@@ -17,6 +17,8 @@
 from datetime import date
 from typing import List, Optional
 
+import structlog
+
 from app.models.news import NewsArticle
 from app.providers.registry import get_registry
 
@@ -37,6 +39,7 @@ class NewsService:
         category: Optional[str] = None,
     ) -> List[NewsArticle]:
         provider = self.registry.get_news_provider(provider_name)
+        structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_company_news(
             symbol=symbol,
             from_date=from_date,

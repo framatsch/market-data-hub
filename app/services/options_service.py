@@ -18,6 +18,8 @@ from decimal import Decimal
 from typing import Literal, Optional
 from datetime import date
 
+import structlog
+
 from app.models.options import OptionChain, OptionQuote
 from app.providers.registry import get_registry
 
@@ -36,6 +38,7 @@ class OptionsService:
         market_data_type: Optional[int] = None
     ) -> OptionChain:
         provider = self.registry.get_options_provider(provider_name)
+        structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_option_chain(
             symbol, expiry,
             min_strike=min_strike,
@@ -52,6 +55,7 @@ class OptionsService:
         market_data_type: Optional[int] = None
     ) -> OptionQuote:
         provider = self.registry.get_options_provider(provider_name)
+        structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_option_quote(symbol, option_id, market_data_type=market_data_type)
 
 options_service = OptionsService()
