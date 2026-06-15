@@ -21,7 +21,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         start = time.perf_counter()
         response: Response | None = None
-        error: Exception | None = None
 
         try:
             response = await call_next(request)
