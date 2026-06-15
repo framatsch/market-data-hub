@@ -18,10 +18,12 @@ import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from app.admin.runtime import set_admin_runtime
 from app.config import settings
 from app.providers.base import BaseOptionsProvider
 from app.providers.schwab import SchwabProvider
@@ -43,15 +45,24 @@ class _Response:
         return self._payload
 
 
-@pytest.fixture
-def provider(monkeypatch, tmp_path: Path) -> SchwabProvider:
-    token_file = tmp_path / "schwab_token.json"
-    token_file.write_text("{}", encoding="utf-8")
+class FakeKeyRepository:
+    def __init__(self, values: dict[tuple[str, str], str | None]) -> None:
+        self.values = values
 
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    async def get(self, provider_name: str, credential_name: str) -> str | None:
+        return self.values.get((provider_name, credential_name))
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime():
+    set_admin_runtime()
+    yield
+    set_admin_runtime()
+
+
+@pytest.fixture
+def provider(monkeypatch) -> SchwabProvider:
     monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
     monkeypatch.setattr(settings, "SCHWAB_ASYNCIO", True)
     monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 50)
     monkeypatch.setattr(settings, "SCHWAB_TIMEOUT_SECONDS", 10)
@@ -270,13 +281,8 @@ async def test_get_last_price_unknown_symbol(provider: SchwabProvider):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_provider_disabled_when_no_api_key(monkeypatch, tmp_path: Path):
-    token_file = tmp_path / "token.json"
-    token_file.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
-
+async def test_provider_disabled_when_no_api_key():
+    set_admin_runtime(key_repository=cast(Any, FakeKeyRepository({})))
     provider = SchwabProvider()
 
     with pytest.raises(ProviderConnectionError):
@@ -284,12 +290,14 @@ async def test_provider_disabled_when_no_api_key(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_missing_token_file_raises_connection_error(monkeypatch, tmp_path: Path):
-    missing = tmp_path / "missing-token.json"
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+async def test_missing_token_json_raises_connection_error(monkeypatch):
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository({("schwab", "api_key"): "test-key", ("schwab", "app_secret"): "test-secret"}),
+        )
+    )
     monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(missing))
 
     provider = SchwabProvider()
 
@@ -302,15 +310,20 @@ async def test_missing_token_file_raises_connection_error(monkeypatch, tmp_path:
 @pytest.mark.asyncio
 async def test_missing_token_file_from_easy_client_raises_connection_error(
     monkeypatch,
-    tmp_path: Path,
 ):
-    token_file = tmp_path / "token.json"
-    token_file.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository(
+                {
+                    ("schwab", "api_key"): "test-key",
+                    ("schwab", "app_secret"): "test-secret",
+                    ("schwab", "token_json"): '{}',
+                }
+            ),
+        )
+    )
     monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
 
     provider = SchwabProvider()
 
@@ -320,15 +333,21 @@ async def test_missing_token_file_from_easy_client_raises_connection_error(
 
 
 @pytest.mark.asyncio
-async def test_expired_token_raises_connection_error(monkeypatch, tmp_path: Path):
+async def test_expired_token_raises_connection_error(monkeypatch):
     """Generic exception from easy_client (e.g. expired token) → ProviderConnectionError with hint."""
-    token_file = tmp_path / "token.json"
-    token_file.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository(
+                {
+                    ("schwab", "api_key"): "test-key",
+                    ("schwab", "app_secret"): "test-secret",
+                    ("schwab", "token_json"): '{}',
+                }
+            ),
+        )
+    )
     monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
 
     provider = SchwabProvider()
 
@@ -439,15 +458,8 @@ async def test_test_connection_service_unavailable(provider: SchwabProvider):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_rate_limit_exceeded_raises_timeout(monkeypatch, tmp_path: Path):
+async def test_rate_limit_exceeded_raises_timeout(monkeypatch):
     """In-process rate limit: fill the window, next call should raise ProviderTimeoutError."""
-    token_file = tmp_path / "token.json"
-    token_file.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
-    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
     monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 3)
 
     provider = SchwabProvider()
@@ -463,15 +475,8 @@ async def test_rate_limit_exceeded_raises_timeout(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_window_expires_allows_new_requests(monkeypatch, tmp_path: Path):
+async def test_rate_limit_window_expires_allows_new_requests(monkeypatch):
     """After the 1-second window expires, requests should be allowed again."""
-    token_file = tmp_path / "token.json"
-    token_file.write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(settings, "SCHWAB_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "SCHWAB_APP_SECRET", "test-secret")
-    monkeypatch.setattr(settings, "SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
-    monkeypatch.setattr(settings, "SCHWAB_TOKEN_PATH", str(token_file))
     monkeypatch.setattr(settings, "SCHWAB_RATE_LIMIT_PER_SEC", 2)
 
     provider = SchwabProvider()

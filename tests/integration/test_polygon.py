@@ -17,16 +17,16 @@
 """Integration tests for Polygon.io Provider."""
 
 import pytest
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from app.providers.polygon import PolygonProvider
-from app.config import settings
 
-# Skip if Polygon API key not configured
+# Skip unless explicitly enabled.
 pytestmark = pytest.mark.skipif(
-    not settings.POLYGON_API_KEY or settings.POLYGON_API_KEY == "stub-key",
-    reason="Polygon API key not configured"
+    os.getenv("RUN_POLYGON_INTEGRATION", "false").lower() not in {"1", "true", "yes"},
+    reason="Set RUN_POLYGON_INTEGRATION=true to run Polygon integration tests",
 )
 
 @pytest.fixture
@@ -106,4 +106,3 @@ class TestPolygonReference:
         assert profile.symbol == "AAPL"
         assert "Apple" in profile.name
         assert profile.provider == "polygon"
-

@@ -3,7 +3,6 @@ import html
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
 
@@ -55,6 +54,7 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
     "finnhub": {"api_key"},
     "polygon": {"api_key"},
     "lseg": {"app_key", "username", "password"},
+    "prixe": {"api_key"},
 }
 
 PROVIDER_CAPABILITIES: dict[str, list[str]] = {
@@ -677,9 +677,6 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
 
     token_json = await get_key_repository().get("schwab", "token_json")
     storage = "sqlite" if token_json else None
-    if token_json is None and Path(settings.SCHWAB_TOKEN_PATH).exists():
-        storage = "file-fallback"
-        token_json = "configured"
     paused = registry.is_provider_paused("schwab")
     if not token_json:
         return {"status": "not_configured", "paused": paused, "token_configured": False}

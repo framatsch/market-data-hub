@@ -68,6 +68,9 @@ class KeyRepository:
     async def get(self, provider_name: str, credential_name: str) -> str | None:
         return await asyncio.to_thread(self._get_sync, provider_name, credential_name)
 
+    def get_sync(self, provider_name: str, credential_name: str) -> str | None:
+        return self._get_sync(provider_name, credential_name)
+
     def _get_sync(self, provider_name: str, credential_name: str) -> str | None:
         with self._connect() as conn:
             row = conn.execute(

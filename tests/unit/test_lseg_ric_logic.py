@@ -22,8 +22,9 @@ from app.providers.lseg import LSEGProvider
 def lseg_provider():
     with patch("app.providers.lseg.REFINITIV_AVAILABLE", True):
         with patch("app.providers.lseg.rd"):
-            provider = LSEGProvider()
-            yield provider
+            with patch("app.providers.lseg.get_provider_credential_sync", return_value="test"):
+                provider = LSEGProvider()
+                yield provider
 
 def test_ticker_to_ric_search_strategies(lseg_provider):
     mock_search = MagicMock()

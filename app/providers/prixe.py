@@ -1,37 +1,37 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import asyncio
 from typing import List, Optional
 
 import httpx
 
 from app.config import settings
 from app.models.price import PriceBar, PriceQuote
+from app.providers.credentials import get_provider_credential_sync
 from app.providers.base import BasePriceProvider
 from app.utils.errors import AppError, ProviderError, map_httpx_http_error
-from app.utils.secrets import unwrap_secret
 
 
 class PrixeProvider(BasePriceProvider):
     """Prixe provider for latest stock prices via POST /api/last_sold."""
 
     def __init__(self) -> None:
-        self._api_key = unwrap_secret(settings.PRIXE_API_KEY)
-        if not self._api_key:
-            raise ProviderError(
-                "Prixe API key is not configured.",
-                code="PROVIDER_NOT_AVAILABLE",
-                details={"provider": "prixe", "setting": "PRIXE_API_KEY"},
-            )
+        self._api_key: str | None = None
 
         self._base_url = settings.PRIXE_BASE_URL
         self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_api_key(self) -> str:
+        if self._api_key:
+            return self._api_key
+        self._api_key = await asyncio.to_thread(get_provider_credential_sync, "prixe", "api_key")
+        return self._api_key
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=settings.PROVIDER_REQUEST_TIMEOUT,
-                headers={"Authorization": f"Bearer {self._api_key}"},
             )
         return self._client
 
@@ -42,17 +42,14 @@ class PrixeProvider(BasePriceProvider):
 
     async def test_connection(self) -> dict:
         """Validate Prixe API key with a lightweight last_sold request."""
-        if not self._api_key:
-            return {
-                "status_code": 401,
-                "success": False,
-                "message": "Invalid Prixe API key",
-                "details": {"reason": "missing api key"},
-            }
-
         client = await self._get_client()
         try:
-            response = await client.post("/api/last_sold", json={"symbol": "AAPL"})
+            api_key = await self._get_api_key()
+            response = await client.post(
+                "/api/last_sold",
+                json={"symbol": "AAPL"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
             if response.status_code == 200:
                 return {
                     "status_code": 200,
@@ -99,9 +96,14 @@ class PrixeProvider(BasePriceProvider):
 
         normalized_symbol = symbol.upper()
         client = await self._get_client()
+        api_key = await self._get_api_key()
 
         try:
-            response = await client.post("/api/last_sold", json={"symbol": normalized_symbol})
+            response = await client.post(
+                "/api/last_sold",
+                json={"symbol": normalized_symbol},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
             response.raise_for_status()
             payload = response.json()
             return self._map_last_sold_payload(normalized_symbol, payload)
@@ -165,6 +167,7 @@ class PrixeProvider(BasePriceProvider):
             )
 
         client = await self._get_client()
+        api_key = await self._get_api_key()
 
         request_payload = {
             "ticker": normalized_symbol,
@@ -174,7 +177,11 @@ class PrixeProvider(BasePriceProvider):
         }
 
         try:
-            response = await client.post("/api/price", json=request_payload)
+            response = await client.post(
+                "/api/price",
+                json=request_payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
             response.raise_for_status()
             payload = response.json()
             return self._map_historical_payload(

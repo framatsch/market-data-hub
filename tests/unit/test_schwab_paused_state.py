@@ -4,10 +4,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import SecretStr
 
 from app.admin.runtime import set_admin_runtime
-from app.config import settings
 from app.providers import schwab as schwab_module
 from app.providers.schwab import SchwabProvider
 from app.utils.errors import ProviderConnectionError
@@ -135,7 +133,12 @@ async def test_unpause_clears_paused_state_and_client() -> None:
 
 
 async def test_fire_webhook_uses_configured_url(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("https://hooks.example/test"))
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository({("schwab", "alert_webhook_url"): "https://hooks.example/test"}),
+        )
+    )
     monkeypatch.setattr(
         "app.utils.webhooks.socket.getaddrinfo",
         lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
@@ -165,7 +168,12 @@ async def test_fire_webhook_uses_configured_url(monkeypatch) -> None:
 
 
 async def test_fire_webhook_skips_non_https_url(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("http://hooks.example/test"))
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository({("schwab", "alert_webhook_url"): "http://hooks.example/test"}),
+        )
+    )
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs):
@@ -177,7 +185,12 @@ async def test_fire_webhook_skips_non_https_url(monkeypatch) -> None:
 
 
 async def test_fire_webhook_skips_private_resolved_address(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SCHWAB_ALERT_WEBHOOK_URL", SecretStr("https://hooks.example/test"))
+    set_admin_runtime(
+        key_repository=cast(
+            Any,
+            FakeKeyRepository({("schwab", "alert_webhook_url"): "https://hooks.example/test"}),
+        )
+    )
     monkeypatch.setattr(
         "app.utils.webhooks.socket.getaddrinfo",
         lambda *args, **kwargs: [(None, None, None, None, ("172.16.0.10", 443))],

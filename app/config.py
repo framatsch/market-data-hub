@@ -52,9 +52,7 @@ class Settings(BaseSettings):
     # → Cannot provide real-time Greeks for options
     # → Use LSEG only for: Stock prices, Company data, News
     # → Use IBKR for: Options data and Greeks
-    LSEG_APP_KEY: str = "stub-key"  # Refinitiv App Key
-    LSEG_USERNAME: str = ""  # Refinitiv platform username
-    LSEG_PASSWORD: SecretStr = SecretStr("")  # Refinitiv platform password
+    # Credentials are loaded from keys.db (provider=lseg).
     LSEG_BASE_URL: str = "https://api.lseg.com/v1"
 
     # LSEG Performance & Validation
@@ -63,22 +61,17 @@ class Settings(BaseSettings):
     LSEG_STRICT_VALIDATION: bool = False  # If True, raise error on missing fields; if False, return None
 
     # Finnhub Provider
-    FINNHUB_API_KEY: SecretStr = SecretStr("stub-key")  # Finnhub API Key
+    # Credentials are loaded from keys.db (provider=finnhub).
     FINNHUB_BASE_URL: str = "https://finnhub.io/api/v1"
     FINNHUB_RATE_LIMIT_PER_MIN: int = 60  # Free tier: 60 calls per minute
     FINNHUB_FALLBACK_ON_RATE_LIMIT: bool = True  # Fallback to mock provider if rate limited
 
     # Schwab Provider
-    # Credentials: set via environment variables or .env file.
-    # For Kubernetes: mount as envFrom secretRef (see k8s/ or docs/schwab-setup.md).
-    SCHWAB_API_KEY: SecretStr = SecretStr("")       # Schwab Individual Trader API key
-    SCHWAB_APP_SECRET: SecretStr = SecretStr("")    # Schwab app secret (OAuth2 client secret)
+    # Credentials are loaded from keys.db (provider=schwab).
     SCHWAB_CALLBACK_URL: str = "http://localhost:8000/api/admin/schwab/callback"  # OAuth2 redirect URI for backend callback flow
-    SCHWAB_TOKEN_PATH: str = "./schwab_token.json"  # Persistent token file; avoid /tmp in containers
     SCHWAB_TIMEOUT_SECONDS: int = 30               # Per-request timeout (applied via asyncio.wait_for)
     SCHWAB_RATE_LIMIT_PER_SEC: int = 5             # Sliding-window limit; Schwab allows ~120/min
     SCHWAB_ASYNCIO: bool = True                    # True = async httpx client from schwab-py
-    SCHWAB_ALERT_WEBHOOK_URL: SecretStr = SecretStr("")
     SCHWAB_ALERT_WEBHOOK_FORMAT: Literal["slack", "generic", "discord"] = "slack"
 
     # Admin Auth
@@ -90,11 +83,11 @@ class Settings(BaseSettings):
     ADMIN_OIDC_REDIRECT_URI: str = ""
 
     # Polygon.io Provider
-    POLYGON_API_KEY: SecretStr = SecretStr("stub-key")
+    # Credentials are loaded from keys.db (provider=polygon).
     POLYGON_BASE_URL: str = "https://api.polygon.io"
 
     # Prixe Provider
-    PRIXE_API_KEY: SecretStr = SecretStr("")
+    # Credentials are loaded from keys.db (provider=prixe).
     PRIXE_BASE_URL: str = "https://api.prixe.io"
 
     # MCP Integration

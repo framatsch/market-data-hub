@@ -30,6 +30,7 @@ def polygon_provider():
         mock_instance = mock_client.return_value
         mock_instance.get = AsyncMock()
         provider = PolygonProvider()
+        provider.api_key = "test-polygon-key"
         yield provider
 
 def test_format_ticker(polygon_provider):
@@ -215,7 +216,6 @@ async def test_get_option_chain(polygon_provider):
     assert chain.underlying_symbol == "AAPL"
     assert len(chain.options) == 1
     assert chain.options[0].symbol == "O:AAPL240119C00150000"
-
 
 
 

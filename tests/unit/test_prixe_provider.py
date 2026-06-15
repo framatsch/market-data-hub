@@ -5,20 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from app.config import settings
 from app.providers.prixe import PrixeProvider
 from app.utils.errors import DataNotFoundError, ProviderError
-
-
-@pytest.fixture(autouse=True)
-def restore_prixe_settings():
-    saved_key = settings.PRIXE_API_KEY
-    saved_base_url = settings.PRIXE_BASE_URL
-    settings.PRIXE_API_KEY = "test-prixe-key"
-    settings.PRIXE_BASE_URL = "https://api.prixe.io"
-    yield
-    settings.PRIXE_API_KEY = saved_key
-    settings.PRIXE_BASE_URL = saved_base_url
 
 
 @pytest.mark.asyncio
@@ -45,6 +33,7 @@ async def test_get_last_price_success_maps_decimal_fields():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         quote = await provider.get_last_price("aapl")
 
         assert quote.symbol == "AAPL"
@@ -54,7 +43,11 @@ async def test_get_last_price_success_maps_decimal_fields():
         assert quote.currency == "USD"
         assert quote.provider == "prixe"
 
-        mock_client.post.assert_awaited_once_with("/api/last_sold", json={"symbol": "AAPL"})
+        mock_client.post.assert_awaited_once_with(
+            "/api/last_sold",
+            json={"symbol": "AAPL"},
+            headers={"Authorization": "Bearer test-prixe-key"},
+        )
         await provider.close()
         mock_client.aclose.assert_awaited_once()
 
@@ -74,16 +67,9 @@ async def test_get_last_price_404_maps_to_data_not_found():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         with pytest.raises(DataNotFoundError):
             await provider.get_last_price("UNKNOWN")
-
-
-def test_missing_api_key_raises_provider_not_available():
-    settings.PRIXE_API_KEY = ""
-    with pytest.raises(ProviderError) as exc_info:
-        PrixeProvider()
-
-    assert exc_info.value.code == "PROVIDER_NOT_AVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -112,6 +98,7 @@ async def test_get_historical_prices_maps_to_price_bars():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         start = datetime(2024, 5, 1, tzinfo=timezone.utc)
         end = datetime(2024, 5, 3, tzinfo=timezone.utc)
 
@@ -131,6 +118,7 @@ async def test_get_historical_prices_maps_to_price_bars():
                 "end_date": "2024-05-03",
                 "interval": "1d",
             },
+            headers={"Authorization": "Bearer test-prixe-key"},
         )
 
 
@@ -143,6 +131,7 @@ async def test_get_historical_prices_rejects_unsupported_interval():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         start = datetime(2024, 5, 1, tzinfo=timezone.utc)
         end = datetime(2024, 5, 3, tzinfo=timezone.utc)
 
@@ -168,6 +157,7 @@ async def test_test_connection_success():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         result = await provider.test_connection()
 
         assert result["status_code"] == 200
@@ -190,6 +180,7 @@ async def test_test_connection_auth_failure():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         result = await provider.test_connection()
 
         assert result["status_code"] == 401
@@ -206,6 +197,7 @@ async def test_test_connection_service_unavailable():
         mock_async_client.return_value = mock_client
 
         provider = PrixeProvider()
+        provider._api_key = "test-prixe-key"
         result = await provider.test_connection()
 
         assert result["status_code"] == 503

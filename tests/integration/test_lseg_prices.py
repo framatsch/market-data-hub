@@ -25,18 +25,19 @@ Tests are marked with @pytest.mark.integration for selective execution.
 """
 
 import pytest
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from app.providers.lseg import LSEGProvider
-from app.config import settings
 from app.utils.errors import DataNotFoundError
 
 
-# Skip all tests if LSEG credentials not configured
+# Skip all tests unless explicitly enabled.
+# LSEG credentials are now sourced from keys.db via admin runtime.
 pytestmark = pytest.mark.skipif(
-    not settings.LSEG_APP_KEY or settings.LSEG_APP_KEY == "stub-key",
-    reason="LSEG credentials not configured"
+    os.getenv("RUN_LSEG_INTEGRATION", "false").lower() not in {"1", "true", "yes"},
+    reason="Set RUN_LSEG_INTEGRATION=true to run LSEG integration tests",
 )
 
 

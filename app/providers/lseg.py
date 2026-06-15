@@ -27,9 +27,9 @@ from app.config import settings
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.price import PriceQuote, PriceBar
 from app.models.news import NewsArticle
+from app.providers.credentials import get_provider_credential_sync
 from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, DataValidationError, ProviderError
-from app.utils.secrets import unwrap_secret
 
 logger = logging.getLogger(__name__)
 _REFINITIV_HTTPX_PROXY_PATCHED = False
@@ -203,11 +203,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 if proxy_var in os.environ:
                     del os.environ[proxy_var]
 
+            app_key = get_provider_credential_sync("lseg", "app_key")
+            username = get_provider_credential_sync("lseg", "username")
+            password = get_provider_credential_sync("lseg", "password")
+
             session = rd.session.platform.Definition(
-                app_key=settings.LSEG_APP_KEY,
+                app_key=app_key,
                 grant=rd.session.platform.GrantPassword(
-                    username=settings.LSEG_USERNAME,
-                    password=unwrap_secret(settings.LSEG_PASSWORD)
+                    username=username,
+                    password=password,
                 ),
                 signon_control=True
             ).get_session()

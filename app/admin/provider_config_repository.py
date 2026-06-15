@@ -13,7 +13,7 @@ KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prix
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
-    "schwab": {"callback_url", "token_path", "alert_webhook_format"},
+    "schwab": {"callback_url", "alert_webhook_format"},
     "lseg": set(),
     "finnhub": set(),
     "polygon": set(),
@@ -232,7 +232,6 @@ class ProviderConfigRepository:
         if provider_name == "schwab":
             return {
                 "callback_url": settings.SCHWAB_CALLBACK_URL,
-                "token_path": settings.SCHWAB_TOKEN_PATH,
             }
         return {}
 

@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import asyncio
 from datetime import datetime, date
 from typing import List, Optional
 from decimal import Decimal
@@ -25,9 +26,9 @@ from app.models.price import PriceQuote, PriceBar
 from app.models.options import OptionChain, OptionQuote
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import MarketStatus
+from app.providers.credentials import get_provider_credential_sync
 from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider
 from app.utils.errors import DataNotFoundError, ProviderError
-from app.utils.secrets import unwrap_secret
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,15 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     """Polygon.io provider for US Stocks and Options."""
 
     def __init__(self):
-        self.api_key = unwrap_secret(settings.POLYGON_API_KEY)
+        self.api_key: str | None = None
         self.base_url = settings.POLYGON_BASE_URL
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=10.0)
+
+    async def _get_api_key(self) -> str:
+        if self.api_key:
+            return self.api_key
+        self.api_key = await asyncio.to_thread(get_provider_credential_sync, "polygon", "api_key")
+        return self.api_key
 
     async def close(self):
         await self._client.aclose()
@@ -45,9 +52,10 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     async def test_connection(self) -> dict:
         """Validate Polygon API key with a lightweight previous-close request."""
         try:
+            api_key = await self._get_api_key()
             response = await self._client.get(
                 "/v2/aggs/ticker/AAPL/prev",
-                params={"apiKey": self.api_key, "adjusted": "true"},
+                params={"apiKey": api_key, "adjusted": "true"},
             )
 
             if response.status_code == 200:
@@ -97,9 +105,10 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
         ticker = self._format_ticker(symbol, sec_type)
+        api_key = await self._get_api_key()
         
         url = f"/v2/last/nbbo/{ticker}"
-        params = {"apiKey": self.api_key}
+        params = {"apiKey": api_key}
         
         try:
             resp = await self._client.get(url, params=params)
@@ -142,8 +151,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def _get_last_price_fallback(self, symbol: str, ticker: str) -> PriceQuote:
         """Fallback for free tier users using the Previous Close endpoint."""
+        api_key = await self._get_api_key()
         url = f"/v2/aggs/ticker/{ticker}/prev"
-        params = {"apiKey": self.api_key, "adjusted": "true"}
+        params = {"apiKey": api_key, "adjusted": "true"}
         
         try:
             resp = await self._client.get(url, params=params)
@@ -178,6 +188,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         sec_type: str = "stock"
     ) -> List[PriceBar]:
         ticker = self._format_ticker(symbol, sec_type)
+        api_key = await self._get_api_key()
         
         # Map MDH interval to Polygon
         multiplier = 1
@@ -198,7 +209,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         
         url = f"/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
         params = {
-            "apiKey": self.api_key,
+            "apiKey": api_key,
             "adjusted": "true",
             "sort": "asc"
         }
@@ -231,9 +242,10 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def get_option_chain(self, symbol: str, expiry: date, **kwargs) -> OptionChain:
         """Fetch option chain using Polygon Snapshots."""
+        api_key = await self._get_api_key()
         url = f"/v3/snapshot/options/{symbol.upper()}"
         params = {
-            "apiKey": self.api_key,
+            "apiKey": api_key,
             "expiration_date": expiry.isoformat(),
             "limit": 250
         }
@@ -280,8 +292,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
         """Fetch quote for a specific option contract."""
+        api_key = await self._get_api_key()
         url = f"/v3/snapshot/options/{symbol.upper()}/{self._format_ticker(option_id, 'option')}"
-        params = {"apiKey": self.api_key}
+        params = {"apiKey": api_key}
         
         try:
             resp = await self._client.get(url, params=params)
@@ -318,8 +331,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status from Polygon."""
+        api_key = await self._get_api_key()
         url = "/v1/marketstatus/now"
-        params = {"apiKey": self.api_key}
+        params = {"apiKey": api_key}
         
         try:
             resp = await self._client.get(url, params=params)
@@ -338,8 +352,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def get_company_profile(self, symbol: str) -> CompanyProfile:
         """Fetch company profile using Polygon Ticker Details v3."""
+        api_key = await self._get_api_key()
         url = f"/v3/reference/tickers/{symbol.upper()}"
-        params = {"apiKey": self.api_key}
+        params = {"apiKey": api_key}
         
         try:
             resp = await self._client.get(url, params=params)
@@ -369,9 +384,10 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
     async def search_companies(self, query: str) -> List[CompanySummary]:
         """Search for companies using Polygon Tickers v3."""
+        api_key = await self._get_api_key()
         url = "/v3/reference/tickers"
         params = {
-            "apiKey": self.api_key,
+            "apiKey": api_key,
             "search": query,
             "active": "true",
             "limit": 10

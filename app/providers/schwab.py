@@ -49,7 +49,6 @@ from app.utils.errors import (
     ProviderError,
     ProviderTimeoutError,
 )
-from app.utils.secrets import unwrap_secret
 from app.utils.webhooks import validate_webhook_url
 
 try:
@@ -138,12 +137,17 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             return None
 
     async def _get_credentials(self) -> tuple[str, str]:
-        key_value = await self._load_repository_credential("api_key") or unwrap_secret(settings.SCHWAB_API_KEY)
-        secret_value = await self._load_repository_credential("app_secret") or unwrap_secret(settings.SCHWAB_APP_SECRET)
+        key_value = await self._load_repository_credential("api_key")
+        secret_value = await self._load_repository_credential("app_secret")
         if not key_value:
             raise ProviderConnectionError(
-                "Schwab provider is not configured. Set SCHWAB_API_KEY to enable it.",
-                details={"setting": "SCHWAB_API_KEY"},
+                "Schwab provider is not configured. Set schwab.api_key in admin credentials.",
+                details={"credential": "schwab.api_key"},
+            )
+        if not secret_value:
+            raise ProviderConnectionError(
+                "Schwab provider is not configured. Set schwab.app_secret in admin credentials.",
+                details={"credential": "schwab.app_secret"},
             )
         return key_value, secret_value
 
@@ -174,12 +178,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             self._temp_token_path = path
             return path
 
-        if Path(settings.SCHWAB_TOKEN_PATH).exists():
-            return settings.SCHWAB_TOKEN_PATH
-
         raise ProviderConnectionError(
             "Schwab token not found. Re-authorize Schwab through the admin UI.",
-            details={"hint": "Configure schwab.token_json or set SCHWAB_TOKEN_PATH."},
+            details={"hint": "Configure schwab.token_json in admin credentials."},
         )
 
     async def _get_client(self) -> Any:
@@ -222,7 +223,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 self._cleanup_temp_token_file()
                 raise ProviderConnectionError(
                     "Schwab token not found. Re-authorize Schwab through the admin UI.",
-                    details={"hint": "Configure schwab.token_json or set SCHWAB_TOKEN_PATH."},
+                    details={"hint": "Configure schwab.token_json in admin credentials."},
                 )
             except Exception as exc:
                 self._cleanup_temp_token_file()
@@ -437,9 +438,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         )
 
     async def _fire_webhook(self, message: str) -> None:
-        webhook_url = await self._load_repository_credential("alert_webhook_url") or unwrap_secret(
-            settings.SCHWAB_ALERT_WEBHOOK_URL
-        )
+        webhook_url = await self._load_repository_credential("alert_webhook_url")
         if not webhook_url:
             return
         try:
