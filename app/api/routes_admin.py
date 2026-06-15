@@ -57,6 +57,16 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
     "lseg": {"app_key", "username", "password"},
 }
 
+PROVIDER_CAPABILITIES: dict[str, list[str]] = {
+    "ibkr": ["prices", "options", "companies"],
+    "lseg": ["prices", "companies"],
+    "schwab": ["prices", "options"],
+    "finnhub": ["news"],
+    "polygon": ["prices", "companies"],
+    "mock": ["news"],
+    "prixe": ["prices"],
+}
+
 
 class KeySaveRequest(BaseModel):
     provider_name: str
@@ -248,20 +258,44 @@ async def update_admin_credentials(
     return {"updated": updated, "errors": []}
 
 
+def _provider_capabilities(name: str, provider: object | None) -> list[str]:
+    if provider is None:
+        return PROVIDER_CAPABILITIES.get(name, [])
+
+    capabilities = []
+    if isinstance(provider, BasePriceProvider):
+        capabilities.append("prices")
+    if isinstance(provider, BaseOptionsProvider):
+        capabilities.append("options")
+    if isinstance(provider, BaseCompanyProvider):
+        capabilities.append("companies")
+    if isinstance(provider, BaseNewsProvider):
+        capabilities.append("news")
+    return capabilities
+
+
 def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]:
     provider = registry.get_provider_instance(name)
+    capabilities = _provider_capabilities(name, provider)
     if not config.enabled:
-        return {"name": name, "enabled": False, "status": "disabled", "error": None}
+        return {"name": name, "enabled": False, "status": "disabled", "error": None, "capabilities": capabilities}
     if registry.is_provider_paused(name):
         return {
             "name": name,
             "enabled": True,
             "status": "paused",
             "error": "Token expired - re-authorization required",
+            "capabilities": capabilities,
         }
     if provider is None:
-        return {"name": name, "enabled": True, "status": "unavailable", "error": "Provider not loaded"}
-    return {"name": name, "enabled": True, "status": "healthy", "error": None}
+        return {
+            "name": name,
+            "enabled": True,
+            "status": "unavailable",
+            "error": "Provider not loaded",
+            "capabilities": capabilities,
+        }
+    return {"name": name, "enabled": True, "status": "healthy", "error": None, "capabilities": capabilities}
 
 
 def _system_defaults() -> dict[str, str]:

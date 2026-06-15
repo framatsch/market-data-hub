@@ -3,6 +3,7 @@ export interface Provider {
   enabled: boolean;
   status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled' | 'unavailable';
   error?: string | null;
+  capabilities?: string[];
   config_summary?: {
     timeout_seconds: number;
     retry_count: number;
@@ -57,11 +58,4 @@ export interface SystemDefaults {
   default_options_provider?: string;
   default_news_provider?: string;
   logo_url?: string;
-}
-
-export interface ProviderCapabilities {
-  prices: string[];
-  options: string[];
-  companies: string[];
-  news: string[];
 }

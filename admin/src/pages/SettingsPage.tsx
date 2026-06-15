@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
+import {
   Box, 
   Typography, 
   Paper, 
@@ -15,7 +15,14 @@ import {
   TextField
 } from '@mui/material';
 import { fetcher } from '../lib/api';
-import type { SystemDefaults, ProviderCapabilities } from '../types';
+import type { SystemDefaults } from '../types';
+
+interface SettingsProviderCapabilities {
+  prices: string[];
+  options: string[];
+  companies: string[];
+  news: string[];
+}
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -36,7 +43,7 @@ export default function SettingsPage() {
     queryFn: () => fetcher('/api/admin/settings/defaults'),
   });
 
-  const { data: capabilities, isLoading: isLoadingCapabilities } = useQuery<ProviderCapabilities>({
+  const { data: capabilities, isLoading: isLoadingCapabilities } = useQuery<SettingsProviderCapabilities>({
     queryKey: ['providerCapabilities'],
     queryFn: () => fetcher('/api/admin/settings/capabilities'),
   });

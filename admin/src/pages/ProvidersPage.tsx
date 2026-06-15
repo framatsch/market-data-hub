@@ -74,6 +74,10 @@ function statusColor(status: string): 'success' | 'warning' | 'error' | 'default
   return 'error';
 }
 
+function capabilityLabel(capability: string) {
+  return capability.charAt(0).toUpperCase() + capability.slice(1);
+}
+
 function renderAuthSection(provider: Provider) {
   if (provider.name === 'schwab') {
     return (
@@ -196,6 +200,7 @@ export default function ProvidersPage() {
               <TableRow>
                 <TableCell width={48} />
                 <TableCell><Typography variant="subtitle2">Provider</Typography></TableCell>
+                <TableCell><Typography variant="subtitle2">Capabilities</Typography></TableCell>
                 <TableCell><Typography variant="subtitle2">Status</Typography></TableCell>
                 <TableCell align="right"><Typography variant="subtitle2">Enabled</Typography></TableCell>
               </TableRow>
@@ -204,6 +209,7 @@ export default function ProvidersPage() {
               {filteredProviders.map((provider) => {
                 const isOpen = expandedProvider === provider.name;
                 const isAutoExpand = expandParam === provider.name;
+                const capabilities = provider.capabilities ?? [];
                 return (
                   <>
                     {/* Provider row */}
@@ -222,6 +228,16 @@ export default function ProvidersPage() {
                         <Typography variant="body1" sx={{ fontWeight: 600 }}>
                           {provider.name.toUpperCase()}
                         </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {capabilities.map(capabilityLabel).join(' · ')}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                          {capabilities.map(cap => (
+                            <Chip key={cap} label={capabilityLabel(cap)} size="small" variant="outlined" />
+                          ))}
+                        </Box>
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -244,7 +260,7 @@ export default function ProvidersPage() {
 
                     {/* 0.2: Inline detail panel row */}
                     <TableRow key={`${provider.name}-detail`}>
-                      <TableCell colSpan={4} sx={{ p: 0, border: 0 }}>
+                      <TableCell colSpan={5} sx={{ p: 0, border: 0 }}>
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
                           <Box sx={{ p: 3, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
                             <ProviderDetailsPanel

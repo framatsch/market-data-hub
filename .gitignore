@@ -4,6 +4,7 @@ __pycache__/
 .vscode/
 .env.local
 .env.*.local
+.env
 .idea/
 .DS_Store
 coverage/
@@ -20,3 +21,5 @@ admin/node_modules/
 # Generated files (never commit)
 .coverage
 keys.db
+paseo.json
+
