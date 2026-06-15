@@ -32,7 +32,6 @@ from app.config import settings
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderError, ProviderConnectionError
-from app.utils.secrets import unwrap_secret
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +87,7 @@ class FinnhubProvider(BaseNewsProvider):
         logger.info("FinnhubProvider initialized")
 
     async def _ensure_api_key(self) -> str:
-        """Ensure API key is loaded from database or settings fallback."""
+        """Ensure API key is loaded from the encrypted key repository."""
         if self._api_key_configured and self._api_key:
             return self._api_key
 
@@ -101,12 +100,6 @@ class FinnhubProvider(BaseNewsProvider):
                 return self._api_key
         except Exception as e:
             logger.debug(f"Could not load Finnhub key from DB: {e}")
-
-        # Fallback to settings
-        self._api_key = unwrap_secret(settings.FINNHUB_API_KEY)
-        if self._api_key and self._api_key != "stub-key":
-            self._api_key_configured = True
-            return self._api_key
 
         raise ProviderError(
             "Finnhub API key not configured. Add it in the admin UI.",

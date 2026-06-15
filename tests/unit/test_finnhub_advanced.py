@@ -23,7 +23,10 @@ from app.utils.errors import ProviderError
 
 @pytest.fixture
 def finnhub_provider():
-    return FinnhubProvider()
+    provider = FinnhubProvider()
+    provider._api_key = "test-key"
+    provider._api_key_configured = True
+    return provider
 
 @pytest.mark.asyncio
 async def test_get_company_news_rate_limit(finnhub_provider):

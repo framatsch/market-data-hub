@@ -15,7 +15,7 @@ CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
     "schwab": {"callback_url", "token_path", "alert_webhook_format"},
     "lseg": set(),
-    "finnhub": {"api_key"},
+    "finnhub": set(),
     "polygon": set(),
     "prixe": set(),
     "mock": set(),
@@ -166,6 +166,12 @@ class ProviderConfigRepository:
 
     def _row_to_config(self, row: sqlite3.Row) -> ProviderRuntimeConfig:
         connection_config = json.loads(row["connection_config_json"]) if row["connection_config_json"] else {}
+        allowed_connection_keys = CONNECTION_CONFIG_ALLOWLIST[row["provider_name"]]
+        connection_config = {
+            key: value
+            for key, value in connection_config.items()
+            if key in allowed_connection_keys
+        }
         return ProviderRuntimeConfig(
             provider_name=row["provider_name"],
             enabled=bool(row["enabled"]),

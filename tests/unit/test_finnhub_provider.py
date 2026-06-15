@@ -18,18 +18,38 @@ import pytest
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
+from app.admin.crypto import CryptoService
+from app.admin.key_repository import KeyRepository
+from app.admin.runtime import set_admin_runtime
 from app.providers.finnhub import FinnhubProvider
 
 @pytest.fixture
 def finnhub_provider():
-    return FinnhubProvider()
+    provider = FinnhubProvider()
+    provider._api_key = "test-key"
+    provider._api_key_configured = True
+    return provider
 
-def test_init_stub_key():
-    from app.config import settings
-    with patch("app.providers.finnhub.settings") as mock_settings:
-        mock_settings.FINNHUB_API_KEY = "stub-key"
+def test_init_does_not_load_api_key():
+    provider = FinnhubProvider()
+
+    assert provider._api_key is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_api_key_loads_from_key_repository(tmp_path):
+    key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    key_repo = KeyRepository(str(tmp_path / "keys.db"), CryptoService(key))
+    await key_repo.save("finnhub", "api_key", "db-key")
+    set_admin_runtime(key_repository=key_repo)
+
+    try:
         provider = FinnhubProvider()
-        assert provider._api_key == "stub-key"
+        api_key = await provider._ensure_api_key()
+    finally:
+        set_admin_runtime()
+
+    assert api_key == "db-key"
 
 def test_detect_category(finnhub_provider):
     assert finnhub_provider._detect_category("Earnings Report") == "earnings"

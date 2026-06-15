@@ -47,6 +47,42 @@ async def test_provider_config_validates_connection_config_allowlist(repository)
         await repository.save("ibkr", {"connection_config": {"unsupported": True}})
 
 
+async def test_provider_config_rejects_finnhub_api_key_connection_config(repository) -> None:
+    with pytest.raises(ValueError, match="Unknown connection config"):
+        await repository.save("finnhub", {"connection_config": {"api_key": "secret"}})
+
+
+async def test_provider_config_drops_legacy_finnhub_api_key_connection_config(repository) -> None:
+    with repository._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO provider_config (
+                provider_name, enabled, timeout_seconds, retry_count,
+                retry_backoff_seconds, rate_limit_per_sec, circuit_breaker_enabled,
+                circuit_breaker_failure_threshold, circuit_breaker_reset_seconds,
+                connection_config_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "finnhub",
+                1,
+                10.0,
+                3,
+                0.5,
+                1.0,
+                0,
+                5,
+                60.0,
+                '{"api_key": "secret"}',
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+
+    config = await repository.get("finnhub")
+
+    assert config.connection_config == {}
+
+
 async def test_provider_config_list_all_merges_defaults_and_rows(repository) -> None:
     await repository.save("finnhub", {"enabled": False})
 
