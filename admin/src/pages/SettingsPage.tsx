@@ -11,8 +11,7 @@ import {
   MenuItem,
   Snackbar,
   Alert,
-  CircularProgress,
-  TextField
+  CircularProgress
 } from '@mui/material';
 import { fetcher } from '../lib/api';
 import type { SystemDefaults } from '../types';
@@ -35,7 +34,6 @@ export default function SettingsPage() {
     default_options_provider: '',
     default_company_provider: '',
     default_news_provider: '',
-    logo_url: '',
   });
 
   const { data: currentDefaults, isLoading: isLoadingDefaults } = useQuery<SystemDefaults>({
@@ -72,7 +70,6 @@ export default function SettingsPage() {
         default_options_provider: currentDefaults.default_options_provider || '',
         default_company_provider: currentDefaults.default_company_provider || '',
         default_news_provider: currentDefaults.default_news_provider || '',
-        logo_url: currentDefaults.logo_url || '',
       });
     }
   }, [currentDefaults]);
@@ -169,17 +166,6 @@ export default function SettingsPage() {
               ))}
             </Select>
           </FormControl>
-
-          <TextField
-            fullWidth
-            margin="normal"
-            label="Custom Logo URL"
-            placeholder="/admin/logo.svg"
-            value={defaults.logo_url || ''}
-            onChange={(e) => setDefaults({ ...defaults, logo_url: e.target.value })}
-            size="small"
-            helperText="Path or absolute URL to override the default Market Data Hub logo"
-          />
 
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
             <Button 

@@ -3,7 +3,7 @@ import html
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Awaitable, Callable, Literal, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -31,6 +31,8 @@ except ImportError:  # pragma: no cover
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 logger = logging.getLogger(__name__)
+_DEFAULT_CONNECTION_TEST_TIMEOUT_SECONDS = 10.0
+_LSEG_CONNECTION_TEST_TIMEOUT_SECONDS = 30.0
 
 _SCHWAB_TOKEN_LIFETIME_DAYS = 7
 _SCHWAB_PENDING_STATE_TTL = timedelta(minutes=10)
@@ -91,7 +93,6 @@ class SystemDefaultsUpdate(BaseModel):
     default_company_provider: str | None = None
     default_options_provider: str | None = None
     default_news_provider: str | None = None
-    logo_url: str | None = None
 
 
 class IbkrGatewayUpdate(BaseModel):
@@ -309,10 +310,7 @@ def _system_defaults() -> dict[str, str]:
 
 @router.get("/settings/defaults")
 async def get_admin_settings_defaults(_principal: PrincipalDep) -> dict[str, str]:
-    defaults = _system_defaults()
-    logo_url = await get_settings_repository().get("logo_url")
-    defaults["logo_url"] = logo_url or ""
-    return defaults
+    return _system_defaults()
 
 
 @router.put("/settings/defaults")
@@ -321,16 +319,10 @@ async def update_admin_settings_defaults(payload: SystemDefaultsUpdate, _princip
     settings_repo = get_settings_repository()
     for key, value in values.items():
         if value is not None:
-            if key == "logo_url":
-                await settings_repo.set(key, value)
-            else:
-                await settings_repo.set(key, value.lower())
+            await settings_repo.set(key, value.lower())
     await registry.reload_from_config(get_provider_config_repository(), settings_repo)
     
-    defaults = _system_defaults()
-    logo_url = await settings_repo.get("logo_url")
-    defaults["logo_url"] = logo_url or ""
-    return defaults
+    return _system_defaults()
 
 
 @router.get("/settings/capabilities")
@@ -341,15 +333,11 @@ async def get_admin_settings_capabilities(_principal: PrincipalDep) -> dict[str,
         "companies": [],
         "news": [],
     }
-    for name, provider in sorted(registry.list_provider_instances().items()):
-        if isinstance(provider, BasePriceProvider):
-            capabilities["prices"].append(name)
-        if isinstance(provider, BaseOptionsProvider):
-            capabilities["options"].append(name)
-        if isinstance(provider, BaseCompanyProvider):
-            capabilities["companies"].append(name)
-        if isinstance(provider, BaseNewsProvider):
-            capabilities["news"].append(name)
+    for config in await get_provider_config_repository().list_all():
+        if not config.enabled:
+            continue
+        for capability in PROVIDER_CAPABILITIES.get(config.provider_name, []):
+            capabilities[capability].append(config.provider_name)
     return capabilities
 
 
@@ -479,15 +467,21 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
     test_connection = getattr(provider, "test_connection", None)
     if not callable(test_connection):
         raise HTTPException(status_code=500, detail="Provider does not support connection testing")
+    test_connection_call = cast(Callable[[], Awaitable[Any]], test_connection)
+
+    timeout_seconds = max(
+        provider_config.timeout_seconds,
+        _LSEG_CONNECTION_TEST_TIMEOUT_SECONDS if provider_key == "lseg" else _DEFAULT_CONNECTION_TEST_TIMEOUT_SECONDS,
+    )
 
     try:
-        result_payload = await asyncio.wait_for(test_connection(), timeout=10.0)
+        result_payload = await asyncio.wait_for(test_connection_call(), timeout=timeout_seconds)
     except asyncio.TimeoutError:
         timeout_result = ConnectionTestResult(
             status_code=503,
             success=False,
             message="Connection test timeout",
-            details={"provider": provider_key, "timeout_seconds": 10.0},
+            details={"provider": provider_key, "timeout_seconds": timeout_seconds},
         )
         logger.warning(
             "Connection test failed for provider=%s status_code=%s message=%s",

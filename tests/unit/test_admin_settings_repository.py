@@ -48,3 +48,10 @@ async def test_settings_repository_rejects_unknown_key(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="Unknown system setting"):
         await repository.set("unexpected", "value")
+
+
+async def test_settings_repository_rejects_removed_logo_url_key(tmp_path) -> None:
+    repository = SettingsRepository(str(tmp_path / "keys.db"))
+
+    with pytest.raises(ValueError, match="Unknown system setting"):
+        await repository.set("logo_url", "/admin/logo.svg")

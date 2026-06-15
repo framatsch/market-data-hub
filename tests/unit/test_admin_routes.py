@@ -9,10 +9,9 @@ from app.admin.crypto import CryptoService
 from app.admin.key_repository import KeyRepository
 from app.admin.provider_config_repository import ProviderConfigRepository
 from app.admin.settings_repository import SettingsRepository
-from app.admin.runtime import set_admin_runtime
+from app.admin.runtime import get_provider_config_repository, set_admin_runtime
 from app.api.routes_admin import router
 from app.config import settings
-from app.providers.base import BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
 from app.providers.schwab import SchwabProvider
 
 
@@ -89,7 +88,12 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
     response = client.get("/api/admin/settings/defaults")
 
     assert response.status_code == 200
-    assert response.json()["default_news_provider"] == ""
+    assert response.json() == {
+        "default_price_provider": "",
+        "default_company_provider": "",
+        "default_options_provider": "",
+        "default_news_provider": "",
+    }
 
     async def fake_reload(config_repo, settings_repo):
         assert await settings_repo.get("default_price_provider") == "lseg"
@@ -103,45 +107,23 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
     assert update.json()["default_price_provider"] == "lseg"
 
 
-def test_admin_settings_capabilities(client, monkeypatch) -> None:
-    class PriceProvider(BasePriceProvider):
-        async def get_historical_prices(self, symbol, interval, start, end, sec_type="stock"):
-            raise NotImplementedError
+def test_admin_settings_capabilities(client) -> None:
+    config_repo = get_provider_config_repository()
+    asyncio.run(config_repo.save("ibkr", {"enabled": True}))
+    asyncio.run(config_repo.save("lseg", {"enabled": True}))
+    asyncio.run(config_repo.save("finnhub", {"enabled": True}))
+    asyncio.run(config_repo.save("schwab", {"enabled": False}))
+    asyncio.run(config_repo.save("mock", {"enabled": False}))
+    asyncio.run(config_repo.save("polygon", {"enabled": False}))
+    asyncio.run(config_repo.save("prixe", {"enabled": False}))
 
-        async def get_last_price(self, symbol, market_data_type=None, sec_type="stock"):
-            raise NotImplementedError
-
-        async def test_connection(self):
-            return {"status_code": 200, "success": True, "message": "ok", "details": {}}
-
-    class OptionsProvider(PriceProvider, BaseOptionsProvider):
-        async def get_option_chain(self, symbol, expiry, min_strike=None, max_strike=None, right=None, market_data_type=None):
-            raise NotImplementedError
-
-        async def get_option_quote(self, symbol, option_id, market_data_type=None):
-            raise NotImplementedError
-
-    class NewsProvider(BaseNewsProvider):
-        async def get_company_news(self, symbol, from_date, to_date, limit=20, offset=0, language="en", category=None):
-            raise NotImplementedError
-
-        async def test_connection(self):
-            return {"status_code": 200, "success": True, "message": "ok", "details": {}}
-
-    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
-    original = registry._providers.copy()
-    monkeypatch.setattr(registry, "_providers", {"ibkr": OptionsProvider(), "finnhub": NewsProvider()})
-
-    try:
-        response = client.get("/api/admin/settings/capabilities")
-    finally:
-        registry._providers = original
+    response = client.get("/api/admin/settings/capabilities")
 
     assert response.status_code == 200
     assert response.json() == {
-        "prices": ["ibkr"],
+        "prices": ["ibkr", "lseg"],
         "options": ["ibkr"],
-        "companies": [],
+        "companies": ["ibkr", "lseg"],
         "news": ["finnhub"],
     }
 

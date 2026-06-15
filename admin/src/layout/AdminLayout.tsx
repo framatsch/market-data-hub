@@ -18,23 +18,14 @@ import {
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import GitHubIcon from '@mui/icons-material/GitHub';
-import { useQuery } from '@tanstack/react-query';
-import { fetcher } from '../lib/api';
-import type { SystemDefaults } from '../types';
 import Sidebar from './Sidebar';
 
 const drawerWidth = 240;
+const logoUrl = '/admin/logo.svg';
 
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-
-  const { data: systemDefaults } = useQuery<SystemDefaults>({
-    queryKey: ['systemDefaults'],
-    queryFn: () => fetcher('/api/admin/settings/defaults'),
-  });
-
-  const logoUrl = systemDefaults?.logo_url || '/admin/logo.svg';
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);

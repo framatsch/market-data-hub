@@ -57,5 +57,4 @@ export interface SystemDefaults {
   default_company_provider?: string;
   default_options_provider?: string;
   default_news_provider?: string;
-  logo_url?: string;
 }
