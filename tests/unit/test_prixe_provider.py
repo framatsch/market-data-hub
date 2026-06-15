@@ -45,7 +45,7 @@ async def test_get_last_price_success_maps_decimal_fields():
 
         mock_client.post.assert_awaited_once_with(
             "/api/last_sold",
-            json={"symbol": "AAPL"},
+            json={"ticker": "AAPL"},
             headers={"Authorization": "Bearer test-prixe-key"},
         )
         await provider.close()
@@ -163,6 +163,11 @@ async def test_test_connection_success():
         assert result["status_code"] == 200
         assert result["success"] is True
         assert result["message"] == "Prixe API key valid"
+        mock_client.post.assert_awaited_once_with(
+            "/api/last_sold",
+            json={"ticker": "AAPL"},
+            headers={"Authorization": "Bearer test-prixe-key"},
+        )
 
 
 @pytest.mark.asyncio

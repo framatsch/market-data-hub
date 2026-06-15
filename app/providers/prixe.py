@@ -47,7 +47,7 @@ class PrixeProvider(BasePriceProvider):
             api_key = await self._get_api_key()
             response = await client.post(
                 "/api/last_sold",
-                json={"symbol": "AAPL"},
+                json={"ticker": "AAPL"},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             if response.status_code == 200:
@@ -55,7 +55,7 @@ class PrixeProvider(BasePriceProvider):
                     "status_code": 200,
                     "success": True,
                     "message": "Prixe API key valid",
-                    "details": {"endpoint": "/api/last_sold", "symbol": "AAPL"},
+                    "details": {"endpoint": "/api/last_sold", "ticker": "AAPL"},
                 }
             if response.status_code in (401, 403):
                 return {
@@ -101,7 +101,7 @@ class PrixeProvider(BasePriceProvider):
         try:
             response = await client.post(
                 "/api/last_sold",
-                json={"symbol": normalized_symbol},
+                json={"ticker": normalized_symbol},
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             response.raise_for_status()

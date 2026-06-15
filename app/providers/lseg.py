@@ -127,23 +127,13 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
     def _test_connection_sync(self) -> dict:
         try:
-            self._create_session()
-            self._throttle()
-            response = historical_pricing.summaries.Definition(
-                universe="AAPL.O",
-                interval=historical_pricing.Intervals.DAILY,
-                count=1,
-            ).get_data()
-
-            rows = 0
-            if getattr(response, "data", None) is not None and getattr(response.data, "df", None) is not None:
-                rows = len(response.data.df)
+            self._get_session()
 
             return {
                 "status_code": 200,
                 "success": True,
                 "message": "LSEG session active",
-                "details": {"instrument": "AAPL.O", "rows": rows},
+                "details": {"session_created_at": self._session_created_at.isoformat() if self._session_created_at else None},
             }
         except Exception as exc:
             error_message = str(exc)
@@ -161,14 +151,6 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 "message": "LSEG service unavailable",
                 "details": {"error": error_message},
             }
-        finally:
-            if self._session is not None:
-                try:
-                    self._session.close()
-                except Exception:
-                    logger.debug("Failed closing LSEG session after test_connection", exc_info=True)
-                self._session = None
-                self._session_created_at = None
 
     def _get_session(self):
         """Get or create Refinitiv session with smart refresh."""
