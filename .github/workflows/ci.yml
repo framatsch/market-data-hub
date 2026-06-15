@@ -2,10 +2,10 @@ name: CI/CD
 
 on:
   push:
-    branches: ["main", "develop"]
+    branches: ["main", "devel"]
     tags: ["v*"]
   pull_request:
-    branches: ["main", "develop"]
+    branches: ["main", "devel"]
 
 env:
   PYTHON_VERSION: "3.12"
@@ -13,6 +13,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+# ... (omitted for brevity in replace context, but tool needs exact match)
+# I will read the file first to ensure I have the exact context for replace.
   quality:
     name: Lint and Test
     runs-on: ubuntu-latest
@@ -75,7 +77,7 @@ jobs:
             # Tag as 'latest' on main branch
             type=raw,value=latest,enable={{is_default_branch}}
             # Tag as 'devel' on develop branch
-            type=raw,value=devel,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=raw,value=devel,enable=${{ github.ref == 'refs/heads/devel' }}
             # Tag with version on release tags (e.g., v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
             # Tag with major.minor on release tags (e.g., v1.0.0 -> 1.0)
