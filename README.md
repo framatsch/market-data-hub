@@ -61,7 +61,7 @@ See below for setup, configuration, and deployment.
 - Python 3.12+
 - Docker & Docker Compose (optional, for containerized deployment)
 - IBKR Gateway/TWS running (for price data)
-- LSEG credentials (for company/fundamental data)
+- Provider credentials stored in `keys.db` via the Admin UI/API (for LSEG, Finnhub, Polygon, Prixe, Schwab)
 
 ### Option 1: Local Development (HTTP Mode)
 
@@ -69,12 +69,9 @@ See below for setup, configuration, and deployment.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Create and configure .env file
+# 2. Create runtime .env file
 cp .env.example .env
-# Edit .env with your LSEG credentials:
-#   LSEG_APP_KEY=your-app-key
-#   LSEG_USERNAME=your-username
-#   LSEG_PASSWORD=your-password
+# Provider credentials are added later via Admin UI/API and stored in keys.db.
 
 # 3. Run HTTP server
 python -m app.main
@@ -86,9 +83,9 @@ python -m app.main
 ### Option 2: Docker Compose (Recommended for Local Dev)
 
 ```bash
-# 1. Create .env file with your LSEG credentials
+# 1. Create runtime .env file
 cp .env.example .env
-# Edit .env with actual values
+# Edit runtime settings as needed. Provider credentials live in keys.db.
 
 # 2. Build and run (builds image automatically)
 docker-compose up
@@ -141,7 +138,7 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 
 ## Configuration
 
-Configuration via environment variables (see `.env.example`):
+Runtime configuration via environment variables (see `.env.example`). Provider credentials are stored encrypted in `keys.db` via the Admin UI/API.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -149,23 +146,27 @@ Configuration via environment variables (see `.env.example`):
 | `IBKR_PORT` | `4002` | Gateway: 4002, TWS Paper: 7497, TWS Live: 7496 |
 | `IBKR_CLIENT_ID` | `815` | Unique client ID for connection |
 | `IBKR_MARKET_DATA_TYPE` | `3` | 1=Live, 2=Frozen, 3=Delayed (default; free) |
-| `LSEG_APP_KEY` | *(required)* | LSEG application API key |
-| `LSEG_USERNAME` | *(required)* | LSEG Workspace username (email) |
-| `LSEG_PASSWORD` | *(required)* | LSEG Workspace password |
-| `FINNHUB_API_KEY` | `stub-key` | Finnhub API key (get from finnhub.io/dashboard) |
 | `FINNHUB_RATE_LIMIT_PER_MIN` | `60` | API rate limit (60 for free tier) |
 | `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
 | `APP_ENV` | `dev` | Environment: dev, test, prod |
 | `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
-| `PRIXE_API_KEY` | *(empty)* | Prixe API key (Bearer token) |
 | `PRIXE_BASE_URL` | `https://api.prixe.io` | Prixe API base URL |
-| `SCHWAB_API_KEY` | *(empty)* |  app key — leave empty to disable provider |
-| `SCHWAB_APP_SECRET` | *(empty)* |  app secret from developer portal |
 | `SCHWAB_CALLBACK_URL` | `https://127.0.0.1:8182` | Must match app config exactly (including trailing slash) |
-| `SCHWAB_TOKEN_PATH` | `/tmp/_token.json` | Path to OAuth2 token file (managed by -py) |
 | `SCHWAB_TIMEOUT_SECONDS` | `30` | HTTP request timeout |
 | `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
-| `SCHWAB_ASYNCIO` | `true` | Create  async client (`-py` asyncio mode) |
+| `SCHWAB_ASYNCIO` | `true` | Create Schwab async client (`schwab-py` asyncio mode) |
+| `APP_ENCRYPTION_KEY` | *(empty)* | Encryption key for credentials stored in `keys.db` |
+| `KEYS_DB_PATH` | `./keys.db` | SQLite database path for encrypted provider credentials |
+
+Provider credential keys:
+
+| Provider | Credential keys in `keys.db` |
+|---|---|
+| `lseg` | `app_key`, `username`, `password` |
+| `finnhub` | `api_key` |
+| `polygon` | `api_key` |
+| `prixe` | `api_key` |
+| `schwab` | `api_key`, `app_secret`, `token_json`, optional `alert_webhook_url` |
 
 ## Observability
 
@@ -193,12 +194,7 @@ To access Refinitiv/LSEG data, obtain credentials from [LSEG Developer Portal](h
 1. Create or sign in to your LSEG account
 2. Generate API key in Developer Portal
 3. Note your LSEG Workspace username (typically email address)
-4. Set credentials in `.env`:
-   ```bash
-   LSEG_APP_KEY=your-key-here
-   LSEG_USERNAME=your-email@example.com
-   LSEG_PASSWORD=your-password-here
-   ```
+4. Store credentials in `keys.db` via Admin UI/API under provider `lseg` with keys `app_key`, `username`, and `password`.
 
 **Note**: Data access requires active LSEG subscription with appropriate entitlements for the data types you retrieve.
 
@@ -208,10 +204,7 @@ To access company news and data from Finnhub (fallback provider), obtain an API 
 
 1. Sign up for a free account at [finnhub.io/register](https://finnhub.io/register)
 2. Get your API key from the [Dashboard](https://finnhub.io/dashboard)
-3. Set the API key in `.env`:
-   ```bash
-   FINNHUB_API_KEY=your-api-key-here
-   ```
+3. Store the API key in `keys.db` via Admin UI/API under provider `finnhub` with key `api_key`.
 
 **Rate Limits**:
 - Free tier: 60 API calls per minute
@@ -220,51 +213,55 @@ To access company news and data from Finnhub (fallback provider), obtain an API 
 
 See [doc/news-api-guide.md](doc/news-api-guide.md) for detailed news API usage and testing.
 
-###  Credentials Setup
+### Schwab Credentials Setup
 
- requires OAuth2 authentication via the [ Developer Portal](https://developer..com/). The `-py` library manages the token lifecycle automatically once set up.
+Schwab requires OAuth2 authentication via the [Schwab Developer Portal](https://developer.schwab.com/). The `schwab-py` library manages the token lifecycle automatically once set up.
 
-#### 1. Create a  developer app
+#### 1. Create a Schwab developer app
 
-1. Sign in at [developer..com](https://developer..com/)
+1. Sign in at [developer.schwab.com](https://developer.schwab.com/)
 2. Create a new app under **Products → Trader API – Individual**
 3. Set the callback URL to `https://127.0.0.1:8182` (or another `https://127.0.0.1:<port>` URL)
 4. Note your **App Key** and **App Secret**
 
-> **App approval delay:** New and modified apps enter an `Approved - Pending` state and require manual review by . This typically takes a few days. Until the status shows **Ready for Use**, API calls will return `401` errors.
+> **App approval delay:** New and modified apps enter an `Approved - Pending` state and require manual review by Schwab. This typically takes a few days. Until the status shows **Ready for Use**, API calls will return `401` errors.
 
 #### 2. Generate the token (one-time per machine)
 
 Run the token generator on a machine with a browser:
 
 ```bash
--generate-token.py \
+schwab-generate-token.py \
   --token_file /path/to/_token.json \
   --api_key YOUR_APP_KEY \
   --app_secret YOUR_APP_SECRET \
   --callback_url https://127.0.0.1:8182
 ```
 
-A browser window will open. Log in with your  brokerage account. After redirecting, the token file is written automatically.
+A browser window will open. Log in with your Schwab brokerage account. After redirecting, the token file is written automatically.
 
 > Your browser will warn about an invalid/self-signed certificate on the callback URL — this is expected. Proceed anyway, but verify the address matches your callback URL.
 
-#### 3. Configure `.env`
+#### 3. Store credentials in `keys.db`
 
-```bash
-SCHWAB_API_KEY=your-app-key-here
-SCHWAB_APP_SECRET=your-app-secret-here
-SCHWAB_CALLBACK_URL=https://127.0.0.1:8182
-SCHWAB_TOKEN_PATH=/path/to/_token.json
-```
+Store credentials via Admin UI/API under provider `schwab`:
+
+| Credential key | Value |
+|---|---|
+| `api_key` | App key from the developer portal |
+| `app_secret` | App secret from the developer portal |
+| `token_json` | Full contents of the generated `_token.json` file |
+| `alert_webhook_url` | Optional alert webhook URL |
+
+Keep `SCHWAB_CALLBACK_URL` in `.env`; it is runtime configuration and must match the developer portal app exactly.
 
 #### 4. Token rotation (every 7 days)
 
- refresh tokens expire after **7 days**. Re-run `-generate-token.py` weekly before the token expires, or set a cron job:
+Schwab refresh tokens expire after **7 days**. Re-run `schwab-generate-token.py` weekly before the token expires, or set a cron job:
 
 ```bash
 # Example: regenerate token every Sunday at 08:00
-0 8 * * 0 -generate-token.py --token_file /path/to/token.json --api_key $SCHWAB_API_KEY --app_secret $SCHWAB_APP_SECRET --callback_url https://127.0.0.1:8182
+0 8 * * 0 schwab-generate-token.py --token_file /path/to/token.json --api_key YOUR_APP_KEY --app_secret YOUR_APP_SECRET --callback_url https://127.0.0.1:8182
 ```
 
 #### 5. Containerized / headless deployments
@@ -275,7 +272,7 @@ The login flow requires a browser. For servers:
 2. Copy `_token.json` to the server / mount it as a secret
 3. **Never share or commit the token file** — it grants full account access
 
-**Do not** create, edit, or copy-paste the JSON contents manually. The token file is managed exclusively by `-py`.
+**Do not** create, edit, or copy-paste the JSON contents manually. The token file is managed exclusively by `schwab-py`.
 
 #### Verify the setup
 
@@ -415,12 +412,13 @@ Connect to `ws://localhost:8000/ws/prices` and send:
 # 1. Create namespace
 kubectl create namespace market-data-hub
 
-# 2. Create Kubernetes Secret from environment variables
+# 2. Create Kubernetes Secret for admin runtime storage
 kubectl create secret generic market-data-hub-secrets \
-  --from-literal=lseg_app_key=$LSEG_APP_KEY \
-  --from-literal=lseg_username=$LSEG_USERNAME \
-  --from-literal=lseg_password=$LSEG_PASSWORD \
+  --from-literal=app_encryption_key=$APP_ENCRYPTION_KEY \
   -n market-data-hub
+
+# Provider credentials are stored in keys.db; seed them through the Admin UI/API
+# after deployment, or mount/persist KEYS_DB_PATH with preloaded credentials.
 
 # 3. Update image reference in deploy/kubernetes.yaml
 # Replace: ghcr.io/yourusername/market-data-hub:latest

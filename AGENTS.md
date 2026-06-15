@@ -44,7 +44,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
 
 ## Environment
 
-- Copy `.env.example` → `.env`. Required: `LSEG_APP_KEY`, `LSEG_USERNAME`, `LSEG_PASSWORD`.
+- Copy `.env.example` → `.env`. Provider credentials are managed in encrypted `keys.db` via Admin UI/API, not provider-specific env vars.
 - IBKR: running TWS/Gateway required (Gateway port 4001, TWS paper 7497).
 - Settings via `app/config.py` (`SettingsConfigDict(env_file=".env")`). Never commit credentials.
 - `MCP_ENABLED=true` enables Model Context Protocol.
