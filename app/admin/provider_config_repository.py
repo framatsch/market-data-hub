@@ -15,7 +15,7 @@ CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
     "schwab": {"callback_url", "token_path", "alert_webhook_format"},
     "lseg": set(),
-    "finnhub": set(),
+    "finnhub": {"api_key"},
     "polygon": set(),
     "prixe": set(),
     "mock": set(),

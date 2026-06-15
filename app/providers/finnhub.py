@@ -49,9 +49,8 @@ class FinnhubProvider(BaseNewsProvider):
     """
 
     def __init__(self):
-        self._api_key: str = unwrap_secret(settings.FINNHUB_API_KEY)
-        if not self._api_key or self._api_key == "stub-key":
-            logger.warning("Finnhub API key not configured - provider will not work")
+        self._api_key: str | None = None
+        self._api_key_configured = False
 
         # Sliding-window rate limiter (60 calls per minute).
         # No maxlen: manual popleft manages the window to avoid eviction races.
@@ -87,6 +86,33 @@ class FinnhubProvider(BaseNewsProvider):
         }
 
         logger.info("FinnhubProvider initialized")
+
+    async def _ensure_api_key(self) -> str:
+        """Ensure API key is loaded from database or settings fallback."""
+        if self._api_key_configured and self._api_key:
+            return self._api_key
+
+        try:
+            from app.admin.runtime import get_key_repository
+            db_key = await get_key_repository().get("finnhub", "api_key")
+            if db_key:
+                self._api_key = db_key
+                self._api_key_configured = True
+                return self._api_key
+        except Exception as e:
+            logger.debug(f"Could not load Finnhub key from DB: {e}")
+
+        # Fallback to settings
+        self._api_key = unwrap_secret(settings.FINNHUB_API_KEY)
+        if self._api_key and self._api_key != "stub-key":
+            self._api_key_configured = True
+            return self._api_key
+
+        raise ProviderError(
+            "Finnhub API key not configured. Add it in the admin UI.",
+            code="PROVIDER_NOT_AVAILABLE",
+            details={"provider": "finnhub"}
+        )
 
     # ========================================================================
     # HTTP Client Management
@@ -205,19 +231,12 @@ class FinnhubProvider(BaseNewsProvider):
 
     async def test_connection(self) -> dict:
         """Validate Finnhub API key with a lightweight quote request."""
-        if not self._api_key:
-            return {
-                "status_code": 401,
-                "success": False,
-                "message": "Invalid Finnhub API key",
-                "details": {"reason": "missing api key"},
-            }
-
         try:
+            api_key = await self._ensure_api_key()
             client = await self._get_client()
             response = await client.get(
                 "/quote",
-                params={"symbol": "AAPL", "token": self._api_key},
+                params={"symbol": "AAPL", "token": api_key},
             )
 
             if response.status_code == 200:
@@ -295,6 +314,9 @@ class FinnhubProvider(BaseNewsProvider):
                     # Return 429 error
                     raise ProviderError(error_msg)
 
+            # Get API key
+            api_key = await self._ensure_api_key()
+
             # Get HTTP client
             client = await self._get_client()
 
@@ -313,7 +335,7 @@ class FinnhubProvider(BaseNewsProvider):
                     "symbol": symbol.upper(),
                     "from": from_date.isoformat(),
                     "to": to_date.isoformat(),
-                    "token": self._api_key
+                    "token": api_key
                 }
             )
 
