@@ -26,8 +26,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             return response
-        except Exception as exc:
-            error = exc
+        except Exception:
             raise
         finally:
             duration_seconds = time.perf_counter() - start
