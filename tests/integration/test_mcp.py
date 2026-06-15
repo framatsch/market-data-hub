@@ -23,23 +23,43 @@ import threading
 import uvicorn
 import socket
 import time
+from datetime import datetime
+from decimal import Decimal
 from httpx import AsyncClient
 from app.main import app
 from app.config import settings
+from app.models.price import PriceQuote
+from app.providers.base import BasePriceProvider
+from app.providers.registry import registry
 
 import os
 
-# Skip if LSEG not configured or if explicitly in CI
+# Skip if explicitly in CI.
 pytestmark = [
-    pytest.mark.skipif(
-        not settings.LSEG_APP_KEY or settings.LSEG_APP_KEY == "stub-key",
-        reason="LSEG credentials not configured"
-    ),
     pytest.mark.skipif(
         os.getenv("CI") == "true",
         reason="Skipping network-intensive integration test in CI"
     )
 ]
+
+
+class MCPTestPriceProvider(BasePriceProvider):
+    name = "mcp-test-price"
+
+    async def get_historical_prices(self, symbol, interval, start, end, sec_type="stock"):
+        return []
+
+    async def get_last_price(self, symbol, market_data_type=None, sec_type="stock"):
+        return PriceQuote(
+            symbol=symbol,
+            price=Decimal("150.00"),
+            currency="USD",
+            timestamp=datetime.now(),
+            provider=self.name,
+        )
+
+    async def test_connection(self):
+        return {"status_code": 200, "success": True, "message": "ok", "details": {}}
 
 def get_free_port():
     """Find a free port on localhost."""
@@ -55,6 +75,14 @@ def server_port():
 def real_server(server_port):
     """Run a real uvicorn server in a background thread."""
     original_mcp_enabled = settings.MCP_ENABLED
+    original_reload_from_config = registry.reload_from_config
+    original_provider = registry._providers.get(MCPTestPriceProvider.name)
+
+    async def keep_test_registry(*args, **kwargs):
+        return None
+
+    registry.reload_from_config = keep_test_registry
+    registry._providers[MCPTestPriceProvider.name] = MCPTestPriceProvider()
     settings.MCP_ENABLED = True
     
     from app.api.mcp import router as mcp_router
@@ -82,6 +110,11 @@ def real_server(server_port):
     
     server.should_exit = True
     thread.join(timeout=2.0)
+    if original_provider is None:
+        registry._providers.pop(MCPTestPriceProvider.name, None)
+    else:
+        registry._providers[MCPTestPriceProvider.name] = original_provider
+    registry.reload_from_config = original_reload_from_config
     settings.MCP_ENABLED = original_mcp_enabled
 
 @pytest.fixture
@@ -137,8 +170,8 @@ class TestMCPFlow:
             pytest.fail("MCP Tools list test timed out")
 
     @pytest.mark.anyio
-    async def test_mcp_get_aapl_price_lseg(self, async_client):
-        """Test getting AAPL price via MCP using LSEG provider."""
+    async def test_mcp_get_aapl_price_mock_provider(self, async_client):
+        """Test getting AAPL price via MCP using a local test provider."""
         try:
             async with asyncio.timeout(20.0):
                 async with async_client.stream("GET", "/mcp/sse") as sse_response:
@@ -159,7 +192,7 @@ class TestMCPFlow:
                         "method": "tools/call",
                         "params": {
                             "name": "get_last_price",
-                            "arguments": {"symbol": "AAPL", "provider": "lseg"}
+                            "arguments": {"symbol": "AAPL", "provider": MCPTestPriceProvider.name}
                         }
                     }
                     response = await async_client.post(f"/mcp/messages?session_id={session_id}", json=payload)
