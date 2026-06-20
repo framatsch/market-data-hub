@@ -13,7 +13,7 @@ KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prix
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
-    "schwab": {"callback_url", "alert_webhook_format"},
+    "schwab": {"callback_url", "alert_webhook_format", "manual_token_mode", "force_refresh_token"},
     "lseg": set(),
     "finnhub": set(),
     "polygon": set(),
@@ -232,6 +232,12 @@ class ProviderConfigRepository:
         if provider_name == "schwab":
             return {
                 "callback_url": settings.SCHWAB_CALLBACK_URL,
+                # manual_token_mode=True: OAuth-Redirect deaktiviert; Token-JSON wird
+                # manuell via Admin-UI eingefügt statt über den Callback-Flow gesetzt.
+                "manual_token_mode": False,
+                # force_refresh_token: wird nach easy_client() an update_tokens() übergeben.
+                # True = sofortiger Refresh-Token-Update bei Client-Initialisierung.
+                "force_refresh_token": True,
             }
         return {}
 

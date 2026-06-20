@@ -108,6 +108,16 @@ class SchwabCallbackRequest(BaseModel):
     received_url: str
 
 
+class SchwabConfigUpdate(BaseModel):
+    callback_url: str | None = None
+    manual_token_mode: bool | None = None
+    force_refresh_token: bool | None = None
+
+
+class SchwabManualTokenRequest(BaseModel):
+    token_json: str
+
+
 class AlertWebhookUpdate(BaseModel):
     webhook_url: str
     format: str = "slack"
@@ -560,6 +570,102 @@ async def update_ibkr_gateway(payload: IbkrGatewayUpdate, _principal: PrincipalD
     return {"name": "ibkr", "connection_config": config.connection_config}
 
 
+async def _get_schwab_callback_url() -> str:
+    """Liest callback_url aus provider_config DB; fällt auf settings.SCHWAB_CALLBACK_URL zurück."""
+    try:
+        repo = get_provider_config_repository()
+        config = await repo.get("schwab")
+        url = (config.connection_config or {}).get("callback_url")
+        if url and isinstance(url, str) and url.strip():
+            return url.strip()
+    except Exception:
+        pass
+    return settings.SCHWAB_CALLBACK_URL
+
+
+async def _get_schwab_connection_config() -> dict[str, Any]:
+    """Gibt die vollständige Schwab connection_config zurück, mit Defaults."""
+    from app.admin.provider_config_repository import ProviderConfigRepository
+    repo = get_provider_config_repository()
+    config = await repo.get("schwab")
+    cc = dict(config.connection_config or {})
+    cc.setdefault("callback_url", settings.SCHWAB_CALLBACK_URL)
+    cc.setdefault("manual_token_mode", False)
+    cc.setdefault("force_refresh_token", True)
+    return cc
+
+
+@router.get("/schwab/config")
+async def get_schwab_config(_principal: PrincipalDep) -> dict[str, Any]:
+    """Gibt Schwab connection_config zurück (callback_url, manual_token_mode, force_refresh_token)."""
+    cc = await _get_schwab_connection_config()
+    return {"connection_config": cc}
+
+
+@router.put("/schwab/config")
+async def update_schwab_config(payload: SchwabConfigUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+    """Speichert Schwab connection_config-Felder (callback_url, manual_token_mode, force_refresh_token)."""
+    repo = get_provider_config_repository()
+    existing = await repo.get("schwab")
+    cc = dict(existing.connection_config or {})
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
+    cc.update(updates)
+    saved = await repo.save("schwab", {"connection_config": cc})
+    await registry.reload_from_config(repo)
+    return {"connection_config": saved.connection_config}
+
+
+@router.post("/schwab/auth/token/manual")
+async def save_schwab_token_manually(payload: SchwabManualTokenRequest, _principal: PrincipalDep) -> dict[str, Any]:
+    """Speichert ein manuell eingefügtes Schwab token_json direkt in der Keys-DB.
+
+    Wird verwendet wenn manual_token_mode=True, d.h. der OAuth-Redirect nicht
+    funktioniert und das Token nach dem Login manuell aus der Callback-URL extrahiert wird.
+    """
+    import json as _json
+    try:
+        _json.loads(payload.token_json)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"token_json ist kein gültiges JSON: {exc}") from exc
+
+    key_repo = get_key_repository()
+    await key_repo.save("schwab", "token_json", payload.token_json)
+    registry.unpause_provider("schwab")
+    _schwab_callback_error.pop(_SCHWAB_CALLBACK_ERROR_KEY, None)
+    expires_at = (_utcnow() + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat()
+    return {"status": "ok", "token_expires_at": expires_at}
+
+
+@router.post("/schwab/auth/update-tokens")
+async def schwab_update_tokens(_principal: PrincipalDep, force_refresh_token: bool = True) -> dict[str, Any]:
+    """Ruft client.update_tokens(force_refresh_token=...) auf dem laufenden Schwab-Client auf.
+
+    Kann genutzt werden um den Refresh-Token manuell zu erneuern (z.B. am Wochenende),
+    bevor er nach 7 Tagen abläuft.
+    """
+    from app.providers.registry import registry as _registry
+    provider = _registry.get_provider("schwab")
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Schwab provider nicht geladen")
+
+    schwab_provider = provider
+    client = getattr(schwab_provider, "_client", None)
+    if client is None:
+        raise HTTPException(status_code=503, detail="Schwab client nicht initialisiert — zuerst verbinden")
+
+    try:
+        update_fn = getattr(client, "update_tokens", None)
+        if update_fn is None:
+            raise HTTPException(status_code=503, detail="schwab-py client unterstützt update_tokens() nicht")
+        await asyncio.to_thread(update_fn, force_refresh_token=force_refresh_token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"update_tokens fehlgeschlagen: {exc}") from exc
+
+    return {"status": "ok", "force_refresh_token": force_refresh_token}
+
+
 @router.get("/schwab/auth/url")
 async def get_schwab_auth_url(_principal: PrincipalDep) -> dict[str, str]:
     if get_auth_context is None:
@@ -571,12 +677,13 @@ async def get_schwab_auth_url(_principal: PrincipalDep) -> dict[str, str]:
     if not api_key or not app_secret:
         raise HTTPException(status_code=503, detail="Schwab credentials not configured")
 
+    callback_url = await _get_schwab_callback_url()
     now = _utcnow()
     _evict_expired_schwab_states(now)
     auth_context = await asyncio.to_thread(
         get_auth_context,
         api_key,
-        callback_url=settings.SCHWAB_CALLBACK_URL,
+        callback_url=callback_url,
     )
     _schwab_pending_states[auth_context.state] = (auth_context, now)
 
@@ -606,6 +713,9 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
     if not api_key or not app_secret:
         _set_schwab_callback_error("Schwab credentials not configured")
         return HTMLResponse(status_code=400, content="<h1>Schwab credentials not configured.</h1>")
+
+    # Hinweis: Wenn manual_token_mode aktiv ist, sollte dieser Callback nie aufgerufen werden.
+    # Falls doch, geben wir eine Hilfsmeldung zurück statt den Flow fortzusetzen.
 
     now = _utcnow()
     _evict_expired_schwab_states(now)
@@ -664,12 +774,13 @@ async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _princip
     if not api_key or not app_secret:
         raise HTTPException(status_code=503, detail="Schwab credentials not configured")
 
+    callback_url = await _get_schwab_callback_url()
     try:
         client = await asyncio.to_thread(
             client_from_received_url,
             api_key=api_key,
             app_secret=app_secret,
-            callback_url=settings.SCHWAB_CALLBACK_URL,
+            callback_url=callback_url,
             token_path=None,
             received_url=payload.received_url,
         )

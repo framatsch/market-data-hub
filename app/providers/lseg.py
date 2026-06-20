@@ -21,6 +21,8 @@ from collections import deque
 import time
 import asyncio
 import logging
+import io
+from contextlib import redirect_stderr, redirect_stdout
 import pandas as pd
 
 from app.config import settings
@@ -122,7 +124,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # ========================================================================
 
     async def test_connection(self) -> dict:
-        """Validate LSEG credentials by opening a session and issuing a lightweight request."""
+        """Validate LSEG credentials by opening a Refinitiv session."""
         return await asyncio.to_thread(self._test_connection_sync)
 
     def _test_connection_sync(self) -> dict:
@@ -160,6 +162,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         if self._session is None or self._session_created_at is None:
             logger.debug("Session is None or not created yet, creating new session...")
             needs_refresh = True
+        elif not self._is_session_open(self._session):
+            logger.info("Refinitiv session is not open, refreshing...")
+            needs_refresh = True
+        elif not self._is_default_session_open():
+            logger.info("Refinitiv default session is not open, refreshing...")
+            needs_refresh = True
         elif now - self._session_created_at > self._session_ttl:
             needs_refresh = True
             logger.info(f"Session TTL exceeded ({self._session_ttl}), refreshing...")
@@ -171,7 +179,47 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         if needs_refresh:
             self._create_session()
 
+        if self._session is None or not self._is_session_open(self._session) or not self._is_default_session_open():
+            raise ProviderConnectionError("LSEG session is not open after initialization")
+
         return self._session
+
+    def _is_default_session_open(self) -> bool:
+        """Return whether Refinitiv's global default session is our open session."""
+        try:
+            default_session = rd.session.get_default()
+        except Exception:
+            if self._session is not None and self._is_session_open(self._session):
+                rd.session.set_default(self._session)
+                return True
+            return False
+
+        if default_session is not self._session:
+            if self._session is not None and self._is_session_open(self._session):
+                rd.session.set_default(self._session)
+                return True
+            return self._is_session_open(default_session)
+
+        return self._is_session_open(default_session)
+
+    def _is_session_open(self, session) -> bool:
+        """Return whether a Refinitiv session object is currently open."""
+        for attr_name in ("is_open", "opened", "is_opened"):
+            attr = getattr(session, attr_name, None)
+            if callable(attr):
+                return bool(attr())
+            if attr is not None:
+                return bool(attr)
+
+        state = getattr(session, "state", None)
+        if state is not None:
+            state_value = getattr(state, "name", state)
+            normalized_state = str(state_value).lower()
+            if any(token in normalized_state for token in ("closed", "close", "pending")):
+                return False
+            return any(token in normalized_state for token in ("opened", "open"))
+
+        return True
 
     def _create_session(self):
         """Create new Refinitiv session."""
@@ -199,7 +247,16 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             ).get_session()
 
             logger.info("Session definition created, opening session...")
-            session.open()
+            open_output = self._open_session(session)
+            if open_output:
+                logger.warning("Refinitiv session open output: %s", open_output)
+                self._raise_if_auth_error(open_output)
+
+            if not self._is_session_open(session):
+                raise ProviderConnectionError(
+                    "LSEG session did not open successfully.",
+                    details={"error": open_output or "Session open returned without an open session"},
+                )
 
             logger.info("Session opened, setting as default...")
             rd.session.set_default(session)
@@ -208,11 +265,41 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             self._session_created_at = datetime.now(timezone.utc)
             logger.info("✅ Refinitiv session created successfully")
 
+            # refinitiv.data creates its own plain-text StreamHandler on rd.* loggers
+            # (lazy, after session open). Patch them to use our JSON formatter.
+            from app.logging_config import patch_refinitiv_loggers
+            patch_refinitiv_loggers()
+
+        except ProviderConnectionError:
+            raise
         except Exception as e:
             logger.error(f"❌ Failed to create Refinitiv session: {type(e).__name__}: {e}")
+            self._raise_if_auth_error(str(e))
             raise ProviderConnectionError(
                 "Could not authenticate with Refinitiv. Check LSEG credentials.",
-                details={"hint": f"Auth error: {type(e).__name__}"},
+                details={"hint": f"Auth error: {type(e).__name__}", "error": str(e)},
+            )
+
+    def _open_session(self, session) -> str:
+        """Open a Refinitiv session and return any output printed by the SDK."""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                session.open()
+        except Exception as exc:
+            output = "\n".join(part.strip() for part in (stdout.getvalue(), stderr.getvalue(), str(exc)) if part.strip())
+            self._raise_if_auth_error(output)
+            raise
+        return "\n".join(part.strip() for part in (stdout.getvalue(), stderr.getvalue()) if part.strip())
+
+    def _raise_if_auth_error(self, error_text: str) -> None:
+        """Surface LSEG auth failures with their real message."""
+        lowered = error_text.lower()
+        if "access_denied" in lowered or "invalid username or password" in lowered:
+            raise ProviderConnectionError(
+                "LSEG authentication failed: Invalid username or password.",
+                details={"error": error_text},
             )
 
     # ========================================================================
@@ -230,13 +317,6 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             if datetime.now(timezone.utc) - cached_at < self._ric_cache_ttl:
                 logger.debug(f"RIC cache hit for {ticker}: {ric}")
                 return ric
-
-        # Ensure session exists
-        self._get_session()
-
-        # Cache miss - search API with fallback strategies
-        logger.debug(f"RIC cache miss for {ticker}, searching...")
-        self._throttle()
 
         # Try multiple search views/filters
         search_strategies = [
@@ -256,48 +336,77 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             },
         ]
 
-        for strategy in search_strategies:
-            try:
-                logger.debug(f"Trying RIC search strategy: {strategy['name']}")
+        for search_attempt in range(2):
+            # Ensure session exists immediately before Refinitiv content calls.
+            self._get_session()
 
-                definition_params = {
-                    "query": ticker,
-                    "view": strategy["view"],
-                    "select": strategy["select"],
-                    "top": 10  # Get more results to filter for non-futures/options
-                }
+            # Cache miss - search API with fallback strategies
+            logger.debug(f"RIC cache miss for {ticker}, searching...")
+            self._throttle()
 
-                if strategy["filter"]:
-                    definition_params["filter"] = strategy["filter"]
+            for strategy in search_strategies:
+                try:
+                    logger.debug(f"Trying RIC search strategy: {strategy['name']}")
 
-                response = search.Definition(**definition_params).get_data()
+                    definition_params = {
+                        "query": ticker,
+                        "view": strategy["view"],
+                        "select": strategy["select"],
+                        "top": 10  # Get more results to filter for non-futures/options
+                    }
 
-                if response.data.df is not None and not response.data.df.empty:
-                    # Filter to prefer non-futures RICs (avoid 'c1', 'c2', etc. suffixes)
-                    rics = response.data.df['RIC'].tolist()
+                    if strategy["filter"]:
+                        definition_params["filter"] = strategy["filter"]
 
-                    # Prefer RICs without continuation/futures markers
-                    for ric in rics:
-                        # Skip continuation contracts, options, and other derivatives
-                        if not any(x in ric.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
-                            self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                            logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
-                            return ric
+                    response = search.Definition(**definition_params).get_data()
 
-                    # If no clean RIC found, use first one anyway (fallback)
-                    ric = rics[0]
-                    self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                    logger.warning(f"Ticker {ticker} mapped to RIC {ric} (no clean RIC, using first result)")
-                    return ric
+                    if response.data.df is not None and not response.data.df.empty:
+                        # Filter to prefer non-futures RICs (avoid 'c1', 'c2', etc. suffixes)
+                        rics = response.data.df['RIC'].tolist()
 
-            except Exception as e:
-                logger.debug(f"Strategy {strategy['name']} failed: {e}")
-                continue
+                        # Prefer RICs without continuation/futures markers
+                        for ric in rics:
+                            # Skip continuation contracts, options, and other derivatives
+                            if not any(x in ric.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
+                                self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
+                                logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
+                                return ric
+
+                        # If no clean RIC found, use first one anyway (fallback)
+                        ric = rics[0]
+                        self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
+                        logger.warning(f"Ticker {ticker} mapped to RIC {ric} (no clean RIC, using first result)")
+                        return ric
+
+                except Exception as e:
+                    logger.debug(f"Strategy {strategy['name']} failed: {e}")
+                    if self._is_session_closed_error(e):
+                        self._session = None
+                        self._session_created_at = None
+                        if search_attempt == 0:
+                            logger.info(
+                                f"RIC search hit closed LSEG session for {ticker}; refreshing session and retrying once"
+                            )
+                            break
+                        raise ProviderConnectionError(
+                            "LSEG session is not open. Retry the request after the session is refreshed.",
+                            details={"error": str(e), "ticker": ticker},
+                        )
+                    continue
+
+            if search_attempt == 0:
+                logger.info(f"RIC search returned no results for {ticker}; refreshing LSEG session and retrying once")
+                self._session = None
+                self._session_created_at = None
 
         # All strategies failed
         logger.error(f"RIC search failed for {ticker} after {len(search_strategies)} strategies")
         raise DataNotFoundError("Ticker", ticker,
             details={"reason": "No RIC found for ticker", "ticker": ticker})
+
+    def _is_session_closed_error(self, error: Exception) -> bool:
+        """Detect Refinitiv errors caused by requests on a closed session."""
+        return "session is not opened" in str(error).lower()
 
     # ========================================================================
     # Rate Limiting & Throttling

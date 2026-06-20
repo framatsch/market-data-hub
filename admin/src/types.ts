@@ -25,6 +25,16 @@ export interface SchwabAuthStatus {
   error?: string;
 }
 
+export interface SchwabConnectionConfig {
+  callback_url: string;
+  manual_token_mode: boolean;
+  force_refresh_token: boolean;
+}
+
+export interface SchwabConfigResponse {
+  connection_config: SchwabConnectionConfig;
+}
+
 export interface ProviderConfig {
   enabled: boolean;
   timeout_seconds: number;

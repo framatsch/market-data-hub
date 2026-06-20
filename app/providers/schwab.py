@@ -136,6 +136,32 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         except RuntimeError:
             return None
 
+    async def _resolve_callback_url(self) -> str:
+        """Liest callback_url aus provider_config DB; fällt auf settings.SCHWAB_CALLBACK_URL zurück."""
+        try:
+            from app.admin.runtime import get_provider_config_repository
+            repo = get_provider_config_repository()
+            config = await asyncio.to_thread(repo._get_sync, "schwab")
+            url = (config.connection_config or {}).get("callback_url")
+            if url and isinstance(url, str) and url.strip():
+                return url.strip()
+        except Exception:
+            pass
+        return settings.SCHWAB_CALLBACK_URL
+
+    async def _resolve_force_refresh_token(self) -> bool:
+        """Liest force_refresh_token aus provider_config DB; Standard ist True."""
+        try:
+            from app.admin.runtime import get_provider_config_repository
+            repo = get_provider_config_repository()
+            config = await asyncio.to_thread(repo._get_sync, "schwab")
+            val = (config.connection_config or {}).get("force_refresh_token")
+            if val is not None:
+                return bool(val)
+        except Exception:
+            pass
+        return True
+
     async def _get_credentials(self) -> tuple[str, str]:
         key_value = await self._load_repository_credential("api_key")
         secret_value = await self._load_repository_credential("app_secret")
@@ -205,17 +231,28 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             key_value, secret_value = await self._get_credentials()
             token_path = await self._resolve_token_path()
 
+            # Callback-URL aus provider_config DB lesen (fällt auf settings zurück)
+            callback_url = await self._resolve_callback_url()
+
+            # force_refresh_token aus provider_config DB lesen
+            force_refresh = await self._resolve_force_refresh_token()
+
             def _create_client() -> Any:
                 # easy_client() is a synchronous factory: reads the token file and
                 # returns an async httpx client when asyncio=True. It does NOT perform
                 # network I/O during construction, so asyncio.to_thread is safe here.
-                return client_factory(
+                client = client_factory(
                     api_key=key_value,
                     app_secret=secret_value,
-                    callback_url=settings.SCHWAB_CALLBACK_URL,
+                    callback_url=callback_url,
                     token_path=token_path,
                     asyncio=settings.SCHWAB_ASYNCIO,
                 )
+                if force_refresh:
+                    update_fn = getattr(client, "update_tokens", None)
+                    if update_fn is not None:
+                        update_fn(force_refresh_token=True)
+                return client
 
             try:
                 self._client = await asyncio.to_thread(_create_client)
