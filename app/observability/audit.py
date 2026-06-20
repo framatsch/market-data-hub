@@ -9,6 +9,13 @@ def setup_structlog() -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
+            structlog.processors.CallsiteParameterAdder(
+                {
+                    structlog.processors.CallsiteParameter.MODULE,
+                    structlog.processors.CallsiteParameter.FUNC_NAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                }
+            ),
             structlog.processors.TimeStamper(fmt="iso", utc=True, key="timestamp"),
             structlog.processors.JSONRenderer(),
         ],

@@ -1,11 +1,9 @@
 import time
-from collections.abc import Awaitable, Callable
+from http import HTTPStatus
 
 import structlog
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.observability.audit import audit_log
 from app.observability.metrics import record_request, status_class
@@ -14,22 +12,31 @@ from app.observability.metrics import record_request, status_class
 SKIP_AUDIT_PATH_PREFIXES = ("/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/admin")
 
 
-class ObservabilityMiddleware(BaseHTTPMiddleware):
+class ObservabilityMiddleware:
     def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
+        self.app = app
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start = time.perf_counter()
-        response: Response | None = None
+        status_code = HTTPStatus.INTERNAL_SERVER_ERROR.value
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
 
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send_wrapper)
         except Exception:
             raise
         finally:
+            request = Request(scope)
             duration_seconds = time.perf_counter() - start
-            status_code = response.status_code if response is not None else 500
             response_status_class = status_class(status_code)
             endpoint = self._classify_endpoint(request.url.path)
             provider = self._provider_context(request)

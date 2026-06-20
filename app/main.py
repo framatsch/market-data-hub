@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.utils.errors import AppError, ErrorResponse, ErrorDetail
 from app.api import routes_admin, routes_meta, routes_prices, routes_companies, routes_options, routes_ws
-from app.logging_config import setup_logging
+from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
 from app.observability.middleware import ObservabilityMiddleware
 
@@ -232,5 +232,6 @@ if __name__ == "__main__":
         host=settings.APP_HOST,
         port=settings.APP_PORT,
         reload=False if is_docker else (settings.APP_ENV == "dev"),
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
+        log_config=get_uvicorn_log_config(settings.LOG_LEVEL),
     )

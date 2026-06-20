@@ -208,6 +208,12 @@ def _validate_credential(provider_name: str, credential_name: str) -> None:
         raise HTTPException(status_code=400, detail=f"Unknown credential: {credential_name} for provider {provider_name}")
 
 
+def _mask_credential_value(value: str) -> str:
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}{'*' * 4}{value[-4:]}"
+
+
 @router.get("/keys")
 async def list_admin_keys(_principal: PrincipalDep) -> list[dict[str, Any]]:
     metadata = await get_key_repository().list_credentials()
@@ -223,24 +229,40 @@ async def save_admin_key(payload: KeySaveRequest, _principal: PrincipalDep) -> d
 
 @router.get("/credentials")
 async def list_admin_credentials(_principal: PrincipalDep) -> list[dict[str, Any]]:
+    key_repository = get_key_repository()
     configured = {
         (item.provider_name, item.credential_name): item
-        for item in await get_key_repository().list_credentials()
+        for item in await key_repository.list_credentials()
     }
     response: list[dict[str, Any]] = []
     for provider_name, credentials in CREDENTIAL_ALLOWLIST.items():
         for credential_name in sorted(credentials):
             metadata = configured.get((provider_name, credential_name))
+            value = await key_repository.get(provider_name, credential_name) if metadata is not None else None
             response.append(
                 {
                     "provider": provider_name,
                     "credential_name": credential_name,
                     "set": metadata is not None,
-                    "masked_value": "configured" if metadata is not None else None,
+                    "masked_value": _mask_credential_value(value) if value is not None else None,
                     "updated_at": metadata.updated_at if metadata is not None else None,
                 }
             )
     return response
+
+
+@router.get("/credentials/{provider_name}/{credential_name}")
+async def reveal_admin_credential(
+    provider_name: str,
+    credential_name: str,
+    _principal: PrincipalDep,
+) -> dict[str, str]:
+    _validate_credential(provider_name, credential_name)
+    value = await get_key_repository().get(provider_name, credential_name)
+    if value is None:
+        raise HTTPException(status_code=404, detail="Credential is not configured")
+    logger.warning("Admin credential revealed for provider=%s credential=%s", provider_name, credential_name)
+    return {"value": value}
 
 
 @router.put("/credentials/{provider_name}")
