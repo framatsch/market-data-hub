@@ -58,7 +58,8 @@ See below for setup, configuration, and deployment.
 ## Quick Start
 
 ### Prerequisites
-- Python 3.12+
+- Python 3.11+
+- `uv` for dependency management
 - Docker & Docker Compose (optional, for containerized deployment)
 - IBKR Gateway/TWS running (for price data)
 - Provider credentials stored in `keys.db` via the Admin UI/API (for LSEG, Finnhub, Polygon, Prixe, Schwab)
@@ -67,7 +68,8 @@ See below for setup, configuration, and deployment.
 
 ```bash
 # 1. Install dependencies
-pip install -r requirements.txt
+uv sync --frozen --all-extras
+uv pip install ruff
 
 # 2. Create runtime .env file
 cp .env.example .env
@@ -77,7 +79,7 @@ cp .env.example .env
 python -m app.main
 
 # 4. Access Swagger docs
-# Open http://localhost:9000/docs
+# Open http://localhost:8000/docs
 ```
 
 ### Option 2: Docker Compose (Recommended for Local Dev)
@@ -100,7 +102,8 @@ docker-compose logs -f
 docker-compose down
 ```
 
-By default, MDH now listens on port `9000` to avoid collisions with other local services.
+When run directly with `python -m app.main`, MDH listens on `APP_PORT` and defaults to `8000`.
+The included `.env.example` and Docker Compose setup use `9000` for local containers to avoid collisions with other services.
 
 You can override the port in `.env`:
 
@@ -119,8 +122,8 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 | Data Type | Primary Provider | Fallback | Reason |
 |-----------|-----------------|----------|--------|
 | **Stock Prices** | IBKR | LSEG | IBKR provides real-time market data |
-| **Historical OHLCV** |  | IBKR, LSEG |  history back to 1985; no extra subscription needed |
-| **Options** | **IBKR ONLY** | - | LSEG and  lack real-time options Greeks |
+| **Historical OHLCV** | IBKR | LSEG, Polygon | Provider coverage depends on symbol and entitlement |
+| **Options** | **IBKR ONLY** | - | Other providers lack real-time options Greeks |
 | **Company Data** | LSEG | Finnhub | LSEG has comprehensive fundamentals |
 | **News** | LSEG | Finnhub | LSEG provides institutional-grade news |
 
@@ -140,23 +143,69 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 
 Runtime configuration via environment variables (see `.env.example`). Provider credentials are stored encrypted in `keys.db` via the Admin UI/API.
 
+**Required for persisted credentials**
+
 | Variable | Default | Description |
 |---|---|---|
-| `IBKR_HOST` | `localhost` | Interactive Brokers Gateway/TWS host |
-| `IBKR_PORT` | `4002` | Gateway: 4002, TWS Paper: 7497, TWS Live: 7496 |
-| `IBKR_CLIENT_ID` | `815` | Unique client ID for connection |
-| `IBKR_MARKET_DATA_TYPE` | `3` | 1=Live, 2=Frozen, 3=Delayed (default; free) |
-| `FINNHUB_RATE_LIMIT_PER_MIN` | `60` | API rate limit (60 for free tier) |
-| `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
-| `APP_ENV` | `dev` | Environment: dev, test, prod |
-| `LOG_LEVEL` | `INFO` | Logging level: DEBUG, INFO, WARNING, ERROR |
-| `PRIXE_BASE_URL` | `https://api.prixe.io` | Prixe API base URL |
-| `SCHWAB_CALLBACK_URL` | `https://127.0.0.1:8182` | Must match app config exactly (including trailing slash) |
-| `SCHWAB_TIMEOUT_SECONDS` | `30` | HTTP request timeout |
-| `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max API calls per second |
-| `SCHWAB_ASYNCIO` | `true` | Create Schwab async client (`schwab-py` asyncio mode) |
-| `APP_ENCRYPTION_KEY` | *(empty)* | Encryption key for credentials stored in `keys.db` |
+| `APP_ENCRYPTION_KEY` | *(empty)* | Encryption key for credentials stored in `keys.db`; required before saving credentials |
 | `KEYS_DB_PATH` | `./keys.db` | SQLite database path for encrypted provider credentials |
+
+Generate `APP_ENCRYPTION_KEY` with:
+
+```bash
+python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
+
+**Common runtime settings**
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_HOST` | `0.0.0.0` | Bind host |
+| `APP_PORT` | `8000` | HTTP API, Admin UI, and MCP port |
+| `APP_ENV` | `dev` | Environment: `dev`, `test`, or `prod` |
+| `LOG_LEVEL` | `INFO` | Logging level |
+| `ENABLED_PROVIDERS` | *(empty)* | Optional comma-separated allow-list, e.g. `lseg,ibkr`; empty loads all configured providers |
+| `MCP_ENABLED` | `false` | Enables MCP endpoints on the same HTTP port |
+| `ADMIN_AUTH_ENABLED` | `true` | Set `false` only for local development |
+| `ADMIN_OIDC_ISSUER` | *(empty)* | Required in production when admin auth is enabled |
+| `ADMIN_OIDC_CLIENT_ID` | *(empty)* | Required in production when admin auth is enabled |
+| `ADMIN_OIDC_CLIENT_SECRET` | *(empty)* | OIDC client secret for admin auth |
+| `ADMIN_OIDC_REDIRECT_URI` | *(empty)* | Optional explicit OIDC callback URL |
+
+**Provider runtime settings**
+
+These are operational defaults, not credentials:
+
+| Variable | Default | Description |
+|---|---|---|
+| `IBKR_HOST` | `127.0.0.1` | Interactive Brokers Gateway/TWS host |
+| `IBKR_PORT` | `4001` | Gateway: 4001, TWS Paper: 7497, TWS Live: 7496 |
+| `IBKR_CLIENT_ID` | `815` | Unique client ID for connection |
+| `IBKR_ACCOUNT_ID` | `DU123456` | Optional account identifier for IBKR operations |
+| `IBKR_ENV` | `paper` | `paper` or `live` |
+| `IBKR_MARKET_DATA_TYPE` | `3` | 1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen |
+| `IBKR_CONNECT_ON_REQUEST` | `false` | Lazily connect to IBKR on demand |
+| `IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR` | `true` | Handle missing subscriptions gracefully |
+| `LSEG_BASE_URL` | `https://api.lseg.com/v1` | LSEG API base URL |
+| `LSEG_RATE_LIMIT_PER_SEC` | `10` | Max LSEG requests per second |
+| `LSEG_CACHE_TTL_SECONDS` | `5` | LSEG quote cache TTL; `0` disables cache |
+| `LSEG_STRICT_VALIDATION` | `false` | Raise on missing LSEG fields instead of returning partial data |
+| `FINNHUB_BASE_URL` | `https://finnhub.io/api/v1` | Finnhub API base URL |
+| `FINNHUB_RATE_LIMIT_PER_MIN` | `60` | API rate limit |
+| `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `true` | Fallback to mock provider when rate limited |
+| `POLYGON_BASE_URL` | `https://api.polygon.io` | Polygon API base URL |
+| `PRIXE_BASE_URL` | `https://api.prixe.io` | Prixe API base URL |
+| `SCHWAB_CALLBACK_URL` | `http://localhost:8000/api/admin/schwab/callback` | OAuth callback URL; must match the Schwab developer app |
+| `SCHWAB_TIMEOUT_SECONDS` | `30` | Schwab request timeout |
+| `SCHWAB_RATE_LIMIT_PER_SEC` | `5` | Max Schwab API calls per second |
+| `SCHWAB_ASYNCIO` | `true` | Create Schwab async client (`schwab-py` asyncio mode) |
+| `SCHWAB_ALERT_WEBHOOK_FORMAT` | `slack` | Alert webhook payload format: `slack`, `generic`, or `discord` |
+| `PROVIDER_REQUEST_TIMEOUT` | `10.0` | Default provider request timeout |
+| `PROVIDER_MAX_RETRIES` | `3` | Default provider retry count |
+
+**No longer configured via environment variables**
+
+Do not put provider secrets such as `LSEG_APP_KEY`, `LSEG_USERNAME`, `LSEG_PASSWORD`, `FINNHUB_API_KEY`, `POLYGON_API_KEY`, `PRIXE_API_KEY`, `SCHWAB_API_KEY`, `SCHWAB_APP_SECRET`, or `SCHWAB_TOKEN_JSON` in `.env`. Store them in `keys.db` via the Admin UI/API instead.
 
 Provider credential keys:
 
@@ -334,10 +383,10 @@ No `docker compose up --build` required for UI-only changes.
 ## Running Modes
 
 ```bash
-# HTTP REST API + optional MCP (single process, port 8000)
+# HTTP REST API + optional MCP (single process, default port 8000)
 python -m app.main
 
-# With MCP enabled (exposes /mcp/sse and /mcp/messages on port 8000)
+# With MCP enabled (exposes MCP on the same HTTP port)
 MCP_ENABLED=true python -m app.main
 
 # Docker Compose
@@ -356,10 +405,12 @@ When `MCP_ENABLED=true`, the MCP (Model Context Protocol) endpoints are availabl
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET  /mcp` | SSE stream alias for clients configured with the base MCP URL |
+| `POST /mcp` | Streamable HTTP JSON-RPC calls for remote MCP clients such as Claude |
 | `GET  /mcp/sse` | SSE stream — establishes a session and receives tool results |
 | `POST /mcp/messages?session_id=<id>` | JSON-RPC 2.0 tool calls |
 
-Connect an MCP client to `http://localhost:8000/mcp/sse`.
+For Claude remote MCP, configure `http://localhost:8000/mcp` or the deployed equivalent. Legacy SSE clients can use `http://localhost:8000/mcp/sse`.
 
 Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`.
 
@@ -500,12 +551,13 @@ See [doc/deployment.md](doc/deployment.md) for detailed deployment documentation
 
 ### Running Tests
 ```bash
-pytest --maxfail=1 --disable-warnings
+uv run pytest --maxfail=1 --disable-warnings
 ```
 
 ### Code Linting
 ```bash
-ruff check .
+uv run ruff check app/
+python skills/lint_check.py --all
 ```
 
 ### API Documentation
