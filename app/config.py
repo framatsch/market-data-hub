@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
+    # Auto-reload (WatchFiles) is for local development ONLY. Never enable in prod:
+    # it rebuilds/re-watches the source tree on every change and is not built for stability.
+    # Only takes effect when APP_ENV == "dev" AND RELOAD is true.
+    RELOAD: bool = False
     
     # Enabled Providers (comma-separated list, empty = all)
     ENABLED_PROVIDERS: str = ""

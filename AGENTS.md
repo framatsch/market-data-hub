@@ -32,13 +32,16 @@ uv sync --frozen --no-dev
 ## Running the Service
 
 ```bash
-python -m app.main                                          # HTTP :8000 (MCP disabled by default)
-MCP_ENABLED=true python -m app.main                        # HTTP :8000 + MCP at /mcp/sse, /mcp/messages
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
+python -m app.main                                          # HTTP on APP_PORT (default 8000, MCP disabled by default)
+MCP_ENABLED=true python -m app.main                        # + MCP at /mcp/sse, /mcp/messages
+APP_ENV=dev RELOAD=true python -m app.main                 # local dev with auto-reload (WatchFiles)
 ```
 
-- MCP endpoints are on **the same port 8000** (or configured port) under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
+- MCP endpoints are on **the same port** (`APP_PORT`, default 8000) under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
 - The MCP server is integrated directly into FastAPI (not a separate process).
+- **Host/port** come from `APP_HOST` / `APP_PORT` — `python -m app.main` reads them; don't pass `--host`/`--port`.
+- **Auto-reload is OFF by default.** It only fires when **both** `APP_ENV=dev` **and** `RELOAD=true`. Never enable reload in production — WatchFiles rebuilds/re-watches the source tree on every change and is not built for stability. A prod container logging `reload` / `WatchFiles` / "Will watch for changes" is misconfigured (the old `/.dockerenv` heuristic was removed; `APP_ENV=dev` alone no longer triggers reload).
+- **Do NOT start prod with `uvicorn ... --reload`.** Production runs via the image default `python -m app.main` (Dockerfile `CMD`).
 
 ---
 
@@ -49,6 +52,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  # HTTP only (dev)
 - Settings via `app/config.py` (`SettingsConfigDict(env_file=".env")`). Never commit credentials.
 - `MCP_ENABLED=true` enables Model Context Protocol.
 - `ENABLED_PROVIDERS=lseg,ibkr` limits loaded providers (default: all).
+- **`APP_ENV`** = `dev` | `test` | `prod`. Only `dev` allows auto-reload (with `RELOAD=true`). `prod` forces admin auth on. `RELOAD` (default `false`) gates WatchFiles.
+- **Admin login** (`/admin/` UI, OpenID): controlled by `ADMIN_AUTH_ENABLED` (default `true`). To disable login in a non-prod deployment, set `APP_ENV=test` + `ADMIN_AUTH_ENABLED=false` — use `test`, **not** `dev`, so you don't accidentally enable dev-only behavior. `APP_ENV=prod` rejects `ADMIN_AUTH_ENABLED=false` and requires `ADMIN_OIDC_ISSUER` + `ADMIN_OIDC_CLIENT_ID` (see `_validate_production_admin_auth` in `app/config.py`).
 
 ---
 

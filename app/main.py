@@ -227,14 +227,25 @@ async def general_error_handler(request: Request, exc: Exception):
 
 
 if __name__ == "__main__":
-    """Run the HTTP API (single Uvicorn process on configured host/port)."""
-    is_docker = os.path.exists('/.dockerenv')
+    """Run the HTTP API (single Uvicorn process on configured host/port).
+
+    Auto-reload (WatchFiles) is a development-only feature and is OFF unless
+    APP_ENV=dev AND RELOAD=true. It must never run in production: it rebuilds /
+    re-watches the source tree on every change and is not designed for stability.
+    The old /.dockerenv heuristic was dropped — it is unreliable in
+    Kubernetes/containerd where that file is often absent.
+    """
+    reload_enabled = settings.APP_ENV == "dev" and settings.RELOAD
+    if reload_enabled:
+        logger.warning(
+            "Auto-reload ENABLED (APP_ENV=dev, RELOAD=true) — development only, never use in production."
+        )
 
     uvicorn.run(
         "app.main:app",
         host=settings.APP_HOST,
         port=settings.APP_PORT,
-        reload=False if is_docker else (settings.APP_ENV == "dev"),
+        reload=reload_enabled,
         log_level=settings.LOG_LEVEL.lower(),
         log_config=get_uvicorn_log_config(settings.LOG_LEVEL),
     )
