@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, AsyncGenerator, Dict
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.services.price_service import PriceService
 from app.services.options_service import OptionsService
@@ -44,6 +44,7 @@ from app.utils.errors import AppError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+metadata_router = APIRouter(tags=["mcp"])
 
 # ---------------------------------------------------------------------------
 # Session registry: session_id -> asyncio.Queue of SSE event strings
@@ -55,6 +56,7 @@ _ACTIVE_STREAMS: Dict[str, asyncio.Queue[str]] = {}
 # SSE transport
 # ---------------------------------------------------------------------------
 
+@router.get("")
 @router.get("/sse")
 async def mcp_sse(request: Request) -> StreamingResponse:
     """
@@ -90,6 +92,44 @@ async def mcp_sse(request: Request) -> StreamingResponse:
     )
 
 
+@metadata_router.get("/.well-known/oauth-protected-resource")
+@metadata_router.get("/.well-known/oauth-protected-resource/mcp")
+@router.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata(request: Request) -> JSONResponse:
+    """Advertise that the public MCP endpoint does not require OAuth."""
+    return JSONResponse(
+        {
+            "resource": str(request.url_for("mcp_streamable_http")),
+            "authorization_servers": [],
+            "scopes_supported": [],
+            "bearer_methods_supported": ["header"],
+        }
+    )
+
+
+@metadata_router.get("/.well-known/oauth-authorization-server")
+@metadata_router.get("/.well-known/oauth-authorization-server/mcp")
+@metadata_router.get("/.well-known/openid-configuration")
+@metadata_router.get("/.well-known/openid-configuration/mcp")
+@router.get("/.well-known/oauth-authorization-server")
+@router.get("/.well-known/openid-configuration")
+async def oauth_not_required_metadata() -> JSONResponse:
+    """Return a controlled response for OAuth discovery probes from MCP clients."""
+    return JSONResponse(
+        {"error": "oauth_not_required", "error_description": "This MCP endpoint is public."},
+        status_code=404,
+    )
+
+
+@metadata_router.post("/register")
+async def oauth_dynamic_registration_not_required() -> JSONResponse:
+    """Claude probes this during remote MCP setup; no registration is needed here."""
+    return JSONResponse(
+        {"error": "oauth_not_required", "error_description": "This MCP endpoint is public."},
+        status_code=400,
+    )
+
+
 # ---------------------------------------------------------------------------
 # JSON-RPC message endpoint
 # ---------------------------------------------------------------------------
@@ -108,26 +148,9 @@ async def mcp_messages(
     rpc_id = payload.get("id")
     params = payload.get("params", {})
 
-    try:
-        result = await _dispatch(method, params)
-        if rpc_id is None:
-            # Notification, no response needed
-            return Response(status_code=202)
-        response_payload: dict = {"jsonrpc": "2.0", "id": rpc_id, "result": result}
-    except AppError as exc:
-        logger.warning("MCP AppError in method=%s: %s", method, exc.message)
-        response_payload = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"message": exc.message, "code": exc.code},
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.error("MCP unexpected error in method=%s: %s", method, exc, exc_info=True)
-        response_payload = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"message": str(exc)},
-        }
+    response_payload = await _handle_json_rpc(method, params, rpc_id)
+    if response_payload is None:
+        return Response(status_code=202)
 
     queue = _ACTIVE_STREAMS.get(session_id)
     if queue:
@@ -137,6 +160,49 @@ async def mcp_messages(
         logger.warning("MCP session not found: %s — response dropped", session_id)
 
     return Response(status_code=202)
+
+
+@router.post("", name="mcp_streamable_http")
+async def mcp_streamable_http(request: Request) -> Response:
+    """
+    Accept Streamable HTTP JSON-RPC calls at /mcp.
+
+    Claude's remote MCP connector posts directly to the configured URL. Keep the
+    legacy SSE endpoint above, but answer these calls inline instead of requiring
+    the /mcp/messages session transport.
+    """
+    payload = await request.json()
+    method = payload.get("method")
+    rpc_id = payload.get("id")
+    params = payload.get("params", {})
+
+    response_payload = await _handle_json_rpc(method, params, rpc_id)
+    if response_payload is None:
+        return Response(status_code=202)
+    return JSONResponse(response_payload)
+
+
+async def _handle_json_rpc(method: str, params: dict, rpc_id: Any) -> dict | None:
+    """Dispatch a JSON-RPC request and serialise the response payload."""
+    try:
+        result = await _dispatch(method, params)
+        if rpc_id is None:
+            return None
+        return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
+    except AppError as exc:
+        logger.warning("MCP AppError in method=%s: %s", method, exc.message)
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "error": {"message": exc.message, "code": exc.code},
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("MCP unexpected error in method=%s: %s", method, exc, exc_info=True)
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "error": {"message": str(exc)},
+        }
 
 
 # ---------------------------------------------------------------------------

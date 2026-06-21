@@ -187,7 +187,10 @@ async def serve_admin_spa(full_path: str):
 
 # MCP router (opt-in via MCP_ENABLED=true)
 if settings.MCP_ENABLED:
+    from app.api.mcp import metadata_router as mcp_metadata_router
     from app.api.mcp import router as mcp_router
+
+    app.include_router(mcp_metadata_router)
     app.include_router(mcp_router)
 
 # Exception Handlers

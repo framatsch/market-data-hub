@@ -25,7 +25,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient  # noqa: F401 — used in TestMcpSse
 from httpx import AsyncClient, ASGITransport
 
-from app.api.mcp import router, _dispatch, TOOL_REGISTRY, TOOL_HANDLERS, _ACTIVE_STREAMS
+from app.api.mcp import metadata_router, router, _dispatch, TOOL_REGISTRY, TOOL_HANDLERS, _ACTIVE_STREAMS
 from app.utils.errors import AppError
 from starlette.testclient import TestClient as StarletteTestClient
 
@@ -38,6 +38,7 @@ def _make_app(mcp_enabled: bool = True) -> FastAPI:
     """Build a minimal FastAPI app with (or without) the MCP router."""
     app = FastAPI()
     if mcp_enabled:
+        app.include_router(metadata_router)
         app.include_router(router)
     return app
 
@@ -144,6 +145,30 @@ class TestMcpSse:
         response = client.get("/mcp/sse")
         assert response.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_root_mcp_get_starts_sse_transport(self):
+        """GET /mcp is accepted for remote clients configured with the base MCP URL."""
+        from starlette.requests import Request
+        from app.api.mcp import mcp_sse, _ACTIVE_STREAMS
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/mcp",
+            "query_string": b"",
+            "headers": [],
+        }
+        sessions_before = set(_ACTIVE_STREAMS.keys())
+        response = await mcp_sse(Request(scope))
+
+        assert response.media_type == "text/event-stream"
+        first_chunk = await response.body_iterator.__anext__()
+        first_text = first_chunk if isinstance(first_chunk, str) else first_chunk.decode()
+        assert "event: endpoint" in first_text
+
+        for sid in set(_ACTIVE_STREAMS.keys()) - sessions_before:
+            _ACTIVE_STREAMS.pop(sid, None)
+
 
 # ---------------------------------------------------------------------------
 # Integration: POST /mcp/messages
@@ -230,3 +255,44 @@ class TestMcpMessages:
                 json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
             )
         assert resp.status_code == 202
+
+
+class TestMcpStreamableHttp:
+    """Regression tests for Claude remote MCP clients posting to /mcp."""
+
+    @pytest.mark.asyncio
+    async def test_post_root_mcp_returns_json_rpc_response(self):
+        app = _make_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["jsonrpc"] == "2.0"
+        assert payload["id"] == 1
+        assert "tools" in payload["result"]
+
+    @pytest.mark.asyncio
+    async def test_post_root_mcp_notification_returns_202(self):
+        app = _make_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            )
+
+        assert response.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_oauth_protected_resource_metadata_is_public(self):
+        app = _make_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="https://example.com") as client:
+            response = await client.get("/.well-known/oauth-protected-resource/mcp")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["resource"] == "https://example.com/mcp"
+        assert payload["authorization_servers"] == []
