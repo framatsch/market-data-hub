@@ -8,6 +8,8 @@
 
 You are an expert AI assistant for the Market Data Hub project. This document defines your behavior, decision-making process, and best practices for this specific codebase.
 
+For high-signal shared rules, including Engram memory usage and compaction recovery, read `AGENTS.md` first. Keep this file for deeper technical patterns and examples.
+
 **Project Context:**
 - FastAPI-based REST/WebSocket API for market data aggregation
 - Dual provider pattern: IBKR (primary) + LSEG/Refinitiv (secondary)

@@ -20,6 +20,6 @@ admin/node_modules/
 
 # Generated files (never commit)
 .coverage
+.engram/
 keys.db
 paseo.json
-

@@ -6,6 +6,14 @@ Single source of truth for all AI agents (OpenCode, GitHub Copilot, Claude). Eve
 
 ---
 
+## Memory
+
+- Engram MCP memory is available (`mem_save`, `mem_search`, `mem_context`, `mem_session_summary`).
+- Save proactively with `mem_save` after significant work: bug fixes, decisions, discoveries, config changes, conventions.
+- After any compaction or context reset, call `mem_context` before continuing.
+
+---
+
 ## Setup & Commands
 
 ```bash
@@ -33,11 +41,11 @@ uv sync --frozen --no-dev
 
 ```bash
 python -m app.main                                          # HTTP on APP_PORT (default 8000, MCP disabled by default)
-MCP_ENABLED=true python -m app.main                        # + MCP at /mcp/sse, /mcp/messages
+MCP_ENABLED=true python -m app.main                        # + MCP at /mcp, /mcp/sse, /mcp/messages
 APP_ENV=dev RELOAD=true python -m app.main                 # local dev with auto-reload (WatchFiles)
 ```
 
-- MCP endpoints are on **the same port** (`APP_PORT`, default 8000) under `/mcp/sse` and `/mcp/messages` when `MCP_ENABLED=true`.
+- MCP endpoints are on **the same port** (`APP_PORT`, default 8000): Claude remote MCP uses `/mcp`; legacy SSE uses `/mcp/sse` + `/mcp/messages`.
 - The MCP server is integrated directly into FastAPI (not a separate process).
 - **Host/port** come from `APP_HOST` / `APP_PORT` — `python -m app.main` reads them; don't pass `--host`/`--port`.
 - **Auto-reload is OFF by default.** It only fires when **both** `APP_ENV=dev` **and** `RELOAD=true`. Never enable reload in production — WatchFiles rebuilds/re-watches the source tree on every change and is not built for stability. A prod container logging `reload` / `WatchFiles` / "Will watch for changes" is misconfigured (the old `/.dockerenv` heuristic was removed; `APP_ENV=dev` alone no longer triggers reload).
@@ -65,7 +73,7 @@ HTTP :8000  FastAPI (app/api/routes_*.py)
             → ibkr.py (async ib_async) | lseg.py (sync refinitiv.data) | finnhub.py (async httpx)
             ← app/models/ (Pydantic, all financial values as Decimal)
 
-MCP  :8000  Integrated Router (app/api/mcp.py) — available via SSE
+MCP  :8000  Integrated Router (app/api/mcp.py) — `/mcp` Streamable HTTP + legacy SSE
 ```
 
 Provider details, error patterns, and code templates → `.github/copilot-instructions.md`
@@ -88,38 +96,14 @@ Provider details, error patterns, and code templates → `.github/copilot-instru
 
 ---
 
-## AI Agent Workflows (Unified Config)
+## Agent Guidance
 
-All agent configs live in `.github/agents/`. One config consumed by GitHub Copilot (auto-loaded), OpenCode, and Claude.
+- Use this file for high-signal project facts only; move long workflows into `.opencode/skills/*/SKILL.md` or `.github/copilot-instructions.md`.
+- For deep provider/API behavior and error patterns, read `.github/copilot-instructions.md` only when relevant.
+- For OpenSpec changes, use the matching `.opencode/skills/openspec-*` skill.
+- For code review requests, follow the managed OCR block below.
 
-### Workflow Agents — use for task types
-
-| Agent | When | Time |
-|-------|------|------|
-| `quickfix.agent.md` | Clear traceback + known error pattern | 2-3 min |
-| `debug.agent.md` | Intermittent, multi-component, unclear root cause | 20-30 min |
-| `plan.agent.md` | New feature → generates `specs/XX.prompt.md` + agent file for new providers | 15-30 min |
-| `implement.agent.md` | Spec ready in `specs/` → phase-by-phase impl; loads domain agent as harness | 1-3 hr |
-
-### Domain Expert Agents — use for component work
-
-| Agent file | Owns | Trigger when working on… |
-|------------|------|--------------------------|
-| `architect.agent.md` | System design, cross-component interfaces, delegation | Feature spanning 2+ components |
-| `ibkr.agent.md` | `app/providers/ibkr.py`, IBKR config keys | IBKR connection, options, NaN, subscription errors |
-| `lseg.agent.md` | `app/providers/lseg.py`, LSEG config keys | RIC lookup, session, caching, rate limiting |
-| `schwab.agent.md` | `app/providers/schwab.py`, SCHWAB_* config keys | Schwab OAuth2 token, price history, quote fetch, `schwab-py` |
-| `finnhub.agent.md` | `app/providers/finnhub.py`, `mock_news.py` | News, sentiment, Finnhub |
-| `fastapi.agent.md` | `app/api/`, `app/models/`, `app/dependencies.py` | Routes, Pydantic models, DI, CSV export |
-| `mcp.agent.md` | MCP tools in `app/api/mcp.py`, SSE on app port | Exposing data to LLM clients via MCP |
-| `infra.agent.md` | `Dockerfile`, `k8s/`, `ci.yml`, `app/config.py` | Docker, K8s, CI, env vars |
-| `provider.agent.template.md` | Template for new providers | Adding any new data provider |
-
-**Architect-first rule:** Any change touching 2+ domain agents → start with `architect.agent.md`.
-
-**New provider rule:** Agent file must be committed **before any code**. `plan.agent.md` generates it automatically. Manual: copy `provider.agent.template.md`, fill placeholders, commit.
-
-### Copilot chat shorthand
+### Copilot Chat Shorthand
 
 ```
 @workspace Quick Fix Mode    ❌ [traceback]
@@ -128,7 +112,7 @@ All agent configs live in `.github/agents/`. One config consumed by GitHub Copil
 @workspace Implement Feature Mode  Spec: specs/XX.prompt.md
 ```
 
-### OpenCode / Claude skills (gstack)
+### OpenCode / Claude Skills
 
 - `investigate` — systematic root-cause debugging (4-phase: investigate → analyze → hypothesize → implement)
 - `ship` — runs tests, bumps VERSION, creates PR
@@ -139,7 +123,7 @@ All agent configs live in `.github/agents/`. One config consumed by GitHub Copil
 
 ```bash
 docker build -t market-data-hub:latest .
-docker run --env-file .env -p 8000:8000 -p 8001:8001 market-data-hub:latest
+docker run --env-file .env -p 8000:8000 market-data-hub:latest
 curl http://localhost:8000/health
 ```
 
@@ -151,14 +135,13 @@ CI (`.github/workflows/ci.yml`): `libopenblas-dev` → `uv sync` → `ruff check
 
 | File | Purpose |
 |------|---------|
-| `app/main.py` | FastAPI + FastMCP init, exception handlers, both-server startup |
+| `app/main.py` | FastAPI app setup, exception handlers, startup/shutdown |
 | `app/config.py` | All settings and env var names |
 | `app/providers/base.py` | Abstract interfaces every provider must implement |
 | `app/providers/ibkr.py` | IBKR async provider (`_is_valid`, `_to_decimal`, `_ensure_connection`) |
 | `app/providers/lseg.py` | LSEG sync provider (`_ticker_to_ric`, session, cache) |
 | `app/utils/errors.py` | `AppError` hierarchy and HTTP status mapping |
 | `.github/copilot-instructions.md` | Error patterns, code templates, technology behaviors |
-| `.github/agents/` | All workflow and domain agent definitions |
 | `skills/lint_check.py` | Pre-commit lint helper |
 | `skills/commit_helper.py` | Commit message generator |
 | `specs/` | Feature specs generated by `plan.agent.md` |
