@@ -25,12 +25,16 @@ def ibkr_provider():
         yield provider
 
 def test_map_interval_all(ibkr_provider):
+    from app.utils.errors import ProviderError
     assert ibkr_provider._map_interval("1m") == "1 min"
     assert ibkr_provider._map_interval("5m") == "5 mins"
     assert ibkr_provider._map_interval("15m") == "15 mins"
     assert ibkr_provider._map_interval("1h") == "1 hour"
     assert ibkr_provider._map_interval("1d") == "1 day"
-    assert ibkr_provider._map_interval("unknown") == "1 day"
+    
+    with pytest.raises(ProviderError) as exc_info:
+        ibkr_provider._map_interval("unknown")
+    assert "Unsupported interval 'unknown'" in str(exc_info.value)
 
 def test_create_contract_types(ibkr_provider):
     with patch("app.providers.ibkr.Stock") as mock_stock:

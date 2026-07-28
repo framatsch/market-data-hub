@@ -203,6 +203,11 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             timespan = "hour"
         elif interval == "1d":
             timespan = "day"
+        else:
+            raise ProviderError(
+                f"Unsupported interval '{interval}' for Polygon provider.",
+                details={"supported_intervals": ["1m", "5m", "1h", "1d"]}
+            )
 
         from_str = start.strftime("%Y-%m-%d")
         to_str = end.strftime("%Y-%m-%d")

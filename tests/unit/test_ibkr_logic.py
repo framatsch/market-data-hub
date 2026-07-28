@@ -26,10 +26,13 @@ def ibkr_provider():
         yield provider
 
 def test_map_interval(ibkr_provider):
+    from app.utils.errors import ProviderError
     assert ibkr_provider._map_interval("1m") == "1 min"
     assert ibkr_provider._map_interval("1h") == "1 hour"
     assert ibkr_provider._map_interval("1d") == "1 day"
-    assert ibkr_provider._map_interval("unknown") == "1 day"
+    with pytest.raises(ProviderError) as exc:
+        ibkr_provider._map_interval("unknown")
+    assert "Unsupported interval 'unknown'" in str(exc.value)
 
 def test_calculate_duration(ibkr_provider):
     now = datetime.now()

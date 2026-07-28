@@ -901,7 +901,11 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return "1 day"
         if interval == "1w":
             return "1 week"
-        return "1 day"  # Default
+        
+        raise ProviderError(
+            f"Unsupported interval '{interval}' for IBKR provider.",
+            details={"supported_intervals": ["1m", "2m", "5m", "15m", "30m", "1h", "1d", "1w"]}
+        )
 
     def _calculate_duration(self, start: datetime, end: datetime) -> str:
         diff = end - start

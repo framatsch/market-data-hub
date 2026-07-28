@@ -210,6 +210,33 @@ return PriceQuote(
 
 ---
 
+### Pattern 5b: Unsupported Interval Mapping (Silent Fallback)
+**Symptom:** API returns 1-day candles when 4-hour candles are requested, without raising an error.
+**Root Cause:** Provider's `_map_interval` method uses a default fallback (e.g. `mapping.get(interval, "1 day")`) instead of explicitly rejecting unsupported intervals.
+**File Locations:** `app/providers/*.py` - `_map_interval()` or `get_historical_prices()`
+
+**Solution:**
+```python
+# ❌ Wrong - Silent fallback to daily data
+def _map_interval(self, interval: str) -> str:
+    return self.mapping.get(interval, "1 day")
+
+# ✅ Right - Strict validation with ProviderError
+def _map_interval(self, interval: str) -> str:
+    if interval not in self.mapping:
+        raise ProviderError(
+            f"Unsupported interval '{interval}'",
+            details={"supported_intervals": list(self.mapping.keys())}
+        )
+    return self.mapping[interval]
+```
+
+**Prevention:**
+- Never use `.get(interval, default)` for time intervals.
+- Always raise `ProviderError` for unsupported intervals so the API returns a 400 Bad Request to the client instead of silently delivering incorrect data granularity.
+
+---
+
 ### Pattern 6: NaN/None Handling in Financial Data
 **Symptom:** `ValueError` or incorrect calculations with NaN values
 **Root Cause:** IBKR returns NaN for unavailable data, not None

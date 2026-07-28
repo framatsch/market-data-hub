@@ -770,7 +770,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             "1d": historical_pricing.Intervals.DAILY,
             "1w": historical_pricing.Intervals.WEEKLY
         }
-        return mapping.get(interval, historical_pricing.Intervals.DAILY)
+        if interval not in mapping:
+            raise ProviderError(
+                f"Unsupported interval '{interval}' for LSEG provider.",
+                details={"supported_intervals": list(mapping.keys())}
+            )
+        return mapping[interval]
 
     # ========================================================================
     # Company Provider Methods (BaseCompanyProvider) - Stub for now
