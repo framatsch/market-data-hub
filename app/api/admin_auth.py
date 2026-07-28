@@ -71,14 +71,15 @@ class AdminAuth:
         if key is None:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        return jwt.decode(
+        from typing import cast
+        return cast(dict[str, Any], jwt.decode(
             token,
             key,
             algorithms=[key.get("alg", "RS256")],
             audience=settings.ADMIN_OIDC_CLIENT_ID or None,
             issuer=settings.ADMIN_OIDC_ISSUER or None,
             options={"verify_aud": bool(settings.ADMIN_OIDC_CLIENT_ID)},
-        )
+        ))
 
     async def _get_jwks(self, force_refresh: bool = False) -> dict[str, Any]:
         now = time.monotonic()
@@ -106,7 +107,8 @@ class AdminAuth:
             return None
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
-                return key
+                from typing import cast
+                return cast(dict[str, Any], key)
         return None
 
 

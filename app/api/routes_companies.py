@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import date, timedelta
 import io
 from fastapi import APIRouter, Query
@@ -33,7 +33,7 @@ async def search_companies(
     q: str,
     service: CompanyServiceDep,
     provider: Optional[str] = None
-):
+) -> Any:
     """Search for companies by query string."""
     provider = provider.lower() if provider else None
     results = await service.search_companies(q, provider)
@@ -44,7 +44,7 @@ async def get_company_profile(
     symbol: str,
     service: CompanyServiceDep,
     provider: Optional[str] = None
-):
+) -> Any:
     """Get company profile information."""
     symbol = symbol.upper()
     provider = provider.lower() if provider else None
@@ -65,7 +65,7 @@ async def get_company_news(
     language: str = Query("en", description="Language code (ISO 639-1: en, de, fr, etc.)"),
     category: Optional[str] = Query(None, description="Filter by category (earnings, merger, product, legal)"),
     format: str = Query("json", description="Response format (json, csv)")
-):
+) -> Any:
     """
     Get news articles for a company.
 

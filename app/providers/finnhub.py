@@ -25,7 +25,7 @@ import logging
 import time
 import re
 from datetime import datetime, date, timezone
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from collections import deque
 
 from app.config import settings
@@ -47,14 +47,14 @@ class FinnhubProvider(BaseNewsProvider):
     - Automatic category detection from headlines
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._api_key: str | None = None
         self._api_key_configured = False
 
         # Sliding-window rate limiter (60 calls per minute).
         # No maxlen: manual popleft manages the window to avoid eviction races.
         self._rate_limit_per_min = settings.FINNHUB_RATE_LIMIT_PER_MIN
-        self._request_times: deque = deque()
+        self._request_times: deque[float] = deque()
         self._last_rate_limit_error: Optional[datetime] = None
 
         # HTTP client
@@ -120,7 +120,7 @@ class FinnhubProvider(BaseNewsProvider):
             )
         return self._client
 
-    async def _close_client(self):
+    async def _close_client(self) -> None:
         """Close HTTP client."""
         if self._client is not None:
             await self._client.aclose()
@@ -159,7 +159,7 @@ class FinnhubProvider(BaseNewsProvider):
     # Category Detection
     # ========================================================================
 
-    def _detect_category(self, headline: str, summary: Optional[str] = None, sentiment: Optional[dict] = None) -> Optional[str]:
+    def _detect_category(self, headline: str, summary: Optional[str] = None, sentiment: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Detect article category from headline/summary.
 
         Priority:
@@ -199,7 +199,7 @@ class FinnhubProvider(BaseNewsProvider):
     # Sentiment Parsing
     # ========================================================================
 
-    def _parse_sentiment(self, sentiment_obj: Optional[dict]) -> dict:
+    def _parse_sentiment(self, sentiment_obj: Optional[Dict[str, Any]]) -> Dict[str, float]:
         """Parse sentiment object into normalized format.
 
         Finnhub returns:
@@ -222,7 +222,7 @@ class FinnhubProvider(BaseNewsProvider):
     # API Methods
     # ========================================================================
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> Dict[str, Any]:
         """Validate Finnhub API key with a lightweight quote request."""
         try:
             api_key = await self._ensure_api_key()
@@ -428,15 +428,15 @@ class FinnhubProvider(BaseNewsProvider):
     # Cleanup
     # ========================================================================
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "FinnhubProvider":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self._close_client()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup on deletion."""
         try:
             if self._client is not None:

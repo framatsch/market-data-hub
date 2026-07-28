@@ -18,7 +18,7 @@ import logging
 import sys
 from app.config import settings
 
-def setup_logging():
+def setup_logging() -> logging.Logger:
     """Configures the logging for the application."""
     logger = logging.getLogger("market_data_hub")
     

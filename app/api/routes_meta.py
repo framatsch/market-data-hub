@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
@@ -29,7 +29,7 @@ start_time = datetime.now()
 PROMETHEUS_TEXT_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check() -> Any:
     """Returns service health status."""
     uptime = (datetime.now() - start_time).total_seconds()
     return HealthResponse(status="OK", uptime_seconds=uptime)
@@ -50,7 +50,7 @@ async def health_check():
         }
     },
 )
-async def get_metrics():
+async def get_metrics() -> Any:
     """Expose Prometheus metrics for scraping."""
     return Response(content=metrics_response(), headers={"Content-Type": PROMETHEUS_TEXT_CONTENT_TYPE})
 
@@ -58,13 +58,13 @@ async def get_metrics():
 async def get_market_status(
     service: PriceServiceDep,
     provider: Optional[str] = Query(None, description="Data provider (e.g., polygon, ibkr)")
-):
+) -> Any:
     """Returns current market status."""
     status = await service.get_market_status(provider_name=provider)
     return ResponseEnvelope(data=status)
 
-@router.get("/providers", response_model=ResponseEnvelope[dict])
-async def list_providers():
+@router.get("/providers", response_model=ResponseEnvelope[dict[str, Any]])
+async def list_providers() -> Any:
     """Lists available providers and defaults.
 
     Available Providers:

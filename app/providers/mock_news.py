@@ -17,7 +17,7 @@
 """Mock news provider for testing and development."""
 
 from datetime import datetime, timezone, date, timedelta
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderError
@@ -30,7 +30,7 @@ class MockNewsProvider(BaseNewsProvider):
     """Mock provider for testing news functionality without external dependencies."""
 
     # Mock data for common stocks
-    MOCK_NEWS_DB = {
+    MOCK_NEWS_DB: Dict[str, List[Dict[str, Any]]] = {
         "AAPL": [
             {
                 "id": "mock:aapl:001",
@@ -111,7 +111,7 @@ class MockNewsProvider(BaseNewsProvider):
         ],
     }
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> Dict[str, Any]:
         return {
             "status_code": 200,
             "success": True,
@@ -145,7 +145,7 @@ class MockNewsProvider(BaseNewsProvider):
 
             for article_data in mock_articles:
                 # Calculate article date
-                article_date = today + timedelta(days=article_data["date"])
+                article_date = today + timedelta(days=float(str(article_data["date"])))
 
                 # Check if within date range
                 if article_date < from_date or article_date > to_date:
@@ -157,16 +157,18 @@ class MockNewsProvider(BaseNewsProvider):
 
                 # Create NewsArticle
                 article = NewsArticle(
-                    article_id=article_data["id"],
-                    title=article_data["title"],
-                    summary=article_data["summary"],
+                    article_id=str(article_data["id"]),
+                    title=str(article_data["title"]),
+                    summary=str(article_data["summary"]),
                     published_at=datetime.combine(
                         article_date, datetime.min.time(), tzinfo=timezone.utc
                     ),
-                    source=article_data["source"],
-                    url=article_data["url"],
+                    source=str(article_data["source"]),
+                    url=str(article_data["url"]),
                     full_text=None,
-                    category=article_data["category"],
+                    category=str(article_data["category"]) if article_data["category"] is not None else None,
+                    image=None,
+                    sentiment=None,
                 )
                 articles.append(article)
 

@@ -217,5 +217,61 @@ async def test_get_option_chain(polygon_provider):
     assert len(chain.options) == 1
     assert chain.options[0].symbol == "O:AAPL240119C00150000"
 
+@pytest.mark.asyncio
+async def test_polygon_filter_rth(polygon_provider):
+    from zoneinfo import ZoneInfo
+    
+    tz = ZoneInfo("America/New_York")
+    
+    # 09:29 ET (Pre-market)
+    pre_market = datetime(2024, 1, 10, 9, 29, tzinfo=tz) 
+    # 09:30 ET (Open)
+    market_open = datetime(2024, 1, 10, 9, 30, tzinfo=tz)
+    # 15:59 ET (Just before close)
+    market_close = datetime(2024, 1, 10, 15, 59, tzinfo=tz)
+    # 16:00 ET (After-hours)
+    after_hours = datetime(2024, 1, 10, 16, 0, tzinfo=tz)
+    # Saturday (Closed)
+    weekend = datetime(2024, 1, 13, 10, 0, tzinfo=tz)
 
+    bars = [
+        PriceBar(symbol="AAPL", start=pre_market, end=pre_market, open=Decimal(1), high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=100, provider="polygon"),
+        PriceBar(symbol="AAPL", start=market_open, end=market_open, open=Decimal(1), high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=100, provider="polygon"),
+        PriceBar(symbol="AAPL", start=market_close, end=market_close, open=Decimal(1), high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=100, provider="polygon"),
+        PriceBar(symbol="AAPL", start=after_hours, end=after_hours, open=Decimal(1), high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=100, provider="polygon"),
+        PriceBar(symbol="AAPL", start=weekend, end=weekend, open=Decimal(1), high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=100, provider="polygon"),
+    ]
 
+    filtered = polygon_provider._filter_rth(bars)
+    
+    assert len(filtered) == 2
+    assert filtered[0].start == market_open
+    assert filtered[1].start == market_close
+
+@pytest.mark.asyncio
+async def test_get_historical_prices_intraday_filtering(polygon_provider):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/New_York")
+    # 09:29 ET
+    t_pre = int(datetime(2024, 1, 10, 9, 29, tzinfo=tz).timestamp() * 1000)
+    # 09:30 ET
+    t_open = int(datetime(2024, 1, 10, 9, 30, tzinfo=tz).timestamp() * 1000)
+    
+    mock_resp.json.return_value = {
+        "results": [
+            {"o": 150, "h": 155, "l": 149, "c": 152, "v": 100, "t": t_pre},
+            {"o": 150, "h": 155, "l": 149, "c": 152, "v": 100, "t": t_open},
+        ]
+    }
+    polygon_provider._client.get.return_value = mock_resp
+    
+    # RTH only (default)
+    bars_rth = await polygon_provider.get_historical_prices("AAPL", "5m", datetime.now(), datetime.now())
+    assert len(bars_rth) == 1
+    
+    # Extended hours
+    bars_ext = await polygon_provider.get_historical_prices("AAPL", "5m", datetime.now(), datetime.now(), extended_hours=True)
+    assert len(bars_ext) == 2

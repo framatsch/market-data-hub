@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime, timedelta, timezone, date
-from typing import List, Optional, Dict, Tuple, TypeVar, Callable
+from typing import Any, AsyncGenerator, Dict, List, Optional, Deque, Tuple, TypeVar, Callable, cast
 from decimal import Decimal
 from collections import deque
 import time
@@ -66,7 +66,7 @@ def _patch_refinitiv_httpx_proxy_handling() -> None:
     original_sync = http_service.get_httpx_client
     original_async = http_service.get_httpx_client_async
 
-    def _normalize_proxy(proxies):
+    def _normalize_proxy(proxies: Any) -> Any:
         if not isinstance(proxies, dict):
             return proxies
 
@@ -77,10 +77,10 @@ def _patch_refinitiv_httpx_proxy_handling() -> None:
 
         return None
 
-    def patched_get_httpx_client(proxies, **kwargs):
+    def patched_get_httpx_client(proxies: Any, **kwargs: Any) -> Any:
         return original_sync(_normalize_proxy(proxies), **kwargs)
 
-    def patched_get_httpx_client_async(proxies, **kwargs):
+    def patched_get_httpx_client_async(proxies: Any, **kwargs: Any) -> Any:
         return original_async(_normalize_proxy(proxies), **kwargs)
 
     http_service.get_httpx_client = patched_get_httpx_client
@@ -96,7 +96,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     LSEG subscription lacks 'trapi.data.pricing.read' scope required for real-time Greeks.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         if not REFINITIV_AVAILABLE:
             raise ImportError("refinitiv.data package is required for LSEG provider")
 
@@ -115,7 +115,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         self._quote_cache: Dict[str, Tuple[PriceQuote, datetime]] = {}
 
         # Rate limiting — no maxlen: manual popleft manages window to avoid eviction races
-        self._request_times: deque = deque()
+        self._request_times: deque[float] = deque()
 
         logger.info("LSEGProvider initialized")
 
@@ -123,11 +123,11 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Session Management
     # ========================================================================
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate LSEG credentials by opening a Refinitiv session."""
         return await asyncio.to_thread(self._test_connection_sync)
 
-    def _test_connection_sync(self) -> dict:
+    def _test_connection_sync(self) -> dict[str, Any]:
         try:
             self._get_session()
 
@@ -154,7 +154,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 "details": {"error": error_message},
             }
 
-    def _get_session(self):
+    def _get_session(self) -> Any:
         """Get or create Refinitiv session with smart refresh."""
         now = datetime.now(timezone.utc)
 
@@ -202,7 +202,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return self._is_session_open(default_session)
 
-    def _is_session_open(self, session) -> bool:
+    def _is_session_open(self, session: Any) -> bool:
         """Return whether a Refinitiv session object is currently open."""
         for attr_name in ("is_open", "opened", "is_opened"):
             attr = getattr(session, attr_name, None)
@@ -221,7 +221,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return True
 
-    def _create_session(self):
+    def _create_session(self) -> None:
         """Create new Refinitiv session."""
         try:
             logger.info("Creating new Refinitiv session...")
@@ -280,7 +280,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 details={"hint": f"Auth error: {type(e).__name__}", "error": str(e)},
             )
 
-    def _open_session(self, session) -> str:
+    def _open_session(self, session: Any) -> str:
         """Open a Refinitiv session and return any output printed by the SDK."""
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -365,18 +365,19 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                         rics = response.data.df['RIC'].tolist()
 
                         # Prefer RICs without continuation/futures markers
-                        for ric in rics:
+                        for ric_val in rics:
+                            ric_str = str(ric_val)
                             # Skip continuation contracts, options, and other derivatives
-                            if not any(x in ric.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
-                                self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                                logger.info(f"Ticker {ticker} mapped to RIC {ric} (strategy: {strategy['name']})")
-                                return ric
+                            if not any(x in ric_str.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
+                                self._ric_cache[ticker] = (ric_str, datetime.now(timezone.utc))
+                                logger.info(f"Ticker {ticker} mapped to RIC {ric_str} (strategy: {strategy['name']})")
+                                return ric_str
 
                         # If no clean RIC found, use first one anyway (fallback)
-                        ric = rics[0]
-                        self._ric_cache[ticker] = (ric, datetime.now(timezone.utc))
-                        logger.warning(f"Ticker {ticker} mapped to RIC {ric} (no clean RIC, using first result)")
-                        return ric
+                        ric_str = str(rics[0])
+                        self._ric_cache[ticker] = (ric_str, datetime.now(timezone.utc))
+                        logger.warning(f"Ticker {ticker} mapped to RIC {ric_str} (no clean RIC, using first result)")
+                        return ric_str
 
                 except Exception as e:
                     logger.debug(f"Strategy {strategy['name']} failed: {e}")
@@ -412,7 +413,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Rate Limiting & Throttling
     # ========================================================================
 
-    def _throttle(self):
+    def _throttle(self) -> None:
         """Ensure rate limit is respected."""
         now = time.time()
 
@@ -448,7 +449,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return None
 
-    def _cache_quote(self, symbol: str, quote: PriceQuote):
+    def _cache_quote(self, symbol: str, quote: PriceQuote) -> None:
         """Cache quote data."""
         if settings.LSEG_CACHE_TTL_SECONDS > 0:
             self._quote_cache[symbol] = (quote, datetime.now(timezone.utc))
@@ -457,7 +458,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Retry Logic with Exponential Backoff
     # ========================================================================
 
-    def _retry_with_backoff(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def _retry_with_backoff(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Execute function with retry logic and exponential backoff."""
         max_retries = 3
         base_delay = 1.0
@@ -480,6 +481,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                         f"Refinitiv API failed after {max_retries} retries",
                         details={"error": str(e), "attempts": max_retries}
                     )
+        raise RuntimeError("Unreachable")
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """Check if error should trigger retry."""
@@ -536,9 +538,13 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         # Build PriceQuote
         # Fields from historical_pricing: TRDPRC_1, OPEN_PRC, HIGH_1, LOW_1, BID, ASK, ACVOL_UNS, VWAP
+        price = safe_decimal("TRDPRC_1", required=True)
+        if price is None:
+            price = Decimal("0")
+
         return PriceQuote(
             symbol=symbol,
-            price=safe_decimal("TRDPRC_1", required=True),  # Last trade price from historical data
+            price=price,  # Last trade price from historical data
             currency="USD",  # Refinitiv returns USD prices
             provider="lseg",
             bid=safe_decimal("BID"),
@@ -575,7 +581,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         ric = self._ticker_to_ric(symbol)
 
         # Fetch quote using historical_pricing (like test_connect.py does)
-        def fetch_quote():
+        def fetch_quote() -> Any:
             self._get_session()
             self._throttle()
 
@@ -600,7 +606,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return quote
 
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "STK") -> list[PriceBar]:
         """
         Get historical price bars for a symbol.
 
@@ -655,7 +661,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         logger.debug(f"LSEG historical request: RIC={ric}, interval={interval}, count={count}, duration={duration.days}d")
 
         # Fetch historical data with retry
-        def fetch_historical():
+        def fetch_historical() -> Any:
             self._get_session()
             self._throttle()
 
@@ -664,12 +670,19 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             start_str = start.strftime("%Y-%m-%d") if interval == "1d" else start.isoformat()
             end_str = end.strftime("%Y-%m-%d") if interval == "1d" else end.isoformat()
 
-            response = historical_pricing.summaries.Definition(
-                universe=ric,
-                interval=refinitiv_interval,
-                start=start_str,
-                end=end_str
-            ).get_data()
+            kwargs = {
+                "universe": ric,
+                "interval": refinitiv_interval,
+                "start": start_str,
+                "end": end_str
+            }
+            
+            if not extended_hours and is_intraday:
+                kwargs["sessions"] = [
+                    historical_pricing.Sessions.NORMAL
+                ]
+
+            response = historical_pricing.summaries.Definition(**kwargs).get_data()
 
             if response.data.df is None or response.data.df.empty:
                 raise DataNotFoundError("Historical data", symbol,
@@ -758,7 +771,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return bars
 
-    def _map_interval(self, interval: str) -> str:
+    def _map_interval(self, interval: str) -> Any:
         """Map API interval to Refinitiv Intervals enum."""
         mapping = {
             "1m": historical_pricing.Intervals.MINUTE,
@@ -792,7 +805,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             description="A leading technology company.",
             exchange="NASDAQ",
             currency="USD",
-            website="https://example.com",
+            website=cast(Any, "https://example.com"),
             sector="Technology",
             industry="Consumer Electronics",
             employees=150000,
@@ -895,7 +908,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     source=source,
                     url=url,
                     full_text=None,  # Full text requires separate API call
-                    category=article_category
+                    category=article_category,
+                    image=None,
+                    sentiment=None
                 ))
 
             return articles

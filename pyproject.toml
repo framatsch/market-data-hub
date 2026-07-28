@@ -33,6 +33,10 @@ test = [
     "python-dotenv>=1.2.1",
     "scipy>=1.11.3"
 ]
+dev = [
+    "ruff>=0.3.0",
+    "mypy>=1.9.0"
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -60,3 +64,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html"
 ]
+
+[tool.mypy]
+ignore_missing_imports = true
+warn_return_any = false

@@ -48,3 +48,20 @@ async def test_get_historical_prices_ibkr(ibkr_provider):
     assert len(result) == 1
     assert result[0].close == Decimal("152.0")
     assert result[0].provider == "ibkr"
+    mock_ib.reqHistoricalDataAsync.assert_called_once()
+    kwargs = mock_ib.reqHistoricalDataAsync.call_args[1]
+    assert kwargs.get('useRTH') == True
+
+@pytest.mark.asyncio
+async def test_get_historical_prices_ibkr_extended_hours(ibkr_provider):
+    provider, mock_ib = ibkr_provider
+    provider._ensure_connection = AsyncMock()
+    provider._disconnect = AsyncMock()
+    
+    mock_ib.reqHistoricalDataAsync = AsyncMock(return_value=[])
+    
+    await provider.get_historical_prices("AAPL", "1d", datetime.now(), datetime.now(), extended_hours=True)
+    
+    mock_ib.reqHistoricalDataAsync.assert_called_once()
+    kwargs = mock_ib.reqHistoricalDataAsync.call_args[1]
+    assert kwargs.get('useRTH') == False

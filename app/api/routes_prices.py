@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Any
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -42,7 +42,7 @@ async def get_last_price(
         description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter."
     ),
     format: str = "json"
-):
+) -> Any:
     """
     Get the latest price quote for a symbol.
 
@@ -77,10 +77,11 @@ async def get_historical_prices(
     interval: str = "1d",
     start: Optional[datetime] = None,
     end: Optional[datetime] = None,
+    extended_hours: bool = Query(False, description="Include extended trading hours (pre-market/after-hours)"),
     provider: Optional[str] = None,
     sec_type: str = Query("stock", description="Security type: 'stock' or 'index'"),
     format: str = "json"
-):
+) -> Any:
     """
     Get historical price bars.
 
@@ -98,7 +99,7 @@ async def get_historical_prices(
     symbol = symbol.upper()
     provider = provider.lower() if provider else None
     sec_type = sec_type.lower()
-    bars = await service.get_historical_prices(symbol, interval, start, end, provider, sec_type)
+    bars = await service.get_historical_prices(symbol, interval, start, end, extended_hours, provider, sec_type)
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(bars, f"{symbol}_history_{interval}.csv")

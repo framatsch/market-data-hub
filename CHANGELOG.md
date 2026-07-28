@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Discord webhook support for alerts and test connections.
 - Support for secure provider credentials storage via `keys.db` (including a generation script).
 - Remote MCP connection support (e.g., for Claude integration) and provider overrides.
+- **Regular Trading Hours (RTH):** Added `extended_hours` query parameter (default: `false`) for historical prices. Intraday intervals now automatically filter out pre/after-market data for IBKR, Polygon, and LSEG by default.
 
 ### Changed
 - **Security:** Moved all provider API keys and credentials (including Finnhub) to the secure `keys.db`, removing them from environment variables.

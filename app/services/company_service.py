@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import structlog
 
@@ -22,7 +22,7 @@ from app.models.company import CompanyProfile, CompanySummary
 from app.providers.registry import get_registry
 
 class CompanyService:
-    def __init__(self, registry=None):
+    def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_company_profile(self, symbol: str, provider_name: Optional[str] = None) -> CompanyProfile:

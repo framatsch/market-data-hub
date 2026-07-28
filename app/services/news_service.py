@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import structlog
 
@@ -24,7 +24,7 @@ from app.providers.registry import get_registry
 
 
 class NewsService:
-    def __init__(self, registry=None):
+    def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_company_news(

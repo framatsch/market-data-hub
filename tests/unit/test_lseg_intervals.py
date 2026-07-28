@@ -31,6 +31,10 @@ def lseg_provider():
 
 def test_map_interval_all_lseg(lseg_provider):
     from app.providers.lseg import historical_pricing
+    from app.utils.errors import ProviderError
+    
     assert lseg_provider._map_interval("1m") == historical_pricing.Intervals.MINUTE
     assert lseg_provider._map_interval("1d") == historical_pricing.Intervals.DAILY
-    assert lseg_provider._map_interval("unknown") == historical_pricing.Intervals.DAILY
+    
+    with pytest.raises(ProviderError):
+        lseg_provider._map_interval("unknown")

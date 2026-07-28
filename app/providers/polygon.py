@@ -16,8 +16,8 @@
 
 import logging
 import asyncio
-from datetime import datetime, date
-from typing import List, Optional
+from datetime import datetime, date, timezone
+from typing import Any, List, Literal, Optional
 from decimal import Decimal
 
 import httpx
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider):
     """Polygon.io provider for US Stocks and Options."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.api_key: str | None = None
         self.base_url = settings.POLYGON_BASE_URL
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=10.0)
@@ -46,10 +46,10 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         self.api_key = await asyncio.to_thread(get_provider_credential_sync, "polygon", "api_key")
         return self.api_key
 
-    async def close(self):
+    async def close(self) -> None:
         await self._client.aclose()
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate Polygon API key with a lightweight previous-close request."""
         try:
             api_key = await self._get_api_key()
@@ -185,7 +185,8 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         interval: str, 
         start: datetime, 
         end: datetime, 
-        sec_type: str = "stock"
+        extended_hours: bool = False,
+        sec_type: str = "STK"
     ) -> List[PriceBar]:
         ticker = self._format_ticker(symbol, sec_type)
         api_key = await self._get_api_key()
@@ -226,7 +227,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             results = resp.json().get("results", [])
             bars = []
             for r in results:
-                bar_start = datetime.fromtimestamp(r["t"] / 1000)
+                bar_start = datetime.fromtimestamp(r["t"] / 1000, tz=timezone.utc)
                 # For daily bars, 'end' is roughly same day, but MDH expects a range
                 # We'll set end to start + interval logic
                 bars.append(PriceBar(
@@ -240,16 +241,51 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                     volume=int(r["v"]),
                     provider="polygon"
                 ))
+            if not extended_hours and interval in ["1m", "5m", "1h"]:
+                bars = self._filter_rth(bars)
+                
             return bars
         except Exception as e:
             logger.error(f"Polygon Aggs error: {e}")
             raise ProviderError(f"Polygon Aggs error: {str(e)}")
 
-    async def get_option_chain(self, symbol: str, expiry: date, **kwargs) -> OptionChain:
+    def _filter_rth(self, bars: List[PriceBar]) -> List[PriceBar]:
+        """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
+        from zoneinfo import ZoneInfo
+        from datetime import time
+        
+        filtered = []
+        tz = ZoneInfo("America/New_York")
+        market_open = time(9, 30)
+        market_close = time(16, 0)
+        
+        for bar in bars:
+            # Convert naive UTC or aware UTC to NY time
+            if bar.start.tzinfo is None:
+                ny_time = bar.start.replace(tzinfo=timezone.utc).astimezone(tz)
+            else:
+                ny_time = bar.start.astimezone(tz)
+                
+            # Filter Monday (0) to Friday (4) and within trading hours
+            if ny_time.weekday() < 5 and market_open <= ny_time.time() < market_close:
+                filtered.append(bar)
+                
+        return filtered
+
+    async def get_option_chain(
+        self,
+        symbol: str,
+        expiry: date,
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal['call', 'put'] | None = None,
+        market_data_type: int | None = None,
+        **kwargs: Any
+    ) -> OptionChain:
         """Fetch option chain using Polygon Snapshots."""
         api_key = await self._get_api_key()
         url = f"/v3/snapshot/options/{symbol.upper()}"
-        params = {
+        params: dict[str, str | int] = {
             "apiKey": api_key,
             "expiration_date": expiry.isoformat(),
             "limit": 250
@@ -281,7 +317,6 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                     theta=float(greeks.get("theta", 0) or 0),
                     vega=float(greeks.get("vega", 0) or 0),
                     implied_volatility=float(r.get("implied_volatility", 0) or 0),
-                    currency="USD",
                     provider="polygon"
                 ))
             
@@ -327,7 +362,6 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 theta=float(greeks.get("theta", 0) or 0),
                 vega=float(greeks.get("vega", 0) or 0),
                 implied_volatility=float(data.get("implied_volatility", 0) or 0),
-                currency="USD",
                 provider="polygon"
             )
         except Exception as e:
@@ -364,7 +398,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         try:
             resp = await self._client.get(url, params=params)
             if resp.status_code == 404:
-                raise DataNotFoundError(f"Company {symbol} not found on Polygon")
+                raise DataNotFoundError("Company", symbol)
             resp.raise_for_status()
             
             results = resp.json().get("results", {})
@@ -391,7 +425,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         """Search for companies using Polygon Tickers v3."""
         api_key = await self._get_api_key()
         url = "/v3/reference/tickers"
-        params = {
+        params: dict[str, str | int] = {
             "apiKey": api_key,
             "search": query,
             "active": "true",

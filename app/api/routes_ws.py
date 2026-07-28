@@ -31,7 +31,7 @@ class SubscriptionMessage(BaseModel):
     provider: str = "ibkr"
 
 @router.websocket("/prices")
-async def websocket_prices(websocket: WebSocket):
+async def websocket_prices(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         while True:

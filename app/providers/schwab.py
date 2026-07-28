@@ -144,7 +144,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             config = await asyncio.to_thread(repo._get_sync, "schwab")
             url = (config.connection_config or {}).get("callback_url")
             if url and isinstance(url, str) and url.strip():
-                return url.strip()
+                return str(url.strip())
         except Exception:
             pass
         return settings.SCHWAB_CALLBACK_URL
@@ -375,7 +375,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     def _parse_option_chain(
         self,
         symbol: str,
-        data: dict,
+        data: dict[str, Any],
         expiry: date,
         min_strike: Optional[Decimal],
         max_strike: Optional[Decimal],
@@ -532,10 +532,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         if not match:
             raise AppError(f"Invalid option symbol: {option_id}", "INVALID_PROVIDER", details={"status_code": 400})
 
-        underlying = match.group(1)
-        expiry = datetime.strptime(match.group(2), "%y%m%d").date()
-        right = "call" if match.group(3) == "C" else "put"
-        strike = Decimal(match.group(4)) / Decimal("1000")
+        underlying = str(match.group(1))
+        expiry = datetime.strptime(str(match.group(2)), "%y%m%d").date()
+        right: Literal["call", "put"] = "call" if match.group(3) == "C" else "put"
+        strike = Decimal(str(match.group(4))) / Decimal("1000")
         return underlying, expiry, right, strike
 
     def unpause(self) -> None:
@@ -547,7 +547,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     # Public interface
     # ------------------------------------------------------------------
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate Schwab OAuth token with a lightweight account request."""
         try:
             await self._check_rate_limit()
@@ -610,6 +610,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         interval: str,
         start: datetime,
         end: datetime,
+        extended_hours: bool = False,
         sec_type: str = "stock",  # noqa: ARG002 — Schwab infers security type automatically
     ) -> list[PriceBar]:
         await self._check_rate_limit()
@@ -640,7 +641,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                     symbol=symbol,
                     start_datetime=start,
                     end_datetime=end,
-                    need_extended_hours_data=True,
+                    need_extended_hours_data=extended_hours,
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -766,7 +767,6 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             return matches[0]
 
         parsed_underlying, parsed_expiry, parsed_right, parsed_strike = self._parse_occ_symbol(option_id)
-        parsed_right = cast(Literal["call", "put"], parsed_right)
         last = quote.get("lastPrice", quote.get("last"))
         mark = quote.get("mark")
         price_raw = last or mark

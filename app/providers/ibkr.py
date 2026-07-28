@@ -17,11 +17,11 @@
 import asyncio
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Any, Dict, Tuple, Sequence, cast
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, Option, Contract, Index, Future
-from ib_async.objects import BarData
+from ib_async import IB, Stock, Option, Contract, Index, Future, Ticker, ContractDetails
+from ib_async.objects import BarData, HistoricalNews
 
 from app.config import settings
 from app.models.price import PriceBar, PriceQuote
@@ -39,7 +39,30 @@ from app.utils.logging import logger
 class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, BaseNewsProvider):
     """Implementation for IBKR provider using ib_async."""
 
-    async def _get_tickers_snapshot(self, contracts: List[Contract], skip_on_error: bool = True) -> List[object]:
+    def __init__(self) -> None:
+        self.ib = IB()
+        self.host = settings.IBKR_HOST
+        self.port = settings.IBKR_PORT
+        self.client_id = settings.IBKR_CLIENT_ID
+        self.connect_on_request = settings.IBKR_CONNECT_ON_REQUEST
+        self.market_data_type = settings.IBKR_MARKET_DATA_TYPE
+        self.fallback_on_subscription_error = settings.IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR
+
+        # Keep track if we are currently connected implementation-wise
+        self._connected = False
+
+        # Track subscription errors
+        self._subscription_errors: List[Dict[str, Any]] = []
+
+        # Track explicitly requested market data type (None = using default)
+        self._requested_market_data_type: Optional[int] = None
+
+        # Track if Level 1 subscription error occurred (for strict failure)
+        self._level1_subscription_error: bool = False
+
+
+
+    async def _get_tickers_snapshot(self, contracts: Sequence[Contract], skip_on_error: bool = True) -> List[Ticker]:
         """
         Request market data snapshots for given contracts and wait for data.
         If skip_on_error is True, ignores subscription errors and returns available data.
@@ -101,7 +124,8 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         if not snapshot_mode:
             logger.debug(f"Cancelling {len(tickers)} streaming subscriptions")
             for t in tickers:
-                self.ib.cancelMktData(t.contract)
+                if t.contract:
+                    self.ib.cancelMktData(t.contract)
 
         # Check if Level 1 subscription error occurred
         if self._level1_subscription_error:
@@ -125,35 +149,14 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         logger.debug(f"Snapshot complete. Got data for {len(valid_tickers)}/{len(tickers)} contracts")
         return tickers
 
-    def __init__(self):
-        self.ib = IB()
-        self.host = settings.IBKR_HOST
-        self.port = settings.IBKR_PORT
-        self.client_id = settings.IBKR_CLIENT_ID
-        self.connect_on_request = settings.IBKR_CONNECT_ON_REQUEST
-        self.market_data_type = settings.IBKR_MARKET_DATA_TYPE
-        self.fallback_on_subscription_error = settings.IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR
-
-        # Keep track if we are currently connected implementation-wise
-        self._connected = False
-
-        # Track subscription errors
-        self._subscription_errors = []
-
-        # Track explicitly requested market data type (None = using default)
-        self._requested_market_data_type = None
-
-        # Track if Level 1 subscription error occurred (for strict failure)
-        self._level1_subscription_error = False
-
-    async def close(self):
+    async def close(self) -> None:
         """Gracefully disconnect from IBKR."""
         if self.ib.isConnected():
             logger.info("Disconnecting from IBKR...")
             self.ib.disconnect()
             self._connected = False
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate connectivity to IBKR TWS/Gateway."""
         was_connected = self.ib.isConnected()
         try:
@@ -203,10 +206,10 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             if not was_connected and self.ib.isConnected():
                 self.ib.disconnect()
 
-    def _is_valid(self, val) -> bool:
+    def _is_valid(self, val: Any) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
 
-    def _to_decimal(self, val) -> Optional[Decimal]:
+    def _to_decimal(self, val: Any) -> Optional[Decimal]:
         if self._is_valid(val):
             return Decimal(str(val))
         return None
@@ -215,9 +218,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         """Get the effective market data type being used (explicit request or default)."""
         return self._requested_market_data_type if self._requested_market_data_type is not None else self.market_data_type
 
-    def _extract_greeks(self, ticker) -> dict:
+    def _extract_greeks(self, ticker: Ticker) -> dict[str, Any]:
         """Extract Greeks from ticker.modelGreeks if available."""
-        greeks = {
+        greeks: dict[str, Any] = {
             "implied_volatility": None,
             "delta": None,
             "gamma": None,
@@ -240,7 +243,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         return greeks
 
-    async def _ensure_connection(self):
+    async def _ensure_connection(self) -> None:
         """Ensure we have an active connection to IBKR."""
         if self.ib.isConnected():
             return
@@ -264,7 +267,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         else:
             logger.debug("Successfully connected to IBKR")
 
-    def _on_ib_error(self, reqId, errorCode, errorString, contract):
+    def _on_ib_error(self, reqId: int, errorCode: int, errorString: str, contract: Contract) -> None:
         """
         Handle IBKR errors/warnings.
         Error 10089/10091 are subscription warnings.
@@ -313,7 +316,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return self.fallback_on_subscription_error
         return False
 
-    async def _set_market_data_type(self, market_data_type: int = None):
+    async def _set_market_data_type(self, market_data_type: Optional[int] = None) -> None:
         """
         Change market data type dynamically.
         1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen
@@ -359,7 +362,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             logger.debug(f"Failed to get trading hours for {contract.symbol}: {e}")
             return None
 
-    def _is_market_open(self, trading_hours: Optional[str], timezone_id: Optional[str] = None) -> bool:
+    def _is_market_open(self, trading_hours: Optional[str], timezone_id: Optional[str] = None) -> Optional[bool]:
         """
         Determine if market is currently open based on trading_hours string and timezone.
 
@@ -485,14 +488,16 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             logger.debug(f"Error determining market open status: {e}")
             return None
 
-    async def _disconnect(self):
+    async def _disconnect(self) -> None:
         """Disconnect if configured to do so."""
         if self.connect_on_request and self.ib.isConnected():
             self.ib.disconnect()
             self._connected = False
             logger.debug("Disconnected from IBKR")
 
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
+    async def get_historical_prices(
+        self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "STK"
+    ) -> list[PriceBar]:
         try:
             await self._ensure_connection()
 
@@ -514,7 +519,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 durationStr=duration_str,
                 barSizeSetting=bar_size,
                 whatToShow='TRADES',
-                useRTH=True,
+                useRTH=not extended_hours,
                 formatDate=1  # Flow date as string
             )
 
@@ -603,7 +608,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             # Should have data
             if not tickers:
-                 raise DataNotFoundError(f"No market data for {symbol}")
+                 raise DataNotFoundError("MarketData", symbol, details={"reason": "No market data"})
             ticker = tickers[0]
 
             # For Level 1: if any subscription error was recorded, abort with provider not available
@@ -622,7 +627,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             # If market is closed, look for 'close' or 'last'.
             # snapshot=True usually returns available data.
             logger.debug(f"Raw ticker for {symbol}: {ticker}")
-            price = ticker.last if self._is_valid(ticker.last) else ticker.close
+            price: Any = ticker.last if self._is_valid(ticker.last) else ticker.close
             if not self._is_valid(price):
                  price = ticker.close
 
@@ -711,7 +716,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             chains = await self.ib.reqSecDefOptParamsAsync(underlying.symbol, '', underlying.secType, underlying.conId)
 
             if not chains:
-                raise DataNotFoundError(f"No option chain found for {symbol}")
+                raise DataNotFoundError("OptionChain", symbol, details={"reason": "No option chain found"})
 
             # Filter for specific expiry
             exp_str = expiry.strftime('%Y%m%d')
@@ -763,22 +768,23 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             options_data = []
             for t in tickers:
-                c = t.contract
+                opt_contract = t.contract
+                assert opt_contract is not None
                 greeks = self._extract_greeks(t)
                 # open_interest: Use callOpenInterest or putOpenInterest based on contract right
                 # Note: openInterest doesn't exist on Ticker, must use call/put specific fields
-                if c.right == 'C' and self._is_valid(t.callOpenInterest):
+                if opt_contract.right == 'C' and self._is_valid(t.callOpenInterest):
                     open_interest_val = int(t.callOpenInterest)
-                elif c.right == 'P' and self._is_valid(t.putOpenInterest):
+                elif opt_contract.right == 'P' and self._is_valid(t.putOpenInterest):
                     open_interest_val = int(t.putOpenInterest)
                 else:
                     open_interest_val = None
                 options_data.append(OptionQuote(
-                    symbol=c.localSymbol, # e.g. AAPL  230616C00150000
+                    symbol=opt_contract.localSymbol, # e.g. AAPL  230616C00150000
                     underlying_symbol=symbol,
-                    strike=Decimal(str(c.strike)),
+                    strike=Decimal(str(opt_contract.strike)),
                     expiry=expiry,
-                    type="call" if c.right == 'C' else "put",
+                    type="call" if opt_contract.right == 'C' else "put",
                     # Try last, then close as fallback
                     price=self._to_decimal(t.last) or self._to_decimal(t.close) or Decimal("0.0"),
                     # Only include bid/ask if valid (not -1)
@@ -844,7 +850,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             ticker = tickers[0] if tickers else None
 
             if not ticker:
-                raise DataNotFoundError(f"No market data for option {option_id}")
+                raise DataNotFoundError("MarketData", option_id, details={"reason": "No market data"})
 
             greeks = self._extract_greeks(ticker)
 
@@ -978,7 +984,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         try:
             contract = Stock(symbol, "SMART", "USD")
-            qualified = await self.ib.qualifyContractsAsync(contract)
+            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
 
             if not qualified or not qualified[0]:
                 raise DataNotFoundError("Company", symbol,
@@ -988,7 +994,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             return CompanyProfile(
                 symbol=symbol,
-                name=qualified_contract.longName or symbol,
+                name=getattr(qualified_contract, 'longName', symbol),
                 exchange=qualified_contract.exchange or "UNKNOWN",
                 currency=qualified_contract.currency or "USD",
                 provider="ibkr"
@@ -1012,7 +1018,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         try:
             # Try to treat query as a symbol
             contract = Stock(query.upper(), "SMART", "USD")
-            qualified = await self.ib.qualifyContractsAsync(contract)
+            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
 
             if not qualified or not qualified[0]:
                 return []
@@ -1022,7 +1028,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return [
                 CompanySummary(
                     symbol=query.upper(),
-                    name=qualified_contract.longName or query.upper(),
+                    name=getattr(qualified_contract, 'longName', query.upper()),
                     exchange=qualified_contract.exchange or "UNKNOWN",
                     provider="ibkr"
                 )
@@ -1048,20 +1054,20 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         try:
             # 1. Create and qualify contract
             contract = Stock(symbol, 'SMART', 'USD')
-            qualified = await self.ib.qualifyContractsAsync(contract)
+            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
             if not qualified:
                 raise DataNotFoundError("Contract", symbol)
 
-            contract = qualified[0]
+            qualified_contract = qualified[0]
 
             # 2. Request historical news from IBKR
-            news_items = await self.ib.reqHistoricalNewsAsync(
-                conId=contract.conId,
+            news_items = cast(List[HistoricalNews], await self.ib.reqHistoricalNewsAsync(
+                conId=qualified_contract.conId,
                 providerCodes='',  # All news providers
                 startDateTime=f"{from_date.isoformat()} 00:00:00",
                 endDateTime=f"{to_date.isoformat()} 23:59:59",
                 totalResults=limit + offset
-            )
+            ))
 
             if not news_items:
                 return []
@@ -1075,7 +1081,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                 article_id = f"ibkr:{item.articleId}"
 
                 # Parse timestamp
-                published_at = datetime.fromtimestamp(item.time, tz=datetime.now().astimezone().tzinfo)
+                published_at = item.time.replace(tzinfo=datetime.now().astimezone().tzinfo) if not item.time.tzinfo else item.time
 
                 # 5. Detect category from headline (IBKR doesn't provide explicit categories)
                 title_lower = item.headline.lower()
@@ -1102,7 +1108,9 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                     source=item.providerCode,
                     url='',  # IBKR doesn't provide direct URLs
                     full_text=None,  # Not available in historical news
-                    category=article_category
+                    category=article_category,
+                    image=None,
+                    sentiment=None
                 ))
 
             return articles

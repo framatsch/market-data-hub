@@ -22,7 +22,7 @@ Usage:
 """
 
 
-def unwrap_secret(value: object) -> str:
+def unwrap_secret(value: object) -> str | None:
     """Return the plain string value of a SecretStr or a regular str.
 
     Works transparently with both pydantic.SecretStr and plain str so that
@@ -31,5 +31,5 @@ def unwrap_secret(value: object) -> str:
     if value is None:
         return None
     if hasattr(value, "get_secret_value"):
-        return value.get_secret_value()  # type: ignore[union-attr]
+        return str(getattr(value, "get_secret_value")())
     return str(value)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Any, Dict, cast
 
 import httpx
 
@@ -40,7 +40,7 @@ class PrixeProvider(BasePriceProvider):
             await self._client.aclose()
             self._client = None
 
-    async def test_connection(self) -> dict:
+    async def test_connection(self) -> Dict[str, Any]:
         """Validate Prixe API key with a lightweight last_sold request."""
         client = await self._get_client()
         try:
@@ -134,7 +134,8 @@ class PrixeProvider(BasePriceProvider):
         interval: str,
         start: datetime,
         end: datetime,
-        sec_type: str = "stock",
+        extended_hours: bool = False,
+        sec_type: str = "STK",
     ) -> List[PriceBar]:
         del sec_type
 
@@ -184,12 +185,15 @@ class PrixeProvider(BasePriceProvider):
             )
             response.raise_for_status()
             payload = response.json()
-            return self._map_historical_payload(
+            bars = self._map_historical_payload(
                 symbol=normalized_symbol,
                 payload=payload,
                 start=start,
                 end=end,
             )
+            if not extended_hours and normalized_interval in ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]:
+                bars = self._filter_rth(bars)
+            return bars
         except httpx.HTTPStatusError as exc:
             raise map_httpx_http_error(
                 provider="prixe",
@@ -292,8 +296,20 @@ class PrixeProvider(BasePriceProvider):
                 "Prixe historical response is missing OHLC/timestamp arrays.",
                 details={"provider": "prixe", "symbol": symbol},
             )
+            
+        timestamps_list = cast(List[Any], timestamps)
+        opens_list = cast(List[Any], opens)
+        highs_list = cast(List[Any], highs)
+        lows_list = cast(List[Any], lows)
+        closes_list = cast(List[Any], closes)
 
-        lengths = {name: len(values) for name, values in arrays.items()}
+        lengths = {
+            "timestamp": len(timestamps_list),
+            "open": len(opens_list),
+            "high": len(highs_list),
+            "low": len(lows_list),
+            "close": len(closes_list),
+        }
         if len(set(lengths.values())) != 1:
             raise ProviderError(
                 "Prixe historical arrays have mismatched lengths.",
@@ -307,7 +323,7 @@ class PrixeProvider(BasePriceProvider):
             )
 
         bars: List[PriceBar] = []
-        for idx, ts in enumerate(timestamps):
+        for idx, ts in enumerate(timestamps_list):
             bar_start = self._parse_timestamp(ts)
             if bar_start.tzinfo is None:
                 bar_start = bar_start.replace(tzinfo=timezone.utc)
@@ -321,10 +337,10 @@ class PrixeProvider(BasePriceProvider):
                     symbol=str(data.get("ticker") or symbol).upper(),
                     start=bar_start,
                     end=bar_start,
-                    open=Decimal(str(opens[idx])),
-                    high=Decimal(str(highs[idx])),
-                    low=Decimal(str(lows[idx])),
-                    close=Decimal(str(closes[idx])),
+                    open=Decimal(str(opens_list[idx])),
+                    high=Decimal(str(highs_list[idx])),
+                    low=Decimal(str(lows_list[idx])),
+                    close=Decimal(str(closes_list[idx])),
                     volume=volume_value,
                     provider="prixe",
                 )
@@ -347,3 +363,24 @@ class PrixeProvider(BasePriceProvider):
             except ValueError:
                 return datetime.now(timezone.utc)
         return datetime.now(timezone.utc)
+
+    def _filter_rth(self, bars: List[PriceBar]) -> List[PriceBar]:
+        """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
+        from zoneinfo import ZoneInfo
+        from datetime import time
+        
+        filtered = []
+        tz = ZoneInfo("America/New_York")
+        market_open = time(9, 30)
+        market_close = time(16, 0)
+        
+        for bar in bars:
+            if bar.start.tzinfo is None:
+                ny_time = bar.start.replace(tzinfo=timezone.utc).astimezone(tz)
+            else:
+                ny_time = bar.start.astimezone(tz)
+                
+            if ny_time.weekday() < 5 and market_open <= ny_time.time() < market_close:
+                filtered.append(bar)
+                
+        return filtered

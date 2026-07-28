@@ -84,10 +84,10 @@ def _apply_formatter_to_all_handlers(formatter: logging.Formatter, context_filte
         logging.getLogger(n) for n in ("uvicorn", "uvicorn.error", "uvicorn.access")
     ]
     for lg in target_loggers:
-        for handler in lg.handlers:
-            if not any(isinstance(f, RequestContextFilter) for f in handler.filters):
-                handler.addFilter(context_filter)
-            handler.setFormatter(formatter)
+        for h in lg.handlers:
+            if not any(isinstance(f, RequestContextFilter) for f in h.filters):
+                h.addFilter(context_filter)
+            h.setFormatter(formatter)
 
 
 def patch_refinitiv_loggers() -> None:
@@ -135,7 +135,9 @@ def setup_logging() -> None:
     logging.getLogger("ib_async.wrapper").setLevel(logging.CRITICAL)
 
 
-def get_uvicorn_log_config(log_level: str = "info") -> dict:
+from typing import Any
+
+def get_uvicorn_log_config(log_level: str = "info") -> dict[str, Any]:
     """Return a logging dictConfig for uvicorn that uses our JsonRequestFormatter.
 
     Pass this as log_config= to uvicorn.run() so uvicorn's dictConfig call does

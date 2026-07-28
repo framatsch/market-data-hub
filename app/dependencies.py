@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 from fastapi import Depends
 
 from app.services.price_service import PriceService
@@ -46,5 +46,5 @@ OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 NewsServiceDep = Annotated[NewsService, Depends(get_news_service)]
 
 
-def get_provider(provider_type: str, name: str | None = None):
+def get_provider(provider_type: str, name: str | None = None) -> Any:
     return _get_provider(provider_type, name)

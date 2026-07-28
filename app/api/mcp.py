@@ -30,7 +30,7 @@ import json
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Callable, Awaitable, cast
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -182,7 +182,7 @@ async def mcp_streamable_http(request: Request) -> Response:
     return JSONResponse(response_payload)
 
 
-async def _handle_json_rpc(method: str, params: dict, rpc_id: Any) -> dict | None:
+async def _handle_json_rpc(method: str, params: dict[str, Any], rpc_id: Any) -> dict[str, Any] | None:
     """Dispatch a JSON-RPC request and serialise the response payload."""
     try:
         result = await _dispatch(method, params)
@@ -209,7 +209,7 @@ async def _handle_json_rpc(method: str, params: dict, rpc_id: Any) -> dict | Non
 # Dispatch
 # ---------------------------------------------------------------------------
 
-async def _dispatch(method: str, params: dict) -> dict | None:
+async def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any] | None:
     """Route an MCP JSON-RPC call to the appropriate handler."""
     if method == "initialize":
         return {
@@ -265,12 +265,12 @@ def _company_service() -> CompanyService:
 # Tool handlers
 # ---------------------------------------------------------------------------
 
-def _text_content(data: Any) -> dict:
+def _text_content(data: Any) -> dict[str, Any]:
     """Wrap serialised data in the standard MCP content envelope."""
     return {"content": [{"type": "text", "text": json.dumps(data, default=str)}]}
 
 
-async def _tool_get_last_price(args: dict) -> dict:
+async def _tool_get_last_price(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     sec_type = args.get("sec_type", "stock")
     provider = args.get("provider")
@@ -280,7 +280,7 @@ async def _tool_get_last_price(args: dict) -> dict:
     return _text_content(quote.model_dump())
 
 
-async def _tool_get_historical_prices(args: dict) -> dict:
+async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     interval = args.get("interval", "1d")
     sec_type = args.get("sec_type", "stock")
@@ -304,7 +304,7 @@ async def _tool_get_historical_prices(args: dict) -> dict:
     return _text_content([b.model_dump() for b in bars])
 
 
-async def _tool_get_option_chain(args: dict) -> dict:
+async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
@@ -313,7 +313,7 @@ async def _tool_get_option_chain(args: dict) -> dict:
     return _text_content(chain.model_dump())
 
 
-async def _tool_get_option_quote(args: dict) -> dict:
+async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     option_id = args["option_id"].upper()
     provider = args.get("provider")
@@ -321,21 +321,21 @@ async def _tool_get_option_quote(args: dict) -> dict:
     return _text_content(quote.model_dump())
 
 
-async def _tool_get_company_profile(args: dict) -> dict:
+async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     provider = args.get("provider")
     profile = await _company_service().get_company_profile(symbol, provider_name=provider)
     return _text_content(profile.model_dump())
 
 
-async def _tool_search_companies(args: dict) -> dict:
+async def _tool_search_companies(args: dict[str, Any]) -> dict[str, Any]:
     query = args["query"]
     provider = args.get("provider")
     results = await _company_service().search_companies(query, provider_name=provider)
     return _text_content([r.model_dump() for r in results])
 
 
-async def _tool_get_company_news(args: dict) -> dict:
+async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     to_date = date.today()
     from_date = to_date - timedelta(days=7)
@@ -350,7 +350,7 @@ async def _tool_get_company_news(args: dict) -> dict:
     return _text_content([a.model_dump() for a in articles])
 
 
-async def _tool_get_market_status(args: dict) -> dict:
+async def _tool_get_market_status(args: dict[str, Any]) -> dict[str, Any]:
     provider = args.get("provider")
     status = await _price_service().get_market_status(provider_name=provider)
     return _text_content(status.model_dump())
@@ -360,7 +360,7 @@ async def _tool_get_market_status(args: dict) -> dict:
 # Tool registry (MCP schema descriptors)
 # ---------------------------------------------------------------------------
 
-TOOL_REGISTRY: list[dict] = [
+TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "name": "get_last_price",
         "description": "Get the latest price quote for a stock or index symbol.",
@@ -524,7 +524,7 @@ TOOL_REGISTRY: list[dict] = [
     },
 ]
 
-TOOL_HANDLERS: Dict[str, Any] = {
+TOOL_HANDLERS: Dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
     "get_last_price": _tool_get_last_price,
     "get_historical_prices": _tool_get_historical_prices,
     "get_option_chain": _tool_get_option_chain,

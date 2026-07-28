@@ -1,3 +1,4 @@
+from typing import Any
 # market-data-hub - FastAPI data service for market and company data
 # Copyright (C) 2026  Market Data Hub Contributors
 #
@@ -49,7 +50,7 @@ def _public_base_url() -> str:
     return f"http://{host}:{settings.APP_PORT}"
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> Any:
     """Manage application lifecycle."""
     from app.providers.registry import registry
     from app.admin.runtime import initialize_admin_runtime
@@ -158,7 +159,7 @@ def _resolve_admin_static_dir() -> Path:
 
 
 @app.get("/admin/assets/{asset_path:path}", include_in_schema=False)
-async def serve_admin_asset(asset_path: str):
+async def serve_admin_asset(asset_path: str) -> Any:
     """Serve admin JS/CSS assets dynamically so volume-mount updates are picked up without restart."""
     asset_file = _resolve_admin_static_dir() / "assets" / asset_path
     if asset_file.exists() and asset_file.is_file():
@@ -167,7 +168,7 @@ async def serve_admin_asset(asset_path: str):
 
 
 @app.get("/admin", include_in_schema=False)
-async def serve_admin_root():
+async def serve_admin_root() -> Any:
     index = _resolve_admin_static_dir() / "index.html"
     if index.exists():
         return FileResponse(index)
@@ -175,7 +176,7 @@ async def serve_admin_root():
 
 
 @app.get("/admin/{full_path:path}", include_in_schema=False)
-async def serve_admin_spa(full_path: str):
+async def serve_admin_spa(full_path: str) -> Any:
     static_dir = _resolve_admin_static_dir()
     file_path = static_dir / full_path
     if file_path.exists() and file_path.is_file():
@@ -195,7 +196,7 @@ if settings.MCP_ENABLED:
 
 # Exception Handlers
 @app.exception_handler(AppError)
-async def app_error_handler(request: Request, exc: AppError):
+async def app_error_handler(request: Request, exc: AppError) -> Any:
     status_code = 500
     if exc.code == "DATA_NOT_FOUND":
         status_code = 404
@@ -217,7 +218,7 @@ async def app_error_handler(request: Request, exc: AppError):
 
 
 @app.exception_handler(Exception)
-async def general_error_handler(request: Request, exc: Exception):
+async def general_error_handler(request: Request, exc: Exception) -> Any:
     """Handle unexpected errors."""
     logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(

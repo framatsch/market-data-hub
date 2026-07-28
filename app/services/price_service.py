@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import structlog
 
@@ -24,7 +24,7 @@ from app.models.common import MarketStatus
 from app.providers.registry import get_registry
 
 class PriceService:
-    def __init__(self, registry=None):
+    def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_latest_price(self, symbol: str, provider_name: Optional[str] = None, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
@@ -38,12 +38,13 @@ class PriceService:
         interval: str,
         start: datetime,
         end: datetime,
+        extended_hours: bool = False,
         provider_name: Optional[str] = None,
-        sec_type: str = "stock"
+        sec_type: str = "STK"
     ) -> List[PriceBar]:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_historical_prices(symbol, interval, start, end, sec_type)
+        return await provider.get_historical_prices(symbol, interval, start, end, extended_hours, sec_type=sec_type)
 
     async def get_market_status(self, provider_name: Optional[str] = None) -> MarketStatus:
         provider = self.registry.get_price_provider(provider_name)

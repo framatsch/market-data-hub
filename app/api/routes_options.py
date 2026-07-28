@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from datetime import date
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
@@ -37,7 +37,7 @@ async def get_option_chain(
     market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
     provider: Optional[str] = None,
     format: str = "json"
-):
+) -> Any:
     """Get option chain for a symbol and expiry.
 
     Query Parameters:
@@ -85,7 +85,7 @@ async def get_option_quote(
     market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
     provider: Optional[str] = None,
     format: str = "json"
-):
+) -> Any:
     """Get a specific option quote.
 
     Query Parameters:

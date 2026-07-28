@@ -24,7 +24,7 @@ from app.utils.webhooks import validate_webhook_url
 try:
     from schwab.auth import AuthContext, client_from_received_url, get_auth_context
 except ImportError:  # pragma: no cover
-    AuthContext = Any  # type: ignore[misc,assignment]
+    AuthContext = Any
     client_from_received_url = None
     get_auth_context = None
 
@@ -202,7 +202,7 @@ async def exchange_admin_auth_token(payload: TokenExchangeRequest) -> dict[str, 
         response = await client.post(f"{issuer}/token", data=data)
     if response.status_code >= 400:
         raise HTTPException(status_code=401, detail="Token exchange failed")
-    return response.json()
+    return cast(dict[str, Any], response.json())
 
 
 @router.get("/auth/me")
@@ -359,7 +359,7 @@ async def update_admin_settings_defaults(payload: SystemDefaultsUpdate, _princip
 
 @router.get("/settings/capabilities")
 async def get_admin_settings_capabilities(_principal: PrincipalDep) -> dict[str, list[str]]:
-    capabilities = {
+    capabilities: dict[str, list[str]] = {
         "prices": [],
         "options": [],
         "companies": [],
@@ -643,7 +643,7 @@ async def schwab_update_tokens(_principal: PrincipalDep, force_refresh_token: bo
     before it expires after 7 days.
     """
     from app.providers.registry import registry as _registry
-    provider = _registry.get_provider("schwab")
+    provider = _registry.get_provider_instance("schwab")
     if provider is None:
         raise HTTPException(status_code=404, detail="Schwab provider is not loaded")
 

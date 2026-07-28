@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # market-data-hub - FastAPI data service for market and company data
 # Copyright (C) 2026  Market Data Hub Contributors
 #
@@ -27,7 +28,6 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/usr/bin/env python3
 """Linting and type-check runner for the Market Data Hub application.
 
 Runs ruff and mypy on the application via uv.

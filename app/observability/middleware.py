@@ -75,7 +75,7 @@ class ObservabilityMiddleware:
         route = request.scope.get("route")
         if route is not None:
             path = getattr(route, "path", None)
-            if path:
+            if isinstance(path, str) and path:
                 return path
         return request.url.path
 

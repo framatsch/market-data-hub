@@ -52,7 +52,7 @@ class ProviderRegistry:
         "prixe": PrixeProvider,
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._providers: Dict[str, object] = {}
         self._reload_lock = asyncio.Lock()
         self.default_price_provider: str | None = None
@@ -96,7 +96,7 @@ class ProviderRegistry:
             values["default_news_provider"], "default_news_provider", BaseNewsProvider
         )
 
-    def _initialize_providers(self):
+    def _initialize_providers(self) -> None:
         # Parse enabled providers from config
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if enabled_str:
@@ -222,7 +222,7 @@ class ProviderRegistry:
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BasePriceProvider):
             raise InvalidProviderError(provider_name)
-        return cast(BasePriceProvider, provider)
+        return provider
 
     def get_company_provider(self, name: Optional[str] = None) -> BaseCompanyProvider:
         if name is None and self.default_company_provider is None:
@@ -233,7 +233,7 @@ class ProviderRegistry:
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseCompanyProvider):
             raise InvalidProviderError(provider_name)
-        return cast(BaseCompanyProvider, provider)
+        return provider
 
     def get_options_provider(self, name: Optional[str] = None) -> BaseOptionsProvider:
         if name is None and self.default_options_provider is None:
@@ -244,7 +244,7 @@ class ProviderRegistry:
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseOptionsProvider):
             raise InvalidProviderError(provider_name)
-        return cast(BaseOptionsProvider, provider)
+        return provider
 
     def get_news_provider(self, name: Optional[str] = None) -> BaseNewsProvider:
         if name is None and self.default_news_provider is None:
@@ -255,7 +255,7 @@ class ProviderRegistry:
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseNewsProvider):
             raise InvalidProviderError(provider_name)
-        return cast(BaseNewsProvider, provider)
+        return provider
 
     async def shutdown(self) -> None:
         """Gracefully close all providers that expose a close() coroutine."""
@@ -268,7 +268,8 @@ registry = ProviderRegistry()
 def get_registry() -> ProviderRegistry:
     return registry
 
-def get_provider(provider_type: str, name: Optional[str] = None):
+from typing import Any
+def get_provider(provider_type: str, name: Optional[str] = None) -> Any:
     """
     Get a provider instance by type and name.
 

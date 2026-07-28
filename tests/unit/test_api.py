@@ -69,9 +69,14 @@ def test_get_historical_prices(client, mock_price_service):
                  volume=1000, provider="test")
     ])
     
-    response = client.get("/prices/AAPL/history?interval=1d")
+    response = client.get("/prices/AAPL/history?interval=1d&extended_hours=true")
     assert response.status_code == 200
     assert len(response.json()["data"]) == 1
+    
+    # Verify parameter passing
+    mock_price_service.get_historical_prices.assert_called_once()
+    kwargs = mock_price_service.get_historical_prices.call_args[0]
+    assert kwargs[4] == True  # extended_hours is the 5th argument
 
 def test_get_company_profile(client, mock_company_service):
     mock_company_service.get_company_profile = AsyncMock(return_value=CompanyProfile(

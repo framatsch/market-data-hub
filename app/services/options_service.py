@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from datetime import date
 
 import structlog
@@ -24,7 +24,7 @@ from app.models.options import OptionChain, OptionQuote
 from app.providers.registry import get_registry
 
 class OptionsService:
-    def __init__(self, registry=None):
+    def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_option_chain(

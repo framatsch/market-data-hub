@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Generic, TypeVar, Optional
+from typing import Generic, TypeVar, Optional, Any
 from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
@@ -23,7 +23,7 @@ T = TypeVar("T")
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: Optional[dict] = None
+    details: Optional[dict[str, Any]] = None
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
@@ -31,7 +31,7 @@ class ErrorResponse(BaseModel):
 class ResponseEnvelope(BaseModel, Generic[T]):
     """Standard API response envelope."""
     data: Optional[T] = None
-    meta: Optional[dict] = None
+    meta: Optional[dict[str, Any]] = None
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

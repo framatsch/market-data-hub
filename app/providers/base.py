@@ -34,7 +34,7 @@ class BasePriceProvider(ABC):
         _apply_runtime_config_defaults(self, config)
 
     @abstractmethod
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, sec_type: str = "stock") -> List[PriceBar]:
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "stock") -> List[PriceBar]:
         """Fetch historical price bars."""
         pass
 
