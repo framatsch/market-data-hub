@@ -2,12 +2,11 @@ import asyncio
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
-
 
 KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe")
 
@@ -107,7 +106,7 @@ class ProviderConfigRepository:
             values.update({key: value for key, value in config.items() if key in allowed})
             values["provider_name"] = provider_name
             candidate = ProviderRuntimeConfig(**values)
-        candidate = replace(candidate, updated_at=datetime.now(timezone.utc).isoformat())
+        candidate = replace(candidate, updated_at=datetime.now(UTC).isoformat())
         self._validate_config(candidate)
         with self._connect() as conn:
             conn.execute(

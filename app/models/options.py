@@ -16,8 +16,10 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel
+
 
 class OptionQuote(BaseModel):
     symbol: str
@@ -26,19 +28,19 @@ class OptionQuote(BaseModel):
     expiry: date
     type: Literal["call", "put"]
     price: Decimal
-    bid: Optional[Decimal] = None
-    ask: Optional[Decimal] = None
-    volume: Optional[int] = None
-    open_interest: Optional[int] = None
-    implied_volatility: Optional[float] = None
-    delta: Optional[float] = None
-    gamma: Optional[float] = None
-    theta: Optional[float] = None
-    vega: Optional[float] = None
+    bid: Decimal | None = None
+    ask: Decimal | None = None
+    volume: int | None = None
+    open_interest: int | None = None
+    implied_volatility: float | None = None
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None
+    vega: float | None = None
     provider: str
 
 class OptionChain(BaseModel):
     underlying_symbol: str
     expiry: date
-    options: List[OptionQuote]
+    options: list[OptionQuote]
     provider: str

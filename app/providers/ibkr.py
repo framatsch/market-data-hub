@@ -15,22 +15,28 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+import math
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import List, Optional, Literal, Any, Dict, Tuple, Sequence, cast
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
-from ib_async import IB, Stock, Option, Contract, Index, Future, Ticker, ContractDetails
+from ib_async import IB, Contract, Future, Index, Option, Stock, Ticker
 from ib_async.objects import BarData, HistoricalNews
 
 from app.config import settings
-from app.models.price import PriceBar, PriceQuote
-from app.models.options import OptionChain, OptionQuote
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsArticle
-from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, BaseNewsProvider
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+from app.providers.base import (
+    BaseCompanyProvider,
+    BaseNewsProvider,
+    BaseOptionsProvider,
+    BasePriceProvider,
+)
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
-import math
 from app.utils.logging import logger
 
 # Ensure event loop compatibility
@@ -52,17 +58,17 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         self._connected = False
 
         # Track subscription errors
-        self._subscription_errors: List[Dict[str, Any]] = []
+        self._subscription_errors: list[dict[str, Any]] = []
 
         # Track explicitly requested market data type (None = using default)
-        self._requested_market_data_type: Optional[int] = None
+        self._requested_market_data_type: int | None = None
 
         # Track if Level 1 subscription error occurred (for strict failure)
         self._level1_subscription_error: bool = False
 
 
 
-    async def _get_tickers_snapshot(self, contracts: Sequence[Contract], skip_on_error: bool = True) -> List[Ticker]:
+    async def _get_tickers_snapshot(self, contracts: Sequence[Contract], skip_on_error: bool = True) -> list[Ticker]:
         """
         Request market data snapshots for given contracts and wait for data.
         If skip_on_error is True, ignores subscription errors and returns available data.
@@ -209,7 +215,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
     def _is_valid(self, val: Any) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
 
-    def _to_decimal(self, val: Any) -> Optional[Decimal]:
+    def _to_decimal(self, val: Any) -> Decimal | None:
         if self._is_valid(val):
             return Decimal(str(val))
         return None
@@ -263,7 +269,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             self._connected = True
         except Exception as e:
             logger.error(f"Failed to connect to IBKR: {e}")
-            raise ProviderConnectionError(f"Could not connect to IBKR: {str(e)}")
+            raise ProviderConnectionError(f"Could not connect to IBKR: {e!s}")
         else:
             logger.debug("Successfully connected to IBKR")
 
@@ -316,7 +322,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             return self.fallback_on_subscription_error
         return False
 
-    async def _set_market_data_type(self, market_data_type: Optional[int] = None) -> None:
+    async def _set_market_data_type(self, market_data_type: int | None = None) -> None:
         """
         Change market data type dynamically.
         1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen
@@ -330,7 +336,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         except Exception as e:
             logger.error(f"Failed to set market data type: {e}")
 
-    async def _get_trading_hours(self, contract: Contract) -> Optional[tuple[str, str]]:
+    async def _get_trading_hours(self, contract: Contract) -> tuple[str, str] | None:
         """
         Get trading hours string and timezone for a contract via reqContractDetails.
 
@@ -362,7 +368,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             logger.debug(f"Failed to get trading hours for {contract.symbol}: {e}")
             return None
 
-    def _is_market_open(self, trading_hours: Optional[str], timezone_id: Optional[str] = None) -> Optional[bool]:
+    def _is_market_open(self, trading_hours: str | None, timezone_id: str | None = None) -> bool | None:
         """
         Determine if market is currently open based on trading_hours string and timezone.
 
@@ -405,7 +411,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
                     logger.debug(f"Using timezone: {timezone_id} ({tz_name})")
                 except Exception as e:
                     logger.warning(f"Could not load timezone '{timezone_id}': {e}, using UTC")
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
             else:
                 # Fallback to US/Eastern if no timezone provided (legacy behavior)
                 logger.debug("No timezone provided, defaulting to US/Eastern")
@@ -470,7 +476,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             logger.warning(f"Error parsing trading hours '{trading_hours}': {e}")
             return None
 
-    async def _get_market_open_status(self, contract: Contract) -> Optional[bool]:
+    async def _get_market_open_status(self, contract: Contract) -> bool | None:
         """
         Get current market open status for a contract.
         Fetches trading hours and timezone, then determines if market is currently open.
@@ -513,7 +519,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
             # Request data
             # whatToShow='TRADES' gives OHLCV
-            bars: List[BarData] = await self.ib.reqHistoricalDataAsync(
+            bars: list[BarData] = await self.ib.reqHistoricalDataAsync(
                 contract,
                 endDateTime=end,
                 durationStr=duration_str,
@@ -564,7 +570,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         finally:
             await self._disconnect()
 
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
         """
         Get the latest price quote for a stock or index.
 
@@ -695,10 +701,10 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         self,
         symbol: str,
         expiry: date,
-        min_strike: Optional[Decimal] = None,
-        max_strike: Optional[Decimal] = None,
-        right: Optional[Literal["call", "put"]] = None,
-        market_data_type: Optional[int] = None
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal["call", "put"] | None = None,
+        market_data_type: int | None = None
     ) -> OptionChain:
         try:
             logger.info(f"Fetching option chain for {symbol} expiry {expiry} (market_data_type={market_data_type})")
@@ -813,7 +819,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         finally:
             await self._disconnect()
 
-    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
+    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: int | None = None) -> OptionQuote:
         """
         Get a specific option quote.
 
@@ -984,7 +990,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
 
         try:
             contract = Stock(symbol, "SMART", "USD")
-            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
+            qualified: list[Contract] = cast(list[Contract], await self.ib.qualifyContractsAsync(contract))
 
             if not qualified or not qualified[0]:
                 raise DataNotFoundError("Company", symbol,
@@ -1007,7 +1013,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             raise ProviderError(f"IBKR company lookup failed for {symbol}",
                 details={"error": str(e)})
 
-    async def search_companies(self, query: str) -> List[CompanySummary]:
+    async def search_companies(self, query: str) -> list[CompanySummary]:
         """
         Search for companies in IBKR.
         Note: IBKR does not provide a search API. This attempts to qualify the query as a symbol.
@@ -1018,7 +1024,7 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         try:
             # Try to treat query as a symbol
             contract = Stock(query.upper(), "SMART", "USD")
-            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
+            qualified: list[Contract] = cast(list[Contract], await self.ib.qualifyContractsAsync(contract))
 
             if not qualified or not qualified[0]:
                 return []
@@ -1046,22 +1052,22 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None
-    ) -> List[NewsArticle]:
+        category: str | None = None
+    ) -> list[NewsArticle]:
         """Get news articles for a company from IBKR."""
         await self._ensure_connection()
 
         try:
             # 1. Create and qualify contract
             contract = Stock(symbol, 'SMART', 'USD')
-            qualified: List[Contract] = cast(List[Contract], await self.ib.qualifyContractsAsync(contract))
+            qualified: list[Contract] = cast(list[Contract], await self.ib.qualifyContractsAsync(contract))
             if not qualified:
                 raise DataNotFoundError("Contract", symbol)
 
             qualified_contract = qualified[0]
 
             # 2. Request historical news from IBKR
-            news_items = cast(List[HistoricalNews], await self.ib.reqHistoricalNewsAsync(
+            news_items = cast(list[HistoricalNews], await self.ib.reqHistoricalNewsAsync(
                 conId=qualified_contract.conId,
                 providerCodes='',  # All news providers
                 startDateTime=f"{from_date.isoformat()} 00:00:00",
@@ -1119,5 +1125,5 @@ class IBKRProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, 
             raise
         except Exception as e:
             logger.error(f"IBKR news error for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch news from IBKR: {str(e)}")
+            raise ProviderError(f"Failed to fetch news from IBKR: {e!s}")
             return []

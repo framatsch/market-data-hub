@@ -15,12 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
-from app.models.common import HealthResponse, ResponseEnvelope, MarketStatus
 from app.dependencies import PriceServiceDep
+from app.models.common import HealthResponse, MarketStatus, ResponseEnvelope
 from app.observability.metrics import metrics_response
 from app.providers.registry import get_registry
 
@@ -57,7 +58,7 @@ async def get_metrics() -> Any:
 @router.get("/market-status", response_model=ResponseEnvelope[MarketStatus])
 async def get_market_status(
     service: PriceServiceDep,
-    provider: Optional[str] = Query(None, description="Data provider (e.g., polygon, ibkr)")
+    provider: str | None = Query(None, description="Data provider (e.g., polygon, ibkr)")
 ) -> Any:
     """Returns current market status."""
     status = await service.get_market_status(provider_name=provider)

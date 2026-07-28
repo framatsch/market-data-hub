@@ -14,23 +14,24 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any, List, Optional
+from typing import Any
 
 import structlog
 
 from app.models.company import CompanyProfile, CompanySummary
 from app.providers.registry import get_registry
 
+
 class CompanyService:
     def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
-    async def get_company_profile(self, symbol: str, provider_name: Optional[str] = None) -> CompanyProfile:
+    async def get_company_profile(self, symbol: str, provider_name: str | None = None) -> CompanyProfile:
         provider = self.registry.get_company_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_company_profile(symbol)
 
-    async def search_companies(self, query: str, provider_name: Optional[str] = None) -> List[CompanySummary]:
+    async def search_companies(self, query: str, provider_name: str | None = None) -> list[CompanySummary]:
         provider = self.registry.get_company_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.search_companies(query)

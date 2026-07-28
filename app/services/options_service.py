@@ -14,14 +14,15 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from decimal import Decimal
-from typing import Any, Literal, Optional
 from datetime import date
+from decimal import Decimal
+from typing import Any, Literal
 
 import structlog
 
 from app.models.options import OptionChain, OptionQuote
 from app.providers.registry import get_registry
+
 
 class OptionsService:
     def __init__(self, registry: Any = None) -> None:
@@ -31,11 +32,11 @@ class OptionsService:
         self,
         symbol: str,
         expiry: date,
-        provider_name: Optional[str] = None,
-        min_strike: Optional[Decimal] = None,
-        max_strike: Optional[Decimal] = None,
-        right: Optional[Literal["call", "put"]] = None,
-        market_data_type: Optional[int] = None
+        provider_name: str | None = None,
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal["call", "put"] | None = None,
+        market_data_type: int | None = None
     ) -> OptionChain:
         provider = self.registry.get_options_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
@@ -51,8 +52,8 @@ class OptionsService:
         self,
         symbol: str,
         option_id: str,
-        provider_name: Optional[str] = None,
-        market_data_type: Optional[int] = None
+        provider_name: str | None = None,
+        market_data_type: int | None = None
     ) -> OptionQuote:
         provider = self.registry.get_options_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)

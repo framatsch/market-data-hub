@@ -14,24 +14,31 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from datetime import datetime, timedelta, timezone, date
-from typing import Any, AsyncGenerator, Dict, List, Optional, Deque, Tuple, TypeVar, Callable, cast
-from decimal import Decimal
-from collections import deque
-import time
 import asyncio
-import logging
 import io
+import logging
+import time
+from collections import deque
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from typing import Any, TypeVar, cast
+
 import pandas as pd
 
 from app.config import settings
 from app.models.company import CompanyProfile, CompanySummary
-from app.models.price import PriceQuote, PriceBar
 from app.models.news import NewsArticle
+from app.models.price import PriceBar, PriceQuote
+from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BasePriceProvider
 from app.providers.credentials import get_provider_credential_sync
-from app.providers.base import BaseCompanyProvider, BasePriceProvider, BaseNewsProvider
-from app.utils.errors import DataNotFoundError, ProviderConnectionError, DataValidationError, ProviderError
+from app.utils.errors import (
+    DataNotFoundError,
+    DataValidationError,
+    ProviderConnectionError,
+    ProviderError,
+)
 
 logger = logging.getLogger(__name__)
 _REFINITIV_HTTPX_PROXY_PATCHED = False
@@ -39,7 +46,7 @@ _REFINITIV_HTTPX_PROXY_PATCHED = False
 # Lazy import refinitiv to avoid import errors if not installed
 try:
     import refinitiv.data as rd
-    from refinitiv.data.content import search, historical_pricing
+    from refinitiv.data.content import historical_pricing, search
     REFINITIV_AVAILABLE = True
 except ImportError:
     REFINITIV_AVAILABLE = False
@@ -104,15 +111,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         # Session management
         self._session = None
-        self._session_created_at: Optional[datetime] = None
+        self._session_created_at: datetime | None = None
         self._session_ttl = timedelta(minutes=55)  # Refresh before 1h expiry
 
         # RIC conversion cache (ticker -> RIC mapping)
-        self._ric_cache: Dict[str, Tuple[str, datetime]] = {}
+        self._ric_cache: dict[str, tuple[str, datetime]] = {}
         self._ric_cache_ttl = timedelta(hours=24)
 
         # Quote caching for performance
-        self._quote_cache: Dict[str, Tuple[PriceQuote, datetime]] = {}
+        self._quote_cache: dict[str, tuple[PriceQuote, datetime]] = {}
 
         # Rate limiting — no maxlen: manual popleft manages window to avoid eviction races
         self._request_times: deque[float] = deque()
@@ -156,7 +163,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
     def _get_session(self) -> Any:
         """Get or create Refinitiv session with smart refresh."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Check if session needs refresh
         if self._session is None or self._session_created_at is None:
@@ -262,7 +269,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             rd.session.set_default(session)
 
             self._session = session
-            self._session_created_at = datetime.now(timezone.utc)
+            self._session_created_at = datetime.now(UTC)
             logger.info("✅ Refinitiv session created successfully")
 
             # refinitiv.data creates its own plain-text StreamHandler on rd.* loggers
@@ -314,7 +321,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         # Check cache
         if ticker in self._ric_cache:
             ric, cached_at = self._ric_cache[ticker]
-            if datetime.now(timezone.utc) - cached_at < self._ric_cache_ttl:
+            if datetime.now(UTC) - cached_at < self._ric_cache_ttl:
                 logger.debug(f"RIC cache hit for {ticker}: {ric}")
                 return ric
 
@@ -369,13 +376,13 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                             ric_str = str(ric_val)
                             # Skip continuation contracts, options, and other derivatives
                             if not any(x in ric_str.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
-                                self._ric_cache[ticker] = (ric_str, datetime.now(timezone.utc))
+                                self._ric_cache[ticker] = (ric_str, datetime.now(UTC))
                                 logger.info(f"Ticker {ticker} mapped to RIC {ric_str} (strategy: {strategy['name']})")
                                 return ric_str
 
                         # If no clean RIC found, use first one anyway (fallback)
                         ric_str = str(rics[0])
-                        self._ric_cache[ticker] = (ric_str, datetime.now(timezone.utc))
+                        self._ric_cache[ticker] = (ric_str, datetime.now(UTC))
                         logger.warning(f"Ticker {ticker} mapped to RIC {ric_str} (no clean RIC, using first result)")
                         return ric_str
 
@@ -434,14 +441,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Quote Caching
     # ========================================================================
 
-    def _get_cached_quote(self, symbol: str) -> Optional[PriceQuote]:
+    def _get_cached_quote(self, symbol: str) -> PriceQuote | None:
         """Get cached quote if still valid."""
         if settings.LSEG_CACHE_TTL_SECONDS <= 0:
             return None
 
         if symbol in self._quote_cache:
             quote, cached_at = self._quote_cache[symbol]
-            age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+            age = (datetime.now(UTC) - cached_at).total_seconds()
 
             if age < settings.LSEG_CACHE_TTL_SECONDS:
                 logger.debug(f"Cache hit for {symbol} (age: {age:.1f}s)")
@@ -452,7 +459,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     def _cache_quote(self, symbol: str, quote: PriceQuote) -> None:
         """Cache quote data."""
         if settings.LSEG_CACHE_TTL_SECONDS > 0:
-            self._quote_cache[symbol] = (quote, datetime.now(timezone.utc))
+            self._quote_cache[symbol] = (quote, datetime.now(UTC))
 
     # ========================================================================
     # Retry Logic with Exponential Backoff
@@ -518,7 +525,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         row = df.iloc[0]
 
         # Extract fields with safe handling
-        def safe_decimal(field_name: str, required: bool = False) -> Optional[Decimal]:
+        def safe_decimal(field_name: str, required: bool = False) -> Decimal | None:
             if field_name not in df.columns:
                 if required and settings.LSEG_STRICT_VALIDATION:
                     raise DataValidationError(
@@ -540,7 +547,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         # Fields from historical_pricing: TRDPRC_1, OPEN_PRC, HIGH_1, LOW_1, BID, ASK, ACVOL_UNS, VWAP
         price = safe_decimal("TRDPRC_1", required=True)
         if price is None:
-            price = Decimal("0")
+            price = Decimal(0)
 
         return PriceQuote(
             symbol=symbol,
@@ -553,14 +560,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             high=safe_decimal("HIGH_1"),
             low=safe_decimal("LOW_1"),
             volume=int(row["ACVOL_UNS"]) if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"]) else None,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
     # ========================================================================
     # Price Provider Methods (BasePriceProvider)
     # ========================================================================
 
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
         """Get current price quote for a symbol.
 
         Note: LSEG uses historical pricing summaries (daily) and does not support
@@ -617,9 +624,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         """
         # Ensure start/end are timezone-aware (convert naive to UTC)
         if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
+            start = start.replace(tzinfo=UTC)
         if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
+            end = end.replace(tzinfo=UTC)
 
         # Convert ticker to RIC
         ric = self._ticker_to_ric(symbol)
@@ -747,17 +754,17 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 timestamp = pd.to_datetime(row.name if hasattr(row, 'name') else idx).to_pydatetime()
                 # Make timezone-aware if naive
                 if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    timestamp = timestamp.replace(tzinfo=UTC)
 
                 # Historical pricing columns: TRDPRC_1, OPEN_PRC, HIGH_1, LOW_1, ACVOL_UNS
                 bar = PriceBar(
                     symbol=symbol,
                     start=timestamp,
                     end=timestamp,
-                    open=Decimal(str(row['OPEN_PRC'])) if 'OPEN_PRC' in df.columns and pd.notna(row['OPEN_PRC']) else Decimal('0'),
-                    high=Decimal(str(row['HIGH_1'])) if 'HIGH_1' in df.columns and pd.notna(row['HIGH_1']) else Decimal('0'),
-                    low=Decimal(str(row['LOW_1'])) if 'LOW_1' in df.columns and pd.notna(row['LOW_1']) else Decimal('0'),
-                    close=Decimal(str(row['TRDPRC_1'])) if 'TRDPRC_1' in df.columns and pd.notna(row['TRDPRC_1']) else Decimal('0'),
+                    open=Decimal(str(row['OPEN_PRC'])) if 'OPEN_PRC' in df.columns and pd.notna(row['OPEN_PRC']) else Decimal(0),
+                    high=Decimal(str(row['HIGH_1'])) if 'HIGH_1' in df.columns and pd.notna(row['HIGH_1']) else Decimal(0),
+                    low=Decimal(str(row['LOW_1'])) if 'LOW_1' in df.columns and pd.notna(row['LOW_1']) else Decimal(0),
+                    close=Decimal(str(row['TRDPRC_1'])) if 'TRDPRC_1' in df.columns and pd.notna(row['TRDPRC_1']) else Decimal(0),
                     volume=int(row['ACVOL_UNS']) if 'ACVOL_UNS' in df.columns and pd.notna(row['ACVOL_UNS']) else 0,
                     provider="lseg"
                 )
@@ -812,7 +819,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             provider="lseg"
         )
 
-    async def search_companies(self, query: str) -> List[CompanySummary]:
+    async def search_companies(self, query: str) -> list[CompanySummary]:
         # TODO: Replace with real API call
         return [
             CompanySummary(
@@ -843,8 +850,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None
-    ) -> List[NewsArticle]:
+        category: str | None = None
+    ) -> list[NewsArticle]:
         """Get news articles for a company from LSEG."""
         try:
             # 1. Convert ticker to RIC
@@ -919,4 +926,4 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             raise
         except Exception as e:
             logger.error(f"LSEG news error for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch news from LSEG: {str(e)}")
+            raise ProviderError(f"Failed to fetch news from LSEG: {e!s}")

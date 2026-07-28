@@ -4,7 +4,6 @@ from app.admin.provider_config_repository import ProviderConfigRepository
 from app.admin.settings_repository import SettingsRepository
 from app.config import settings
 
-
 _crypto_service: CryptoService | None = None
 _key_repository: KeyRepository | None = None
 _provider_config_repository: ProviderConfigRepository | None = None

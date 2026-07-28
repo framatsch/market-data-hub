@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
-from decimal import Decimal
 import asyncio
-from typing import List, Optional, Any, Dict, cast
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any, cast
 
 import httpx
 
 from app.config import settings
 from app.models.price import PriceBar, PriceQuote
-from app.providers.credentials import get_provider_credential_sync
 from app.providers.base import BasePriceProvider
+from app.providers.credentials import get_provider_credential_sync
 from app.utils.errors import AppError, ProviderError, map_httpx_http_error
 
 
@@ -19,7 +19,7 @@ class PrixeProvider(BasePriceProvider):
         self._api_key: str | None = None
 
         self._base_url = settings.PRIXE_BASE_URL
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def _get_api_key(self) -> str:
         if self._api_key:
@@ -40,7 +40,7 @@ class PrixeProvider(BasePriceProvider):
             await self._client.aclose()
             self._client = None
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate Prixe API key with a lightweight last_sold request."""
         client = await self._get_client()
         try:
@@ -88,7 +88,7 @@ class PrixeProvider(BasePriceProvider):
     async def get_last_price(
         self,
         symbol: str,
-        market_data_type: Optional[int] = None,
+        market_data_type: int | None = None,
         sec_type: str = "stock",
     ) -> PriceQuote:
         del market_data_type
@@ -136,7 +136,7 @@ class PrixeProvider(BasePriceProvider):
         end: datetime,
         extended_hours: bool = False,
         sec_type: str = "STK",
-    ) -> List[PriceBar]:
+    ) -> list[PriceBar]:
         del sec_type
 
         normalized_symbol = symbol.upper()
@@ -263,7 +263,7 @@ class PrixeProvider(BasePriceProvider):
         payload: object,
         start: datetime,
         end: datetime,
-    ) -> List[PriceBar]:
+    ) -> list[PriceBar]:
         if not isinstance(payload, dict):
             raise ProviderError(
                 "Invalid historical payload from Prixe.",
@@ -297,11 +297,11 @@ class PrixeProvider(BasePriceProvider):
                 details={"provider": "prixe", "symbol": symbol},
             )
             
-        timestamps_list = cast(List[Any], timestamps)
-        opens_list = cast(List[Any], opens)
-        highs_list = cast(List[Any], highs)
-        lows_list = cast(List[Any], lows)
-        closes_list = cast(List[Any], closes)
+        timestamps_list = cast(list[Any], timestamps)
+        opens_list = cast(list[Any], opens)
+        highs_list = cast(list[Any], highs)
+        lows_list = cast(list[Any], lows)
+        closes_list = cast(list[Any], closes)
 
         lengths = {
             "timestamp": len(timestamps_list),
@@ -322,11 +322,11 @@ class PrixeProvider(BasePriceProvider):
                 details={"provider": "prixe", "symbol": symbol},
             )
 
-        bars: List[PriceBar] = []
+        bars: list[PriceBar] = []
         for idx, ts in enumerate(timestamps_list):
             bar_start = self._parse_timestamp(ts)
             if bar_start.tzinfo is None:
-                bar_start = bar_start.replace(tzinfo=timezone.utc)
+                bar_start = bar_start.replace(tzinfo=UTC)
 
             volume_value = 0
             if isinstance(volumes, list):
@@ -346,28 +346,28 @@ class PrixeProvider(BasePriceProvider):
                 )
             )
 
-        start_utc = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
-        end_utc = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
+        start_utc = start if start.tzinfo else start.replace(tzinfo=UTC)
+        end_utc = end if end.tzinfo else end.replace(tzinfo=UTC)
         return [bar for bar in bars if start_utc <= bar.start <= end_utc]
 
     def _parse_timestamp(self, value: object) -> datetime:
         if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+            return datetime.fromtimestamp(float(value), tz=UTC)
         if isinstance(value, str) and value:
             normalized = value.replace("Z", "+00:00")
             try:
                 parsed = datetime.fromisoformat(normalized)
                 if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
+                    return parsed.replace(tzinfo=UTC)
                 return parsed
             except ValueError:
-                return datetime.now(timezone.utc)
-        return datetime.now(timezone.utc)
+                return datetime.now(UTC)
+        return datetime.now(UTC)
 
-    def _filter_rth(self, bars: List[PriceBar]) -> List[PriceBar]:
+    def _filter_rth(self, bars: list[PriceBar]) -> list[PriceBar]:
         """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
-        from zoneinfo import ZoneInfo
         from datetime import time
+        from zoneinfo import ZoneInfo
         
         filtered = []
         tz = ZoneInfo("America/New_York")
@@ -376,7 +376,7 @@ class PrixeProvider(BasePriceProvider):
         
         for bar in bars:
             if bar.start.tzinfo is None:
-                ny_time = bar.start.replace(tzinfo=timezone.utc).astimezone(tz)
+                ny_time = bar.start.replace(tzinfo=UTC).astimezone(tz)
             else:
                 ny_time = bar.start.astimezone(tz)
                 

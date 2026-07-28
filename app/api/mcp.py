@@ -29,16 +29,17 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import date, datetime, timedelta
-from typing import Any, AsyncGenerator, Dict, Callable, Awaitable, cast
+from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from app.services.price_service import PriceService
-from app.services.options_service import OptionsService
-from app.services.company_service import CompanyService
 from app.providers.registry import get_registry
+from app.services.company_service import CompanyService
+from app.services.options_service import OptionsService
+from app.services.price_service import PriceService
 from app.utils.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ metadata_router = APIRouter(tags=["mcp"])
 # ---------------------------------------------------------------------------
 # Session registry: session_id -> asyncio.Queue of SSE event strings
 # ---------------------------------------------------------------------------
-_ACTIVE_STREAMS: Dict[str, asyncio.Queue[str]] = {}
+_ACTIVE_STREAMS: dict[str, asyncio.Queue[str]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +80,7 @@ async def mcp_sse(request: Request) -> StreamingResponse:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield msg
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
             _ACTIVE_STREAMS.pop(session_id, None)
@@ -196,7 +197,7 @@ async def _handle_json_rpc(method: str, params: dict[str, Any], rpc_id: Any) -> 
             "id": rpc_id,
             "error": {"message": exc.message, "code": exc.code},
         }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("MCP unexpected error in method=%s: %s", method, exc, exc_info=True)
         return {
             "jsonrpc": "2.0",
@@ -524,7 +525,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
 ]
 
-TOOL_HANDLERS: Dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
+TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
     "get_last_price": _tool_get_last_price,
     "get_historical_prices": _tool_get_historical_prices,
     "get_option_chain": _tool_get_option_chain,

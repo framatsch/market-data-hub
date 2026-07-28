@@ -17,13 +17,14 @@
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 
-from app.models.price import PriceBar, PriceQuote
-from app.models.company import CompanyProfile, CompanySummary
-from app.models.options import OptionChain, OptionQuote
-from app.models.news import NewsArticle
 from app.models.common import MarketStatus
+from app.models.company import CompanyProfile, CompanySummary
+from app.models.news import NewsArticle
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+
 
 class BasePriceProvider(ABC):
     name = "none"
@@ -34,19 +35,16 @@ class BasePriceProvider(ABC):
         _apply_runtime_config_defaults(self, config)
 
     @abstractmethod
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "stock") -> List[PriceBar]:
+    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "stock") -> list[PriceBar]:
         """Fetch historical price bars."""
-        pass
 
     @abstractmethod
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
         """Fetch latest price quote."""
-        pass
 
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
-        pass
 
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status."""
@@ -63,17 +61,14 @@ class BaseCompanyProvider(ABC):
     @abstractmethod
     async def get_company_profile(self, symbol: str) -> CompanyProfile:
         """Fetch company profile."""
-        pass
 
     @abstractmethod
-    async def search_companies(self, query: str) -> List[CompanySummary]:
+    async def search_companies(self, query: str) -> list[CompanySummary]:
         """Search for companies."""
-        pass
 
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
-        pass
 
 class BaseOptionsProvider(ABC):
     name = "none"
@@ -88,23 +83,20 @@ class BaseOptionsProvider(ABC):
         self,
         symbol: str,
         expiry: date,
-        min_strike: Optional[Decimal] = None,
-        max_strike: Optional[Decimal] = None,
-        right: Optional[Literal["call", "put"]] = None,
-        market_data_type: Optional[int] = None
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal["call", "put"] | None = None,
+        market_data_type: int | None = None
     ) -> OptionChain:
         """Fetch option chain for a given expiry."""
-        pass
 
     @abstractmethod
-    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
+    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: int | None = None) -> OptionQuote:
         """Fetch specific option quote."""
-        pass
 
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
-        pass
 
 
 class BaseNewsProvider(ABC):
@@ -126,8 +118,8 @@ class BaseNewsProvider(ABC):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None
-    ) -> List[NewsArticle]:
+        category: str | None = None
+    ) -> list[NewsArticle]:
         """
         Get news articles for a company.
 
@@ -147,12 +139,10 @@ class BaseNewsProvider(ABC):
             DataNotFoundError: If symbol not found
             ProviderError: If news retrieval fails
         """
-        pass
 
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
-        pass
 
 
 def _apply_runtime_config_defaults(provider: object, config: Any) -> None:

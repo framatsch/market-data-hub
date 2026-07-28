@@ -16,19 +16,27 @@
 
 import asyncio
 import logging
-from typing import Dict, Optional, cast
 
-from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderConfigRepository, ProviderRuntimeConfig
+from app.admin.provider_config_repository import (
+    KNOWN_PROVIDERS,
+    ProviderConfigRepository,
+    ProviderRuntimeConfig,
+)
 from app.admin.settings_repository import SettingsRepository
 from app.config import settings
-from app.providers.base import BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseNewsProvider
+from app.providers.base import (
+    BaseCompanyProvider,
+    BaseNewsProvider,
+    BaseOptionsProvider,
+    BasePriceProvider,
+)
+from app.providers.finnhub import FinnhubProvider
 from app.providers.ibkr import IBKRProvider
 from app.providers.lseg import LSEGProvider
-from app.providers.schwab import SchwabProvider
 from app.providers.mock_news import MockNewsProvider
-from app.providers.finnhub import FinnhubProvider
 from app.providers.polygon import PolygonProvider
 from app.providers.prixe import PrixeProvider
+from app.providers.schwab import SchwabProvider
 from app.utils.errors import AppError, InvalidProviderError
 
 logger = logging.getLogger(__name__)
@@ -53,7 +61,7 @@ class ProviderRegistry:
     }
 
     def __init__(self) -> None:
-        self._providers: Dict[str, object] = {}
+        self._providers: dict[str, object] = {}
         self._reload_lock = asyncio.Lock()
         self.default_price_provider: str | None = None
         self.default_company_provider: str | None = None
@@ -110,7 +118,7 @@ class ProviderRegistry:
         for name, cls in to_load.items():
             try:
                 provider = cls()
-                setattr(provider, "name", name)
+                provider.name = name
                 self._providers[name] = provider
             except ImportError as e:
                 logger.warning(f"Provider '{name}' not available: {e}")
@@ -169,7 +177,7 @@ class ProviderRegistry:
                 if name not in self._providers:
                     try:
                         provider = self.provider_classes[name]()
-                        setattr(provider, "name", name)
+                        provider.name = name
                         self._providers[name] = provider
                     except ImportError as exc:
                         logger.warning("Provider '%s' not available: %s", name, exc)
@@ -197,7 +205,7 @@ class ProviderRegistry:
         if callable(configure):
             configure(config)
         else:
-            setattr(provider, "_runtime_config", config)
+            provider._runtime_config = config
 
     def is_provider_paused(self, name: str) -> bool:
         return bool(getattr(self._providers.get(name), "is_paused", False))
@@ -213,7 +221,7 @@ class ProviderRegistry:
     def list_provider_instances(self) -> dict[str, object]:
         return dict(self._providers)
 
-    def get_price_provider(self, name: Optional[str] = None) -> BasePriceProvider:
+    def get_price_provider(self, name: str | None = None) -> BasePriceProvider:
         if name is None and self.default_price_provider is None:
             raise AppError("No price provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
         provider_name = name or self.default_price_provider
@@ -224,7 +232,7 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
-    def get_company_provider(self, name: Optional[str] = None) -> BaseCompanyProvider:
+    def get_company_provider(self, name: str | None = None) -> BaseCompanyProvider:
         if name is None and self.default_company_provider is None:
             raise AppError("No company data provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
         provider_name = name or self.default_company_provider
@@ -235,7 +243,7 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
-    def get_options_provider(self, name: Optional[str] = None) -> BaseOptionsProvider:
+    def get_options_provider(self, name: str | None = None) -> BaseOptionsProvider:
         if name is None and self.default_options_provider is None:
             raise AppError("No options provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
         provider_name = name or self.default_options_provider
@@ -246,7 +254,7 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
-    def get_news_provider(self, name: Optional[str] = None) -> BaseNewsProvider:
+    def get_news_provider(self, name: str | None = None) -> BaseNewsProvider:
         if name is None and self.default_news_provider is None:
             raise AppError("No news provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
         provider_name = name or self.default_news_provider
@@ -269,7 +277,9 @@ def get_registry() -> ProviderRegistry:
     return registry
 
 from typing import Any
-def get_provider(provider_type: str, name: Optional[str] = None) -> Any:
+
+
+def get_provider(provider_type: str, name: str | None = None) -> Any:
     """
     Get a provider instance by type and name.
 

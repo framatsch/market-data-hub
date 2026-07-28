@@ -1,8 +1,7 @@
 import asyncio
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
 
 SETTINGS_ALLOWLIST = frozenset(
     {
@@ -79,7 +78,7 @@ class SettingsRepository:
 
     def _set_sync(self, key: str, value: str | None) -> dict[str, str | None]:
         self._validate_key(key)
-        updated_at = datetime.now(timezone.utc).isoformat()
+        updated_at = datetime.now(UTC).isoformat()
         with self._connect() as conn:
             conn.execute(
                 """

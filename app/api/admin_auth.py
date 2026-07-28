@@ -10,7 +10,6 @@ from jose import JWTError, jwt
 
 from app.config import settings
 
-
 _JWKS_CACHE_SECONDS = 3600
 _MIN_FORCE_REFRESH_INTERVAL = 60.0
 

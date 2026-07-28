@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any
 
 import structlog
 
@@ -32,12 +32,12 @@ class NewsService:
         symbol: str,
         from_date: date,
         to_date: date,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None,
-    ) -> List[NewsArticle]:
+        category: str | None = None,
+    ) -> list[NewsArticle]:
         provider = self.registry.get_news_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_company_news(

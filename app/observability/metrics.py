@@ -1,6 +1,5 @@
 from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
 
-
 REGISTRY = CollectorRegistry()
 
 PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none"})

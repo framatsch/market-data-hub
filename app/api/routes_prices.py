@@ -15,7 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime, timedelta
-from typing import Optional, Any
+from typing import Any
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/prices", tags=["Prices"])
 async def get_last_price(
     symbol: str,
     service: PriceServiceDep,
-    provider: Optional[str] = Query(
+    provider: str | None = Query(
         None,
         description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type"
     ),
@@ -37,7 +38,7 @@ async def get_last_price(
         "stock",
         description="Security type: 'stock' (default) or 'index'. For indices like ^RUT, use 'index'."
     ),
-    market_data_type: Optional[int] = Query(
+    market_data_type: int | None = Query(
         None,
         description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter."
     ),
@@ -75,10 +76,10 @@ async def get_historical_prices(
     symbol: str,
     service: PriceServiceDep,
     interval: str = "1d",
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
     extended_hours: bool = Query(False, description="Include extended trading hours (pre-market/after-hours)"),
-    provider: Optional[str] = None,
+    provider: str | None = None,
     sec_type: str = Query("stock", description="Security type: 'stock' or 'index'"),
     format: str = "json"
 ) -> Any:

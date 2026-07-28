@@ -16,8 +16,9 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+
 from pydantic import BaseModel
+
 
 class PriceQuote(BaseModel):
     symbol: str
@@ -25,13 +26,13 @@ class PriceQuote(BaseModel):
     currency: str
     timestamp: datetime
     provider: str
-    bid: Optional[Decimal] = None
-    ask: Optional[Decimal] = None
-    open: Optional[Decimal] = None
-    high: Optional[Decimal] = None
-    low: Optional[Decimal] = None
-    volume: Optional[int] = None
-    is_market_open: Optional[bool] = None
+    bid: Decimal | None = None
+    ask: Decimal | None = None
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
+    volume: int | None = None
+    is_market_open: bool | None = None
 
     @property
     def last_price(self) -> Decimal:

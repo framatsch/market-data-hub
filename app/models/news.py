@@ -16,8 +16,8 @@
 
 """News article models."""
 
-from datetime import datetime, date
-from typing import List, Optional, Dict
+from datetime import date, datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -30,13 +30,13 @@ class NewsArticle(BaseModel):
     published_at: datetime
     source: str
     url: str
-    full_text: Optional[str] = Field(None, description="Full article text if available")
-    category: Optional[str] = Field(
+    full_text: str | None = Field(None, description="Full article text if available")
+    category: str | None = Field(
         None, description="Category: earnings, merger, product, legal, etc."
     )
     # Extra fields (Finnhub specific)
-    image: Optional[str] = Field(None, description="Image URL (Finnhub)")
-    sentiment: Optional[Dict[str, float]] = Field(
+    image: str | None = Field(None, description="Image URL (Finnhub)")
+    sentiment: dict[str, float] | None = Field(
         None, description="Sentiment scores: {positive, negative, neutral} (Finnhub)"
     )
 
@@ -56,5 +56,5 @@ class NewsMetadata(BaseModel):
 class NewsResponse(BaseModel):
     """Standardized news response with pagination."""
 
-    data: List[NewsArticle]
+    data: list[NewsArticle]
     meta: NewsMetadata

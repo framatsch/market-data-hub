@@ -14,9 +14,10 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from decimal import Decimal
-from typing import Any, Literal, Optional
 from datetime import date
+from decimal import Decimal
+from typing import Any, Literal
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
@@ -30,12 +31,12 @@ router = APIRouter(prefix="/options", tags=["Options"])
 async def get_option_chain(
     symbol: str,
     service: OptionsServiceDep,
-    expiry: Optional[date] = None,
-    min_strike: Optional[Decimal] = Query(None, description="Minimum strike price to include"),
-    max_strike: Optional[Decimal] = Query(None, description="Maximum strike price to include"),
-    right: Optional[Literal["call", "put"]] = Query(None, description="Filter by option type (call or put)"),
-    market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
-    provider: Optional[str] = None,
+    expiry: date | None = None,
+    min_strike: Decimal | None = Query(None, description="Minimum strike price to include"),
+    max_strike: Decimal | None = Query(None, description="Maximum strike price to include"),
+    right: Literal["call", "put"] | None = Query(None, description="Filter by option type (call or put)"),
+    market_data_type: int | None = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
+    provider: str | None = None,
     format: str = "json"
 ) -> Any:
     """Get option chain for a symbol and expiry.
@@ -82,8 +83,8 @@ async def get_option_quote(
     symbol: str,
     option_id: str,
     service: OptionsServiceDep,
-    market_data_type: Optional[int] = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
-    provider: Optional[str] = None,
+    market_data_type: int | None = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
+    provider: str | None = None,
     format: str = "json"
 ) -> Any:
     """Get a specific option quote.

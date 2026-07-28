@@ -14,25 +14,26 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Any, List, Optional
-from datetime import date, timedelta
 import io
+from datetime import date, timedelta
+from typing import Any
+
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import CompanyServiceDep, NewsServiceDep
-from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import ResponseEnvelope
-from app.models.news import NewsResponse, NewsMetadata
+from app.models.company import CompanyProfile, CompanySummary
+from app.models.news import NewsMetadata, NewsResponse
 from app.utils.csv_export import to_csv
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
-@router.get("/search", response_model=ResponseEnvelope[List[CompanySummary]])
+@router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
 async def search_companies(
     q: str,
     service: CompanyServiceDep,
-    provider: Optional[str] = None
+    provider: str | None = None
 ) -> Any:
     """Search for companies by query string."""
     provider = provider.lower() if provider else None
@@ -43,7 +44,7 @@ async def search_companies(
 async def get_company_profile(
     symbol: str,
     service: CompanyServiceDep,
-    provider: Optional[str] = None
+    provider: str | None = None
 ) -> Any:
     """Get company profile information."""
     symbol = symbol.upper()
@@ -56,14 +57,14 @@ async def get_company_profile(
 async def get_company_news(
     symbol: str,
     service: NewsServiceDep,
-    provider: Optional[str] = Query(None, description="Data provider (finnhub, lseg, ibkr, mock)"),
-    days: Optional[int] = Query(None, description="Last N days (overrides from/to dates)"),
-    from_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
-    to_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    provider: str | None = Query(None, description="Data provider (finnhub, lseg, ibkr, mock)"),
+    days: int | None = Query(None, description="Last N days (overrides from/to dates)"),
+    from_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    to_date: date | None = Query(None, description="End date (YYYY-MM-DD)"),
     limit: int = Query(20, ge=1, le=100, description="Results per page (max 100)"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     language: str = Query("en", description="Language code (ISO 639-1: en, de, fr, etc.)"),
-    category: Optional[str] = Query(None, description="Filter by category (earnings, merger, product, legal)"),
+    category: str | None = Query(None, description="Filter by category (earnings, merger, product, legal)"),
     format: str = Query("json", description="Response format (json, csv)")
 ) -> Any:
     """

@@ -1,7 +1,7 @@
 import asyncio
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.admin.crypto import CryptoService
@@ -48,7 +48,7 @@ class KeyRepository:
 
     def _save_sync(self, provider_name: str, credential_name: str, plaintext: str) -> CredentialMetadata:
         blob = self._crypto.encrypt(plaintext)
-        updated_at = datetime.now(timezone.utc).isoformat()
+        updated_at = datetime.now(UTC).isoformat()
         with self._connect() as conn:
             conn.execute(
                 """

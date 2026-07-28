@@ -14,24 +14,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Optional
+
 from pydantic import BaseModel, HttpUrl
+
 
 class CompanySummary(BaseModel):
     symbol: str
     name: str
     exchange: str
-    sector: Optional[str] = None
+    sector: str | None = None
     provider: str
 
 class CompanyProfile(BaseModel):
     symbol: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     exchange: str
     currency: str
-    website: Optional[HttpUrl] = None
-    sector: Optional[str] = None
-    industry: Optional[str] = None
-    employees: Optional[int] = None
+    website: HttpUrl | None = None
+    sector: str | None = None
+    industry: str | None = None
+    employees: int | None = None
     provider: str

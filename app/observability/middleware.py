@@ -8,7 +8,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.observability.audit import audit_log
 from app.observability.metrics import record_request, status_class
 
-
 SKIP_AUDIT_PATH_PREFIXES = ("/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/admin")
 
 

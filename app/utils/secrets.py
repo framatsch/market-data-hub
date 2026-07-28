@@ -31,5 +31,5 @@ def unwrap_secret(value: object) -> str | None:
     if value is None:
         return None
     if hasattr(value, "get_secret_value"):
-        return str(getattr(value, "get_secret_value")())
+        return str(value.get_secret_value())
     return str(value)

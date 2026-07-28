@@ -17,7 +17,7 @@
 import asyncio
 import json
 import logging
-from typing import List
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
 class SubscriptionMessage(BaseModel):
     type: str # "subscribe"
-    symbols: List[str]
+    symbols: list[str]
     provider: str = "ibkr"
 
 @router.websocket("/prices")

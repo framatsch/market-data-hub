@@ -18,8 +18,8 @@
 
 import csv
 import io
-from typing import Any
 from decimal import Decimal
+from typing import Any
 
 
 def to_csv(data: Any, filename: str = "export.csv") -> tuple[str, bytes]:

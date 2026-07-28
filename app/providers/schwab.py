@@ -32,10 +32,10 @@ import re
 import tempfile
 import time
 from collections import deque
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal
 
 from app.config import settings
 from app.models.options import OptionChain, OptionQuote
@@ -186,8 +186,8 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 token_item = token_data.get("token", token_data)
                 creation_ts = token_item.get("creation_timestamp")
                 if creation_ts:
-                    creation = datetime.fromtimestamp(creation_ts, tz=timezone.utc)
-                    days_remaining = 7 - (datetime.now(timezone.utc) - creation).days
+                    creation = datetime.fromtimestamp(creation_ts, tz=UTC)
+                    days_remaining = 7 - (datetime.now(UTC) - creation).days
                     if days_remaining <= 3:
                         logger.warning(
                             "Schwab token is near expiry",
@@ -294,7 +294,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             self._request_times.append(now)
 
     def _period_to_start(self, period: str) -> datetime:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mapping = {
             "1d": timedelta(days=1),
             "5d": timedelta(days=5),
@@ -329,7 +329,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
             try:
                 ts_ms = candle["datetime"]
-                ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                ts = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
                 bars.append(
                     PriceBar(
                         symbol=symbol,
@@ -365,7 +365,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             symbol=symbol,
             price=Decimal(str(last_price)),
             currency="USD",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             provider="schwab",
             bid=Decimal(str(quote["bidPrice"])) if quote.get("bidPrice") is not None else None,
             ask=Decimal(str(quote["askPrice"])) if quote.get("askPrice") is not None else None,
@@ -377,8 +377,8 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         symbol: str,
         data: dict[str, Any],
         expiry: date,
-        min_strike: Optional[Decimal],
-        max_strike: Optional[Decimal],
+        min_strike: Decimal | None,
+        max_strike: Decimal | None,
     ) -> list[OptionQuote]:
         options: list[OptionQuote] = []
 
@@ -535,7 +535,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         underlying = str(match.group(1))
         expiry = datetime.strptime(str(match.group(2)), "%y%m%d").date()
         right: Literal["call", "put"] = "call" if match.group(3) == "C" else "put"
-        strike = Decimal(str(match.group(4))) / Decimal("1000")
+        strike = Decimal(str(match.group(4))) / Decimal(1000)
         return underlying, expiry, right, strike
 
     def unpause(self) -> None:
@@ -580,7 +580,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 "message": "Schwab service unavailable",
                 "details": {"status_code": response.status_code},
             }
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return {
                 "status_code": 503,
                 "success": False,
@@ -611,7 +611,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        sec_type: str = "stock",  # noqa: ARG002 — Schwab infers security type automatically
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         await self._check_rate_limit()
         client = await self._get_client()
@@ -631,9 +631,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             )
 
         if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
+            start = start.replace(tzinfo=UTC)
         if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
+            end = end.replace(tzinfo=UTC)
 
         try:
             response = await asyncio.wait_for(
@@ -645,7 +645,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 ),
                 timeout=self.timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
                 details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
@@ -663,8 +663,8 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     async def get_last_price(
         self,
         symbol: str,
-        market_data_type: Optional[int] = None,  # noqa: ARG002 — Schwab returns delayed quotes only
-        sec_type: str = "stock",  # noqa: ARG002 — Schwab infers security type automatically
+        market_data_type: int | None = None,
+        sec_type: str = "stock",
     ) -> PriceQuote:
         await self._check_rate_limit()
         client = await self._get_client()
@@ -674,7 +674,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 client.get_quotes([symbol]),
                 timeout=self.timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
                 details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
@@ -689,10 +689,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         self,
         symbol: str,
         expiry: date,
-        min_strike: Optional[Decimal] = None,
-        max_strike: Optional[Decimal] = None,
-        right: Optional[Literal["call", "put"]] = None,
-        market_data_type: Optional[int] = None,
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal["call", "put"] | None = None,
+        market_data_type: int | None = None,
     ) -> OptionChain:
         del market_data_type  # Schwab options endpoint does not expose data-type selection.
 
@@ -728,7 +728,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         self,
         symbol: str,
         option_id: str,
-        market_data_type: Optional[int] = None,
+        market_data_type: int | None = None,
     ) -> OptionQuote:
         del market_data_type  # Schwab options endpoint does not expose data-type selection.
 

@@ -2,8 +2,9 @@ import asyncio
 import html
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Awaitable, Callable, Literal, cast
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, Literal, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -11,12 +12,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app.api.admin_auth import AdminPrincipal, admin_auth
 from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderRuntimeConfig
-from app.admin.runtime import get_key_repository, get_provider_config_repository, get_settings_repository
+from app.admin.runtime import (
+    get_key_repository,
+    get_provider_config_repository,
+    get_settings_repository,
+)
+from app.api.admin_auth import AdminPrincipal, admin_auth
 from app.config import settings
 from app.models.connection import ConnectionTestResult
-from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BaseOptionsProvider, BasePriceProvider
+from app.providers.base import (
+    BaseCompanyProvider,
+    BaseNewsProvider,
+    BaseOptionsProvider,
+    BasePriceProvider,
+)
 from app.providers.registry import registry
 from app.utils.secrets import unwrap_secret
 from app.utils.webhooks import validate_webhook_url
@@ -137,7 +147,7 @@ def _validate_webhook_url(webhook_url: str) -> None:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _evict_expired_schwab_states(now: datetime) -> None:
@@ -508,7 +518,7 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
 
     try:
         result_payload = await asyncio.wait_for(test_connection_call(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         timeout_result = ConnectionTestResult(
             status_code=503,
             success=False,
@@ -791,7 +801,7 @@ async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _princip
     registry.unpause_provider("schwab")
     return {
         "status": "ok",
-        "token_expires_at": (datetime.now(timezone.utc) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat(),
+        "token_expires_at": (datetime.now(UTC) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat(),
     }
 
 
@@ -808,7 +818,7 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
         return {"status": "not_configured", "paused": paused, "token_configured": False}
     if paused:
         return {"status": "expired", "paused": True, "token_configured": True, "storage": storage, "expires_at": None, "days_remaining": 0}
-    expires_at = datetime.now(timezone.utc) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)
+    expires_at = datetime.now(UTC) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)
     return {
         "status": "active",
         "paused": False,

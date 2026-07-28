@@ -15,7 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Generic, TypeVar, Optional, Any
+from typing import Any, Generic, TypeVar
+
 from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
@@ -23,15 +24,15 @@ T = TypeVar("T")
 class ErrorDetail(BaseModel):
     code: str
     message: str
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
 
 class ResponseEnvelope(BaseModel, Generic[T]):
     """Standard API response envelope."""
-    data: Optional[T] = None
-    meta: Optional[dict[str, Any]] = None
+    data: T | None = None
+    meta: dict[str, Any] | None = None
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -41,6 +42,6 @@ class HealthResponse(BaseModel):
 
 class MarketStatus(BaseModel):
     market: str  # e.g. "open", "closed", "extended-hours"
-    exchanges: Optional[dict[str, str]] = None
+    exchanges: dict[str, str] | None = None
     server_time: datetime
     provider: str

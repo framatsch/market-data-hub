@@ -19,19 +19,20 @@ Finnhub News Provider - Real-time company news with sentiment analysis
 https://finnhub.io/docs/api/company-news
 """
 
-import httpx
 import asyncio
 import logging
-import time
 import re
-from datetime import datetime, date, timezone
-from typing import List, Optional, Any, Dict
+import time
 from collections import deque
+from datetime import UTC, date, datetime
+from typing import Any
+
+import httpx
 
 from app.config import settings
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
-from app.utils.errors import DataNotFoundError, ProviderError, ProviderConnectionError
+from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,10 @@ class FinnhubProvider(BaseNewsProvider):
         # No maxlen: manual popleft manages the window to avoid eviction races.
         self._rate_limit_per_min = settings.FINNHUB_RATE_LIMIT_PER_MIN
         self._request_times: deque[float] = deque()
-        self._last_rate_limit_error: Optional[datetime] = None
+        self._last_rate_limit_error: datetime | None = None
 
         # HTTP client
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
         # Category keywords for sentiment-based categorization
         self._category_keywords = {
@@ -144,7 +145,7 @@ class FinnhubProvider(BaseNewsProvider):
 
         # Check if at rate limit
         if len(self._request_times) >= self._rate_limit_per_min:
-            self._last_rate_limit_error = datetime.now(timezone.utc)
+            self._last_rate_limit_error = datetime.now(UTC)
             logger.warning(
                 f"Finnhub rate limit reached ({self._rate_limit_per_min}/min). "
                 f"Next available at {self._request_times[0] + 60:.1f}s"
@@ -159,7 +160,7 @@ class FinnhubProvider(BaseNewsProvider):
     # Category Detection
     # ========================================================================
 
-    def _detect_category(self, headline: str, summary: Optional[str] = None, sentiment: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    def _detect_category(self, headline: str, summary: str | None = None, sentiment: dict[str, Any] | None = None) -> str | None:
         """Detect article category from headline/summary.
 
         Priority:
@@ -199,7 +200,7 @@ class FinnhubProvider(BaseNewsProvider):
     # Sentiment Parsing
     # ========================================================================
 
-    def _parse_sentiment(self, sentiment_obj: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    def _parse_sentiment(self, sentiment_obj: dict[str, Any] | None) -> dict[str, float]:
         """Parse sentiment object into normalized format.
 
         Finnhub returns:
@@ -222,7 +223,7 @@ class FinnhubProvider(BaseNewsProvider):
     # API Methods
     # ========================================================================
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self) -> dict[str, Any]:
         """Validate Finnhub API key with a lightweight quote request."""
         try:
             api_key = await self._ensure_api_key()
@@ -276,8 +277,8 @@ class FinnhubProvider(BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None
-    ) -> List[NewsArticle]:
+        category: str | None = None
+    ) -> list[NewsArticle]:
         """Get company news from Finnhub.
 
         Args:
@@ -367,9 +368,9 @@ class FinnhubProvider(BaseNewsProvider):
 
                     # Parse timestamp
                     if isinstance(datetime_ts, int):
-                        published_at = datetime.fromtimestamp(datetime_ts, tz=timezone.utc)
+                        published_at = datetime.fromtimestamp(datetime_ts, tz=UTC)
                     else:
-                        published_at = datetime.now(timezone.utc)
+                        published_at = datetime.now(UTC)
 
                     # Parse sentiment
                     sentiment = self._parse_sentiment(item.get("sentiment", {}))
@@ -420,7 +421,7 @@ class FinnhubProvider(BaseNewsProvider):
         except Exception as e:
             logger.error(f"Finnhub error for {symbol}: {e}")
             raise ProviderError(
-                f"Failed to fetch news from Finnhub: {str(e)}",
+                f"Failed to fetch news from Finnhub: {e!s}",
                 details={"symbol": symbol, "error_type": type(e).__name__}
             )
 

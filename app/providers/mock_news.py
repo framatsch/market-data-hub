@@ -16,12 +16,13 @@
 
 """Mock news provider for testing and development."""
 
-from datetime import datetime, timezone, date, timedelta
-from typing import List, Optional, Any, Dict
+import logging
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
 from app.utils.errors import DataNotFoundError, ProviderError
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class MockNewsProvider(BaseNewsProvider):
     """Mock provider for testing news functionality without external dependencies."""
 
     # Mock data for common stocks
-    MOCK_NEWS_DB: Dict[str, List[Dict[str, Any]]] = {
+    MOCK_NEWS_DB: dict[str, list[dict[str, Any]]] = {
         "AAPL": [
             {
                 "id": "mock:aapl:001",
@@ -111,7 +112,7 @@ class MockNewsProvider(BaseNewsProvider):
         ],
     }
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self) -> dict[str, Any]:
         return {
             "status_code": 200,
             "success": True,
@@ -127,8 +128,8 @@ class MockNewsProvider(BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: Optional[str] = None
-    ) -> List[NewsArticle]:
+        category: str | None = None
+    ) -> list[NewsArticle]:
         """Get mock news articles for a company."""
         try:
             # Check if symbol exists in mock database
@@ -161,7 +162,7 @@ class MockNewsProvider(BaseNewsProvider):
                     title=str(article_data["title"]),
                     summary=str(article_data["summary"]),
                     published_at=datetime.combine(
-                        article_date, datetime.min.time(), tzinfo=timezone.utc
+                        article_date, datetime.min.time(), tzinfo=UTC
                     ),
                     source=str(article_data["source"]),
                     url=str(article_data["url"]),
@@ -182,4 +183,4 @@ class MockNewsProvider(BaseNewsProvider):
             raise
         except Exception as e:
             logger.error(f"Mock news error for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch news from mock provider: {str(e)}")
+            raise ProviderError(f"Failed to fetch news from mock provider: {e!s}")

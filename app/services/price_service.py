@@ -15,19 +15,20 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 import structlog
 
-from app.models.price import PriceBar, PriceQuote
 from app.models.common import MarketStatus
+from app.models.price import PriceBar, PriceQuote
 from app.providers.registry import get_registry
+
 
 class PriceService:
     def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
-    async def get_latest_price(self, symbol: str, provider_name: Optional[str] = None, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_latest_price(self, symbol: str, provider_name: str | None = None, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_last_price(symbol, market_data_type, sec_type)
@@ -39,14 +40,14 @@ class PriceService:
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        provider_name: Optional[str] = None,
+        provider_name: str | None = None,
         sec_type: str = "STK"
-    ) -> List[PriceBar]:
+    ) -> list[PriceBar]:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_historical_prices(symbol, interval, start, end, extended_hours, sec_type=sec_type)
 
-    async def get_market_status(self, provider_name: Optional[str] = None) -> MarketStatus:
+    async def get_market_status(self, provider_name: str | None = None) -> MarketStatus:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_market_status()

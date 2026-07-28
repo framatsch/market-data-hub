@@ -2,7 +2,6 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-
 _BLOCKED_HOST_SUFFIXES = (
     ".localhost",
     ".localdomain",

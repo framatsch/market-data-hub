@@ -14,20 +14,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import logging
 import asyncio
-from datetime import datetime, date, timezone
-from typing import Any, List, Literal, Optional
+import logging
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any, Literal
 
 import httpx
+
 from app.config import settings
-from app.models.price import PriceQuote, PriceBar
-from app.models.options import OptionChain, OptionQuote
-from app.models.company import CompanyProfile, CompanySummary
 from app.models.common import MarketStatus
+from app.models.company import CompanyProfile, CompanySummary
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+from app.providers.base import (
+    BaseCompanyProvider,
+    BaseOptionsProvider,
+    BasePriceProvider,
+)
 from app.providers.credentials import get_provider_credential_sync
-from app.providers.base import BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider
 from app.utils.errors import DataNotFoundError, ProviderError
 
 logger = logging.getLogger(__name__)
@@ -103,7 +108,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 return f"O:{symbol}"
         return symbol
 
-    async def get_last_price(self, symbol: str, market_data_type: Optional[int] = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
         ticker = self._format_ticker(symbol, sec_type)
         api_key = await self._get_api_key()
         
@@ -147,7 +152,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon API error: {e}", exc_info=True)
-            raise ProviderError(f"Polygon API error: {str(e)}")
+            raise ProviderError(f"Polygon API error: {e!s}")
 
     async def _get_last_price_fallback(self, symbol: str, ticker: str) -> PriceQuote:
         """Fallback for free tier users using the Previous Close endpoint."""
@@ -177,7 +182,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon fallback failed: {e}")
-            raise ProviderError(f"Polygon fallback failed: {str(e)}")
+            raise ProviderError(f"Polygon fallback failed: {e!s}")
 
     async def get_historical_prices(
         self, 
@@ -187,7 +192,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         end: datetime, 
         extended_hours: bool = False,
         sec_type: str = "STK"
-    ) -> List[PriceBar]:
+    ) -> list[PriceBar]:
         ticker = self._format_ticker(symbol, sec_type)
         api_key = await self._get_api_key()
         
@@ -227,7 +232,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             results = resp.json().get("results", [])
             bars = []
             for r in results:
-                bar_start = datetime.fromtimestamp(r["t"] / 1000, tz=timezone.utc)
+                bar_start = datetime.fromtimestamp(r["t"] / 1000, tz=UTC)
                 # For daily bars, 'end' is roughly same day, but MDH expects a range
                 # We'll set end to start + interval logic
                 bars.append(PriceBar(
@@ -247,12 +252,12 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             return bars
         except Exception as e:
             logger.error(f"Polygon Aggs error: {e}")
-            raise ProviderError(f"Polygon Aggs error: {str(e)}")
+            raise ProviderError(f"Polygon Aggs error: {e!s}")
 
-    def _filter_rth(self, bars: List[PriceBar]) -> List[PriceBar]:
+    def _filter_rth(self, bars: list[PriceBar]) -> list[PriceBar]:
         """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
-        from zoneinfo import ZoneInfo
         from datetime import time
+        from zoneinfo import ZoneInfo
         
         filtered = []
         tz = ZoneInfo("America/New_York")
@@ -262,7 +267,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         for bar in bars:
             # Convert naive UTC or aware UTC to NY time
             if bar.start.tzinfo is None:
-                ny_time = bar.start.replace(tzinfo=timezone.utc).astimezone(tz)
+                ny_time = bar.start.replace(tzinfo=UTC).astimezone(tz)
             else:
                 ny_time = bar.start.astimezone(tz)
                 
@@ -328,9 +333,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             )
         except Exception as e:
             logger.error(f"Polygon Snapshot error: {e}")
-            raise ProviderError(f"Polygon Snapshot error: {str(e)}")
+            raise ProviderError(f"Polygon Snapshot error: {e!s}")
 
-    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: Optional[int] = None) -> OptionQuote:
+    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: int | None = None) -> OptionQuote:
         """Fetch quote for a specific option contract."""
         api_key = await self._get_api_key()
         url = f"/v3/snapshot/options/{symbol.upper()}/{self._format_ticker(option_id, 'option')}"
@@ -366,7 +371,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             )
         except Exception as e:
             logger.error(f"Polygon Snapshot error for specific quote: {e}")
-            raise ProviderError(f"Polygon Snapshot error: {str(e)}")
+            raise ProviderError(f"Polygon Snapshot error: {e!s}")
 
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status from Polygon."""
@@ -421,7 +426,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             logger.error(f"Polygon Ticker Details error: {e}")
             raise ProviderError(f"Polygon Ticker Details error: {e}")
 
-    async def search_companies(self, query: str) -> List[CompanySummary]:
+    async def search_companies(self, query: str) -> list[CompanySummary]:
         """Search for companies using Polygon Tickers v3."""
         api_key = await self._get_api_key()
         url = "/v3/reference/tickers"
