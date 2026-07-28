@@ -16,13 +16,15 @@
 
 from functools import lru_cache
 from typing import Annotated, Any
+
 from fastapi import Depends
 
-from app.services.price_service import PriceService
-from app.services.company_service import CompanyService
-from app.services.options_service import OptionsService
-from app.services.news_service import NewsService, news_service
 from app.providers.registry import get_provider as _get_provider
+from app.services.company_service import CompanyService
+from app.services.news_service import NewsService, news_service
+from app.services.options_service import OptionsService
+from app.services.price_service import PriceService
+
 
 @lru_cache
 def get_price_service() -> PriceService:

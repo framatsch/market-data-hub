@@ -18,7 +18,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 
@@ -66,7 +66,7 @@ class JsonRequestFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
             "provider": getattr(record, "provider", "none"),
-            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat().replace("+00:00", "Z"),
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
@@ -136,6 +136,7 @@ def setup_logging() -> None:
 
 
 from typing import Any
+
 
 def get_uvicorn_log_config(log_level: str = "info") -> dict[str, Any]:
     """Return a logging dictConfig for uvicorn that uses our JsonRequestFormatter.

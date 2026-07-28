@@ -1,4 +1,3 @@
-from typing import Any
 # market-data-hub - FastAPI data service for market and company data
 # Copyright (C) 2026  Market Data Hub Contributors
 #
@@ -14,25 +13,31 @@ from typing import Any
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 import logging
 import os
 import warnings
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 import uvicorn
-from pathlib import Path
-
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 
+from app.api import (
+    routes_admin,
+    routes_companies,
+    routes_meta,
+    routes_options,
+    routes_prices,
+    routes_ws,
+)
 from app.config import settings
-from app.utils.errors import AppError, ErrorResponse, ErrorDetail
-from app.api import routes_admin, routes_meta, routes_prices, routes_companies, routes_options, routes_ws
 from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
 from app.observability.middleware import ObservabilityMiddleware
+from app.utils.errors import AppError, ErrorDetail, ErrorResponse
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +57,8 @@ def _public_base_url() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     """Manage application lifecycle."""
-    from app.providers.registry import registry
     from app.admin.runtime import initialize_admin_runtime
+    from app.providers.registry import registry
 
     initialize_admin_runtime()
     await registry.reload_from_config()
