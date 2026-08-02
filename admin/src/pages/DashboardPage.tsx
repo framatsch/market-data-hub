@@ -54,6 +54,47 @@ function providerLabel(name: string) {
   return labels[name] ?? name.toUpperCase();
 }
 
+function capabilityLabel(capability: string) {
+  return capability.charAt(0).toUpperCase() + capability.slice(1);
+}
+
+type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';
+
+interface CredentialMeta {
+  provider: string;
+  credential_name: string;
+  set: boolean;
+  masked_value: string | null;
+  updated_at: string | null;
+}
+
+function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMeta[] | undefined) {
+  if (activeFilters.has('all')) return providers;
+
+  return providers.filter(provider => {
+    let match = false;
+    if (activeFilters.has('active') && provider.enabled) match = true;
+    if (activeFilters.has('inactive') && !provider.enabled) match = true;
+    if (activeFilters.has('healthy') && provider.status === 'healthy') match = true;
+
+    if (activeFilters.has('not-configured')) {
+      if (provider.name === 'mock' || provider.name === 'prixe') {
+        // never match
+      } else if (provider.name === 'ibkr') {
+        if (provider.connection_config?.account_id === 'DU123456') {
+          match = true;
+        }
+      } else {
+        const providerCreds = credentials?.filter(c => c.provider === provider.name) || [];
+        if (providerCreds.length > 0 && providerCreds.every(c => !c.set)) {
+          match = true;
+        }
+      }
+    }
+    return match;
+  });
+}
+
 // ─── Tab panel ─────────────────────────────────────────────────────────────
 
 interface TabPanelProps {
@@ -141,8 +182,17 @@ function ProviderDrawer({
                 </IconButton>
               </Box>
 
+              {(provider.capabilities && provider.capabilities.length > 0) && (
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mb: 1.5 }}>
+                  {provider.capabilities.map(cap => (
+                    <Chip key={cap} label={capabilityLabel(cap)} size="small" color="primary" variant="outlined" />
+                  ))}
+                </Box>
+              )}
+
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                 <Chip
+
                   label={provider.status.toUpperCase()}
                   color={statusColor(provider.status)}
                   size="small"
@@ -165,7 +215,7 @@ function ProviderDrawer({
                         size="small"
                       />
                     }
-                    label={provider.enabled ? 'Enabled' : 'Disabled'}
+                    label="Enabled"
                     sx={{ mr: 0 }}
                   />
                 </Box>
@@ -244,20 +294,31 @@ function ProviderCard({
   const timeout    = provider.config_summary?.timeout_seconds  ?? provider.config?.timeout_seconds;
   const retries    = provider.config_summary?.retry_count       ?? provider.config?.retry_count;
   const rateLimit  = provider.config_summary?.rate_limit_per_sec ?? provider.config?.rate_limit_per_sec;
+  const capabilities = provider.capabilities ?? [];
 
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardActionArea onClick={onClick} sx={{ flex: 1 }}>
         <CardHeader
           title={providerLabel(provider.name)}
-          subheader={provider.enabled ? 'Enabled' : 'Disabled'}
+          subheader={
+            capabilities.length > 0 ? (
+              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+                {capabilities.map(cap => (
+                  <Chip key={cap} label={capabilityLabel(cap)} size="small" color="primary" variant="outlined" />
+                ))}
+              </Box>
+            ) : null
+          }
           action={
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, pt: 0.5 }}>
-              <Chip
-                label={provider.status.toUpperCase()}
-                color={statusColor(provider.status)}
-                size="small"
-              />
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <Chip
+                  label={provider.status.toUpperCase()}
+                  color={statusColor(provider.status)}
+                  size="small"
+                />
+              </Box>
               {provider.name === 'schwab' && schwabStatus?.days_remaining !== undefined && (
                 <Chip
                   label={`${schwabStatus.days_remaining}d`}
@@ -297,6 +358,7 @@ function ProviderCard({
 export default function DashboardPage() {
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set(['all']));
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
     open: false,
     message: '',
@@ -307,6 +369,11 @@ export default function DashboardPage() {
     queryKey: ['providers'],
     queryFn: () => fetcher('/api/admin/providers'),
     refetchInterval: 30000,
+  });
+
+  const credentialsQuery = useQuery<CredentialMeta[]>({
+    queryKey: ['credentials'],
+    queryFn: () => fetcher('/api/admin/credentials'),
   });
 
   const schwabStatusQuery = useQuery<SchwabAuthStatus>({
@@ -346,6 +413,25 @@ export default function DashboardPage() {
     setSelectedProvider(provider);
   };
 
+  const toggleFilter = (filter: FilterType) => {
+    setActiveFilters(prev => {
+      const next = new Set(prev);
+      if (filter === 'all') return new Set(['all']);
+      next.delete('all');
+      if (next.has(filter)) {
+        next.delete(filter);
+      } else {
+        next.add(filter);
+      }
+      if (next.size === 0) return new Set(['all']);
+      return next;
+    });
+  };
+
+  const filteredProviders = providersQuery.data
+    ? filterProviders(providersQuery.data, activeFilters, credentialsQuery.data)
+    : [];
+
   const schwabStatus = schwabStatusQuery.data;
   const showSchwabAlert =
     schwabStatus && (schwabStatus.status === 'expired' || schwabStatus.paused);
@@ -355,6 +441,18 @@ export default function DashboardPage() {
       <Typography variant="h4" gutterBottom>
         Providers
       </Typography>
+
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+        {(['all', 'active', 'inactive', 'healthy', 'not-configured'] as FilterType[]).map(filter => (
+          <Chip
+            key={filter}
+            label={filter.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+            onClick={() => toggleFilter(filter)}
+            color={activeFilters.has(filter) ? 'primary' : 'default'}
+            variant={activeFilters.has(filter) ? 'filled' : 'outlined'}
+          />
+        ))}
+      </Box>
 
       {showSchwabAlert && (
         <Alert
@@ -387,7 +485,11 @@ export default function DashboardPage() {
                 <Skeleton variant="rectangular" height={180} sx={{ borderRadius: 3 }} />
               </Grid>
             ))
-          : providersQuery.data?.map((provider) => (
+          : filteredProviders.length === 0 ? (
+              <Grid size={{ xs: 12 }}>
+                <Typography color="text.secondary">No providers match the selected filters</Typography>
+              </Grid>
+            ) : filteredProviders.map((provider) => (
               <Grid size={{ xs: 12, sm: 6, md: 4 }} key={provider.name}>
                 <ProviderCard
                   provider={provider}

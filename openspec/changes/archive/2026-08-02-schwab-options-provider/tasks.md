@@ -50,4 +50,4 @@
 
 - [x] 6.1 Run `uv run ruff check app/` — no lint errors
 - [x] 6.2 Run `uv run pytest tests/unit/test_schwab_provider.py --maxfail=1 --disable-warnings` — all tests pass
-- [ ] 6.3 Run full test suite `uv run pytest --maxfail=1 --disable-warnings` — no regressions
+- [x] 6.3 Run full test suite `uv run pytest --maxfail=1 --disable-warnings` — no regressions

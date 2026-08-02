@@ -27,5 +27,5 @@
 
 - [x] 5.1 Run `npx tsc --noEmit` in `admin/` — zero errors
 - [x] 5.2 Run `uv run ruff check app/` — no backend lint errors
-- [ ] 5.3 Manual smoke: Provider Management page loads; each provider row shows correct capability chips; IBKR shows Prices + Options + Companies; Mock shows News only
-- [ ] 5.4 Manual smoke: filter chips filter correctly
+- [x] 5.3 Manual smoke: Provider Management page loads; each provider row shows correct capability chips; IBKR shows Prices + Options + Companies; Mock shows News only
+- [x] 5.4 Manual smoke: filter chips filter correctly

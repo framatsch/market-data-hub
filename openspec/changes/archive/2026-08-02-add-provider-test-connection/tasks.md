@@ -93,14 +93,14 @@
 - [x] 12.3 Write API endpoint test for invalid provider name (404 expected)
 - [x] 12.4 Write API endpoint test for unauthenticated request (401 expected)
 - [x] 12.5 Write timeout test to verify 10-second limit
-- [ ] 12.6 Manually test UI button and result display for all providers
+- [x] 12.6 Manually test UI button and result display for all providers
 
 ## 13. Documentation
 
-- [ ] 13.1 Add docstrings to `test_connection()` abstract methods in base classes
-- [ ] 13.2 Document expected response times per provider in design doc or README
-- [ ] 13.3 Document quota/rate limit implications for REST providers (Finnhub, Polygon, Schwab, Prixe)
-- [ ] 13.4 Update OpenAPI spec with new endpoint (run `openapi-sync` skill after implementation)
+- [x] 13.1 Add docstrings to `test_connection()` abstract methods in base classes
+- [x] 13.2 Document expected response times per provider in design doc or README
+- [x] 13.3 Document quota/rate limit implications for REST providers (Finnhub, Polygon, Schwab, Prixe)
+- [x] 13.4 Update OpenAPI spec with new endpoint (run `openapi-sync` skill after implementation)
 
 ## 14. Deployment
 

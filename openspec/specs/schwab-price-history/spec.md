@@ -1,8 +1,6 @@
 ## Purpose
 Define expected Schwab provider behavior for historical price bars, latest quotes, provider selection, data type safety, and auth/token error handling.
-
 ## Requirements
-
 ### Requirement: Fetch historical OHLCV bars for a US equity symbol via Schwab
 The system SHALL retrieve OHLCV price bars for a given US equity or ETF ticker symbol using the Schwab Individual Trader API via the `schwab-py` library. The response SHALL be a list of `PriceBar` objects with open, high, low, close (as `Decimal`), volume (as `int`), and UTC timestamp.
 
@@ -77,12 +75,25 @@ The system SHALL convert all price and volume values from the raw Schwab JSON re
 - **THEN** the resulting `PriceBar.close` is `Decimal("182.63")`, not the float `182.63`
 
 ### Requirement: Token management errors surface as ProviderConnectionError
-The system SHALL catch all `schwab-py` authentication and token-related errors and re-raise them as `ProviderConnectionError` with a human-readable hint.
+The system SHALL catch all `schwab-py` authentication and token-related errors and re-raise them as `ProviderConnectionError` with a human-readable hint. When a 401 or 403 response is received AND the client was previously initialized (indicating a refresh token expiry rather than initial misconfiguration), the provider SHALL additionally set `_paused = True` and fire an async webhook notification before raising. When `_paused` is `True`, the provider SHALL raise `ProviderConnectionError` immediately on any subsequent call without attempting any network request.
 
-#### Scenario: Expired token triggers actionable error
-- **WHEN** the Schwab token is older than 7 days and an API call is attempted
-- **THEN** `ProviderConnectionError` is raised with a message instructing the user to run `schwab-generate-token.py`
+#### Scenario: Initial auth failure (client was None)
+- **WHEN** `SCHWAB_API_KEY` is set but credentials are invalid and client has never been initialized
+- **THEN** `ProviderConnectionError` is raised with message indicating auth failure; `_paused` remains `False`
 
-#### Scenario: Missing token file triggers actionable error
-- **WHEN** `SCHWAB_TOKEN_PATH` points to a nonexistent file
-- **THEN** `ProviderConnectionError` is raised with `token_path` included in the error details
+#### Scenario: Refresh token expiry (client was not None) — pauses provider
+- **WHEN** a live request returns 401 after the provider was previously working (client was not None)
+- **THEN** `_paused = True`, `_client = None`, `ProviderConnectionError` is raised, and webhook is fired if `SCHWAB_ALERT_WEBHOOK_URL` is set
+
+#### Scenario: Paused provider rejects calls immediately
+- **WHEN** `SchwabProvider._paused = True` and any price method is called
+- **THEN** `ProviderConnectionError` is raised immediately without any HTTP call to Schwab
+
+#### Scenario: Provider unpaused after re-auth
+- **WHEN** `POST /api/admin/schwab/auth/callback` successfully completes
+- **THEN** `_paused = False`, `_client = None`, and the next call to any price method proceeds normally via `_get_client()`
+
+#### Scenario: Rate limit error surfaces as ProviderTimeoutError
+- **WHEN** Schwab returns HTTP 429
+- **THEN** `ProviderTimeoutError` is raised (unchanged from existing behavior)
+

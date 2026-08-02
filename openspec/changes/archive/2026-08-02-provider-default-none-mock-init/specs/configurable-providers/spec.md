@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Initial provider state on first start
 On first deployment (no existing DB), all non-mock providers SHALL start as disabled. The user enables providers explicitly via the admin UI.

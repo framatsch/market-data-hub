@@ -36,7 +36,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Run `uv run ruff check app/` — no lint errors
-- [ ] 6.2 Run `uv run pytest --maxfail=1 --disable-warnings` — all tests pass including updated registry tests
-- [ ] 6.3 Manual smoke: start fresh with empty `keys.db` → `GET /api/prices/AAPL` returns 503; `GET /api/news/AAPL` also returns 503
-- [ ] 6.4 Manual smoke: enable IBKR in admin UI → `GET /api/prices/AAPL` now routes to IBKR
+- [x] 6.1 Run `uv run ruff check app/` — no lint errors
+- [x] 6.2 Run `uv run pytest --maxfail=1 --disable-warnings` — all tests pass including updated registry tests
+- [x] 6.3 Manual smoke: start fresh with empty `keys.db` → `GET /api/prices/AAPL` returns 503; `GET /api/news/AAPL` also returns 503
+- [x] 6.4 Manual smoke: enable IBKR in admin UI → `GET /api/prices/AAPL` now routes to IBKR
