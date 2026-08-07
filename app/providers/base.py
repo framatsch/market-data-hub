@@ -35,11 +35,21 @@ class BasePriceProvider(ABC):
         _apply_runtime_config_defaults(self, config)
 
     @abstractmethod
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "stock") -> list[PriceBar]:
+    async def get_historical_prices(
+        self,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended_hours: bool = False,
+        sec_type: str = "stock",
+    ) -> list[PriceBar]:
         """Fetch historical price bars."""
 
     @abstractmethod
-    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(
+        self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock"
+    ) -> PriceQuote:
         """Fetch latest price quote."""
 
     @abstractmethod
@@ -49,6 +59,7 @@ class BasePriceProvider(ABC):
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status."""
         raise NotImplementedError("Market status not implemented for this provider")
+
 
 class BaseCompanyProvider(ABC):
     name = "none"
@@ -70,6 +81,7 @@ class BaseCompanyProvider(ABC):
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
 
+
 class BaseOptionsProvider(ABC):
     name = "none"
 
@@ -86,12 +98,14 @@ class BaseOptionsProvider(ABC):
         min_strike: Decimal | None = None,
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
-        market_data_type: int | None = None
+        market_data_type: int | None = None,
     ) -> OptionChain:
         """Fetch option chain for a given expiry."""
 
     @abstractmethod
-    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: int | None = None) -> OptionQuote:
+    async def get_option_quote(
+        self, symbol: str, option_id: str, market_data_type: int | None = None
+    ) -> OptionQuote:
         """Fetch specific option quote."""
 
     @abstractmethod
@@ -118,7 +132,7 @@ class BaseNewsProvider(ABC):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: str | None = None
+        category: str | None = None,
     ) -> list[NewsArticle]:
         """
         Get news articles for a company.

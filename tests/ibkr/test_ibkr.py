@@ -18,14 +18,15 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, date
+from datetime import date, datetime, timedelta
+
 import pytest
 
 # Adjust path so we can import app
 sys.path.append(os.getcwd())
 
-from app.config import settings  # noqa: E402
-from app.providers.ibkr import IBKRProvider  # noqa: E402
+from app.config import settings
+from app.providers.ibkr import IBKRProvider
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("test_ibkr")

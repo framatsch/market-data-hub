@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from unittest.mock import MagicMock, patch
 from app.dependencies import (
-    get_price_service, get_company_service, 
-    get_options_service, get_news_service
+    get_company_service,
+    get_news_service,
+    get_options_service,
+    get_price_service,
 )
+
 
 def test_get_price_service():
     service = get_price_service()

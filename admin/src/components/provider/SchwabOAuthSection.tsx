@@ -61,12 +61,12 @@ export function SchwabOAuthSection() {
     if (!isPolling) return;
     if (statusQuery.data?.status === 'active') {
       setIsPolling(false);
-      setSnackbar({ open: true, message: 'Schwab erfolgreich autorisiert', severity: 'success' });
+      setSnackbar({ open: true, message: 'Schwab successfully authorized', severity: 'success' });
     } else if (statusQuery.data?.status === 'callback_error') {
       setIsPolling(false);
       setSnackbar({
         open: true,
-        message: `Autorisierung fehlgeschlagen: ${statusQuery.data.error}`,
+        message: `Authorization failed: ${statusQuery.data.error}`,
         severity: 'error',
       });
     }
@@ -86,26 +86,37 @@ export function SchwabOAuthSection() {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schwab', 'config'] });
-      setSnackbar({ open: true, message: 'Konfiguration gespeichert', severity: 'success' });
+      setSnackbar({ open: true, message: 'Configuration saved', severity: 'success' });
     },
     onError: (err: any) =>
-      setSnackbar({ open: true, message: `Fehler: ${err.message}`, severity: 'error' }),
+      setSnackbar({ open: true, message: `Error: ${err.message}`, severity: 'error' }),
   });
 
   const saveManualTokenMutation = useMutation({
-    mutationFn: () =>
-      fetcher('/api/admin/schwab/auth/token/manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token_json: manualTokenJson }),
-      }),
+    mutationFn: () => {
+      const value = manualTokenJson.trim();
+      const isUrl = value.startsWith('http');
+      if (isUrl) {
+        return fetcher('/api/admin/schwab/auth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ received_url: value }),
+        });
+      } else {
+        return fetcher('/api/admin/schwab/auth/token/manual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token_json: value }),
+        });
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schwab', 'status'] });
       setManualTokenJson('');
-      setSnackbar({ open: true, message: 'Token gespeichert — Schwab aktiv', severity: 'success' });
+      setSnackbar({ open: true, message: 'Token saved — Schwab active', severity: 'success' });
     },
     onError: (err: any) =>
-      setSnackbar({ open: true, message: `Token-Fehler: ${err.message}`, severity: 'error' }),
+      setSnackbar({ open: true, message: `Token Error: ${err.message}`, severity: 'error' }),
   });
 
   const updateTokensMutation = useMutation({
@@ -118,12 +129,12 @@ export function SchwabOAuthSection() {
       setSnackbar({
         open: true,
         message: forceRefresh
-          ? 'Refresh-Token erneuert'
-          : 'Access-Token erneuert',
+          ? 'Refresh Token renewed'
+          : 'Access Token renewed',
         severity: 'success',
       }),
     onError: (err: any) =>
-      setSnackbar({ open: true, message: `update_tokens Fehler: ${err.message}`, severity: 'error' }),
+      setSnackbar({ open: true, message: `update_tokens error: ${err.message}`, severity: 'error' }),
   });
 
   // --- OAuth-Redirect flow ---
@@ -145,7 +156,7 @@ export function SchwabOAuthSection() {
         }, 60000);
       }
     } catch (err: any) {
-      setSnackbar({ open: true, message: `Auth-URL Fehler: ${err.message}`, severity: 'error' });
+      setSnackbar({ open: true, message: `Auth URL Error: ${err.message}`, severity: 'error' });
     }
   };
 
@@ -165,7 +176,7 @@ export function SchwabOAuthSection() {
   return (
     <Box sx={{ mt: 3, pt: 3, borderTop: 1, borderColor: 'divider' }}>
       <Typography variant="subtitle2" gutterBottom>
-        OAuth Autorisierung
+        OAuth Authorization
       </Typography>
 
       {/* Status */}
@@ -177,8 +188,8 @@ export function SchwabOAuthSection() {
         />
         {statusQuery.data?.expires_at && (
           <Typography variant="body2" color="text.secondary">
-            Läuft ab: {new Date(statusQuery.data.expires_at).toLocaleString()}
-            {daysRemaining !== undefined && ` (${daysRemaining} Tage)`}
+            Expires at: {new Date(statusQuery.data.expires_at).toLocaleString()}
+            {daysRemaining !== undefined && ` (${daysRemaining} days)`}
           </Typography>
         )}
       </Box>
@@ -193,7 +204,7 @@ export function SchwabOAuthSection() {
 
       {/* ── Konfiguration ── */}
       <Typography variant="subtitle2" gutterBottom>
-        Konfiguration
+        Configuration
       </Typography>
 
       {/* Redirect-URI */}
@@ -204,11 +215,11 @@ export function SchwabOAuthSection() {
         fullWidth
         size="small"
         sx={{ mb: 1 }}
-        helperText="OAuth2-Redirect-URI — muss exakt mit dem Schwab-Developer-Portal übereinstimmen."
+        helperText="OAuth2 Redirect URI — must exactly match the Schwab Developer Portal."
       />
 
       {/* Manual Token Mode */}
-      <Tooltip title="Wenn aktiv: OAuth-Redirect ist deaktiviert. Token-JSON wird manuell eingefügt.">
+      <Tooltip title="If active: OAuth redirect is disabled. Token JSON is inserted manually.">
         <FormControlLabel
           control={
             <Switch
@@ -217,12 +228,12 @@ export function SchwabOAuthSection() {
               size="small"
             />
           }
-          label="Manueller Token-Modus"
+          label="Manual Token Mode"
         />
       </Tooltip>
 
       {/* Force Refresh Token */}
-      <Tooltip title="Ruft client.update_tokens(force_refresh_token=True) direkt nach der Client-Initialisierung auf (Schwabdev-Empfehlung für Wochenend-Refresh).">
+      <Tooltip title="Calls client.update_tokens(force_refresh_token=True) right after client initialization (Schwabdev recommendation for weekend refresh).">
         <FormControlLabel
           control={
             <Switch
@@ -231,7 +242,7 @@ export function SchwabOAuthSection() {
               size="small"
             />
           }
-          label="force_refresh_token bei Client-Init (Standard: ein)"
+          label="force_refresh_token on Client-Init (default: on)"
           sx={{ display: 'block' }}
         />
       </Tooltip>
@@ -243,7 +254,7 @@ export function SchwabOAuthSection() {
           onClick={() => saveConfigMutation.mutate()}
           disabled={saveConfigMutation.isPending}
         >
-          {saveConfigMutation.isPending ? <CircularProgress size={16} /> : 'Konfiguration speichern'}
+          {saveConfigMutation.isPending ? <CircularProgress size={16} /> : 'Save Configuration'}
         </Button>
       </Box>
 
@@ -253,21 +264,20 @@ export function SchwabOAuthSection() {
       {manualTokenMode ? (
         <Box>
           <Typography variant="subtitle2" gutterBottom>
-            Token manuell einfügen
+            Insert Token manually
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Öffne den Autorisierungs-Link manuell, logge dich ein und füge die vollständige
-            Callback-URL oder das Token-JSON aus dem Browser hier ein.
+            Open the authorization link manually, log in, and paste the complete Callback URL or Token JSON from the browser here.
           </Typography>
           <TextField
-            label="token_json"
+            label="Callback URL or Token JSON"
             value={manualTokenJson}
             onChange={(e) => setManualTokenJson(e.target.value)}
             multiline
             minRows={4}
             fullWidth
             size="small"
-            placeholder='{"token": {...}}'
+            placeholder='https://127.0.0.1... or {"token": {...}}'
             sx={{ mb: 1 }}
           />
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -276,7 +286,7 @@ export function SchwabOAuthSection() {
               size="small"
               onClick={handleReauthorize}
             >
-              Auth-Link öffnen
+              Open Auth Link
             </Button>
             <Button
               variant="contained"
@@ -284,7 +294,7 @@ export function SchwabOAuthSection() {
               onClick={() => saveManualTokenMutation.mutate()}
               disabled={saveManualTokenMutation.isPending || !manualTokenJson.trim()}
             >
-              {saveManualTokenMutation.isPending ? <CircularProgress size={16} /> : 'Token speichern'}
+              {saveManualTokenMutation.isPending ? <CircularProgress size={16} /> : 'Save Token'}
             </Button>
           </Box>
         </Box>
@@ -294,22 +304,22 @@ export function SchwabOAuthSection() {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1 }}>
               <CircularProgress size={20} />
               <Typography variant="body2" color="text.secondary">
-                Warte auf Autorisierung...
+                Waiting for authorization...
               </Typography>
             </Box>
           ) : (
             <Button variant="contained" onClick={handleReauthorize}>
               {status === 'active'
-                ? 'Re-autorisieren'
+                ? 'Re-authorize'
                 : pollTimeout
-                  ? 'Nochmal versuchen'
-                  : 'Autorisieren'}
+                  ? 'Try again'
+                  : 'Authorize'}
             </Button>
           )}
 
           {pollTimeout && !isPolling && (
             <Alert severity="warning" sx={{ mt: 2 }}>
-              Autorisierung abgelaufen oder abgebrochen.
+              Authorization expired or cancelled.
             </Alert>
           )}
         </Box>
@@ -320,10 +330,10 @@ export function SchwabOAuthSection() {
         <>
           <Divider sx={{ my: 2 }} />
           <Typography variant="subtitle2" gutterBottom>
-            Token erneuern
+            Renew Token
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Erneuert den Refresh-Token manuell — empfohlen am Wochenende damit er in der Woche gültig bleibt.
+            Renews the Refresh Token manually — recommended on weekends to keep it valid during the week.
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button
@@ -332,7 +342,7 @@ export function SchwabOAuthSection() {
               onClick={() => updateTokensMutation.mutate(true)}
               disabled={updateTokensMutation.isPending}
             >
-              {updateTokensMutation.isPending ? <CircularProgress size={16} /> : 'Refresh-Token erneuern'}
+              {updateTokensMutation.isPending ? <CircularProgress size={16} /> : 'Renew Refresh Token'}
             </Button>
             <Button
               variant="outlined"
@@ -341,7 +351,7 @@ export function SchwabOAuthSection() {
               onClick={() => updateTokensMutation.mutate(false)}
               disabled={updateTokensMutation.isPending}
             >
-              Access-Token erneuern
+              Renew Access Token
             </Button>
           </Box>
         </>

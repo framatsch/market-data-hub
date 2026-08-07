@@ -14,11 +14,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
+
+from app.models.price import PriceBar, PriceQuote
 from app.utils.csv_export import to_csv
-from app.models.price import PriceQuote, PriceBar
+
 
 def test_to_csv_single_object():
     quote = PriceQuote(
@@ -47,6 +48,6 @@ def test_to_csv_list_objects():
     assert b"symbol,start,end" in csv_bytes
 
 def test_to_csv_none():
-    content_type, csv_bytes = to_csv(None, "test.csv")
+    _content_type, csv_bytes = to_csv(None, "test.csv")
     assert csv_bytes == b""
 

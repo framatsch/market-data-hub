@@ -14,23 +14,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.api.mcp import (
-    _tool_get_last_price,
+    _tool_get_company_profile,
     _tool_get_historical_prices,
+    _tool_get_last_price,
+    _tool_get_market_status,
     _tool_get_option_chain,
     _tool_get_option_quote,
-    _tool_get_company_profile,
-    _tool_get_market_status
 )
-from app.models.price import PriceQuote, PriceBar
-from app.models.options import OptionChain, OptionQuote
-from app.models.company import CompanyProfile
 from app.models.common import MarketStatus
+from app.models.company import CompanyProfile
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+
 
 @pytest.mark.asyncio
 async def test_tool_get_last_price():
@@ -80,7 +82,7 @@ async def test_tool_get_option_quote():
     with patch("app.api.mcp._options_service") as mock_service_factory:
         mock_service = MagicMock()
         mock_service.get_option_quote = AsyncMock(return_value=OptionQuote(
-            symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal("150"), 
+            symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal(150), 
             expiry=date(2024, 1, 19), type="call", price=Decimal("5.00"), 
             currency="USD", provider="test"
         ))

@@ -14,14 +14,16 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from datetime import date, datetime
+from datetime import date
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.admin.crypto import CryptoService
 from app.admin.key_repository import KeyRepository
 from app.admin.runtime import set_admin_runtime
 from app.providers.finnhub import FinnhubProvider
+
 
 @pytest.fixture
 def finnhub_provider():

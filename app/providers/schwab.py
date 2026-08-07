@@ -140,6 +140,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         """Liest callback_url aus provider_config DB; fällt auf settings.SCHWAB_CALLBACK_URL zurück."""
         try:
             from app.admin.runtime import get_provider_config_repository
+
             repo = get_provider_config_repository()
             config = await asyncio.to_thread(repo._get_sync, "schwab")
             url = (config.connection_config or {}).get("callback_url")
@@ -153,6 +154,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         """Liest force_refresh_token aus provider_config DB; Standard ist True."""
         try:
             from app.admin.runtime import get_provider_config_repository
+
             repo = get_provider_config_repository()
             config = await asyncio.to_thread(repo._get_sync, "schwab")
             val = (config.connection_config or {}).get("force_refresh_token")
@@ -182,6 +184,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         if token_json is not None:
             try:
                 import json
+
                 token_data = json.loads(token_json)
                 token_item = token_data.get("token", token_data)
                 creation_ts = token_item.get("creation_timestamp")
@@ -191,7 +194,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                     if days_remaining <= 3:
                         logger.warning(
                             "Schwab token is near expiry",
-                            extra={"event": "schwab_token_expiry", "days_remaining": max(0, days_remaining)}
+                            extra={
+                                "event": "schwab_token_expiry",
+                                "days_remaining": max(0, days_remaining),
+                            },
                         )
             except Exception:
                 pass
@@ -211,13 +217,17 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
     async def _get_client(self) -> Any:
         if self._paused:
-            raise ProviderConnectionError("Schwab provider paused - re-authorization required")
+            raise ProviderConnectionError(
+                "Schwab provider paused - re-authorization required"
+            )
         if self._client is not None:
             return self._client
 
         async with self._get_client_lock():
             if self._paused:
-                raise ProviderConnectionError("Schwab provider paused - re-authorization required")
+                raise ProviderConnectionError(
+                    "Schwab provider paused - re-authorization required"
+                )
             if self._client is not None:
                 return self._client
 
@@ -260,7 +270,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 self._cleanup_temp_token_file()
                 raise ProviderConnectionError(
                     "Schwab token not found. Re-authorize Schwab through the admin UI.",
-                    details={"hint": "Configure schwab.token_json in admin credentials."},
+                    details={
+                        "hint": "Configure schwab.token_json in admin credentials."
+                    },
                 )
             except Exception as exc:
                 self._cleanup_temp_token_file()
@@ -279,7 +291,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
         async with self._get_rate_limit_lock():
             now = time.time()
-            while self._request_times and now - self._request_times[0] > _RATE_WINDOW_SECS:
+            while (
+                self._request_times and now - self._request_times[0] > _RATE_WINDOW_SECS
+            ):
                 self._request_times.popleft()
 
             if len(self._request_times) >= limit:
@@ -367,9 +381,15 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             currency="USD",
             timestamp=datetime.now(UTC),
             provider="schwab",
-            bid=Decimal(str(quote["bidPrice"])) if quote.get("bidPrice") is not None else None,
-            ask=Decimal(str(quote["askPrice"])) if quote.get("askPrice") is not None else None,
-            volume=int(quote["totalVolume"]) if quote.get("totalVolume") is not None else None,
+            bid=Decimal(str(quote["bidPrice"]))
+            if quote.get("bidPrice") is not None
+            else None,
+            ask=Decimal(str(quote["askPrice"]))
+            if quote.get("askPrice") is not None
+            else None,
+            volume=int(quote["totalVolume"])
+            if quote.get("totalVolume") is not None
+            else None,
         )
 
     def _parse_option_chain(
@@ -426,7 +446,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                     if price_raw is None:
                         continue
 
-                    symbol_value = contract.get("symbol") or contract.get("description") or ""
+                    symbol_value = (
+                        contract.get("symbol") or contract.get("description") or ""
+                    )
                     options.append(
                         OptionQuote(
                             symbol=str(symbol_value),
@@ -435,11 +457,21 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                             expiry=expiry,
                             type=option_type,
                             price=Decimal(str(price_raw)),
-                            bid=Decimal(str(contract["bid"])) if contract.get("bid") is not None else None,
-                            ask=Decimal(str(contract["ask"])) if contract.get("ask") is not None else None,
-                            volume=int(contract["totalVolume"]) if contract.get("totalVolume") is not None else None,
-                            open_interest=int(contract["openInterest"]) if contract.get("openInterest") is not None else None,
-                            implied_volatility=contract.get("volatility"),  # Schwab uses "volatility" for IV.
+                            bid=Decimal(str(contract["bid"]))
+                            if contract.get("bid") is not None
+                            else None,
+                            ask=Decimal(str(contract["ask"]))
+                            if contract.get("ask") is not None
+                            else None,
+                            volume=int(contract["totalVolume"])
+                            if contract.get("totalVolume") is not None
+                            else None,
+                            open_interest=int(contract["openInterest"])
+                            if contract.get("openInterest") is not None
+                            else None,
+                            implied_volatility=contract.get(
+                                "volatility"
+                            ),  # Schwab uses "volatility" for IV.
                             delta=contract.get("delta"),
                             gamma=contract.get("gamma"),
                             theta=contract.get("theta"),
@@ -457,14 +489,18 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         self._client = None
         return was_initialized
 
-    async def _handle_error_status(self, status_code: int, symbol: str, context: str) -> None:
+    async def _handle_error_status(
+        self, status_code: int, symbol: str, context: str
+    ) -> None:
         """Map Schwab HTTP error codes to appropriate AppError types."""
         if status_code == _HTTP_RATE_LIMITED:
             raise ProviderTimeoutError("schwab", details={"status_code": status_code})
         if status_code in (_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN):
             was_initialized = self._mark_paused()
             if was_initialized:
-                await self._fire_webhook("Schwab token expired - re-authorization required via MDH Admin UI")
+                await self._fire_webhook(
+                    "Schwab token expired - re-authorization required via MDH Admin UI"
+                )
             raise ProviderConnectionError(
                 "Schwab token has expired or is invalid. Re-authorize through the admin UI.",
                 details={"hint": "Token rotation required every 7 days."},
@@ -486,9 +522,14 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
         try:
             from app.admin.runtime import get_provider_config_repository
+
             repo = get_provider_config_repository()
             config = await repo.get("schwab")
-            webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
+            webhook_format = (
+                config.connection_config.get("alert_webhook_format", "slack")
+                if config.connection_config
+                else "slack"
+            )
         except Exception:
             webhook_format = settings.SCHWAB_ALERT_WEBHOOK_FORMAT
 
@@ -508,7 +549,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         except Exception:
             logger.warning("Failed to send Schwab token-expiry webhook", exc_info=True)
 
-    def _map_schwab_option_http_error(self, status_code: int, symbol: str, context: str) -> None:
+    def _map_schwab_option_http_error(
+        self, status_code: int, symbol: str, context: str
+    ) -> None:
         if status_code == _HTTP_UNAUTHORIZED:
             raise ProviderConnectionError(
                 f"Schwab {context} request unauthorized for {symbol}.",
@@ -527,10 +570,16 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         )
 
     @staticmethod
-    def _parse_occ_symbol(option_id: str) -> tuple[str, date, Literal["call", "put"], Decimal]:
+    def _parse_occ_symbol(
+        option_id: str,
+    ) -> tuple[str, date, Literal["call", "put"], Decimal]:
         match = _OCC_OPTION_SYMBOL_RE.match(option_id)
         if not match:
-            raise AppError(f"Invalid option symbol: {option_id}", "INVALID_PROVIDER", details={"status_code": 400})
+            raise AppError(
+                f"Invalid option symbol: {option_id}",
+                "INVALID_PROVIDER",
+                details={"status_code": 400},
+            )
 
         underlying = str(match.group(1))
         expiry = datetime.strptime(str(match.group(2)), "%y%m%d").date()
@@ -585,12 +634,18 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 "status_code": 503,
                 "success": False,
                 "message": "Schwab service unavailable",
-                "details": {"reason": "timeout", "timeout_seconds": self.timeout_seconds},
+                "details": {
+                    "reason": "timeout",
+                    "timeout_seconds": self.timeout_seconds,
+                },
             }
         except Exception as exc:
             error_message = str(exc)
             lowered = error_message.lower()
-            if any(token in lowered for token in ("token", "unauthor", "forbidden", "expired", "invalid")):
+            if any(
+                token in lowered
+                for token in ("token", "unauthor", "forbidden", "expired", "invalid")
+            ):
                 return {
                     "status_code": 401,
                     "success": False,
@@ -648,11 +703,16 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         except TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
-                details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
+                details={
+                    "reason": "request timeout",
+                    "timeout_seconds": self.timeout_seconds,
+                },
             )
 
         if response.status_code != _HTTP_OK:
-            await self._handle_error_status(response.status_code, symbol, "historical price")
+            await self._handle_error_status(
+                response.status_code, symbol, "historical price"
+            )
 
         bars = self._parse_ohlcv(response.json(), symbol)
         if not bars:
@@ -677,7 +737,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         except TimeoutError:
             raise ProviderTimeoutError(
                 "schwab",
-                details={"reason": "request timeout", "timeout_seconds": self.timeout_seconds},
+                details={
+                    "reason": "request timeout",
+                    "timeout_seconds": self.timeout_seconds,
+                },
             )
 
         if response.status_code != _HTTP_OK:
@@ -694,13 +757,19 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
     ) -> OptionChain:
-        del market_data_type  # Schwab options endpoint does not expose data-type selection.
+        del (
+            market_data_type
+        )  # Schwab options endpoint does not expose data-type selection.
 
         client = await self._get_client()
 
         contract_type: Any = {None: "ALL", "call": "CALL", "put": "PUT"}[right]
         options_ns = getattr(type(client), "Options", None)
-        contract_type_enum = getattr(options_ns, "ContractType", None) if options_ns is not None else None
+        contract_type_enum = (
+            getattr(options_ns, "ContractType", None)
+            if options_ns is not None
+            else None
+        )
         if contract_type_enum is not None:
             contract_type = {
                 None: contract_type_enum.ALL,
@@ -708,21 +777,38 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 "put": contract_type_enum.PUT,
             }[right]
 
-        response = await asyncio.to_thread(
-            client.get_option_chain,
-            symbol,
-            contract_type=contract_type,
-            from_date=expiry,
-            to_date=expiry,
-        )
+        try:
+            response = await asyncio.wait_for(
+                client.get_option_chain(
+                    symbol,
+                    contract_type=contract_type,
+                    from_date=expiry,
+                    to_date=expiry,
+                ),
+                timeout=self.timeout_seconds,
+            )
+        except TimeoutError:
+            raise ProviderTimeoutError(
+                "schwab",
+                details={
+                    "reason": "request timeout",
+                    "timeout_seconds": self.timeout_seconds,
+                },
+            )
 
         if response.status_code != _HTTP_OK:
-            self._map_schwab_option_http_error(response.status_code, symbol, "option chain")
+            self._map_schwab_option_http_error(
+                response.status_code, symbol, "option chain"
+            )
 
-        options = self._parse_option_chain(symbol, response.json(), expiry, min_strike, max_strike)
+        options = self._parse_option_chain(
+            symbol, response.json(), expiry, min_strike, max_strike
+        )
         if right is not None:
             options = [option for option in options if option.type == right]
-        return OptionChain(underlying_symbol=symbol, expiry=expiry, options=options, provider="schwab")
+        return OptionChain(
+            underlying_symbol=symbol, expiry=expiry, options=options, provider="schwab"
+        )
 
     async def get_option_quote(
         self,
@@ -730,13 +816,29 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         option_id: str,
         market_data_type: int | None = None,
     ) -> OptionQuote:
-        del market_data_type  # Schwab options endpoint does not expose data-type selection.
+        del (
+            market_data_type
+        )  # Schwab options endpoint does not expose data-type selection.
 
         client = await self._get_client()
-        response = await asyncio.to_thread(client.get_quotes, [option_id])
+        try:
+            response = await asyncio.wait_for(
+                client.get_quotes([option_id]),
+                timeout=self.timeout_seconds,
+            )
+        except TimeoutError:
+            raise ProviderTimeoutError(
+                "schwab",
+                details={
+                    "reason": "request timeout",
+                    "timeout_seconds": self.timeout_seconds,
+                },
+            )
 
         if response.status_code != _HTTP_OK:
-            self._map_schwab_option_http_error(response.status_code, symbol, "option quote")
+            self._map_schwab_option_http_error(
+                response.status_code, symbol, "option quote"
+            )
 
         payload = response.json()
         entry = payload.get(option_id)
@@ -753,7 +855,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         vega = quote.get("vega")
 
         if all(greek is None for greek in (delta, gamma, theta, vega)):
-            parsed_underlying, parsed_expiry, parsed_right, parsed_strike = self._parse_occ_symbol(option_id)
+            parsed_underlying, parsed_expiry, parsed_right, parsed_strike = (
+                self._parse_occ_symbol(option_id)
+            )
             chain = await self.get_option_chain(
                 symbol=parsed_underlying,
                 expiry=parsed_expiry,
@@ -761,12 +865,18 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 max_strike=parsed_strike,
                 right=parsed_right,
             )
-            matches = [opt for opt in chain.options if opt.type == parsed_right and opt.strike == parsed_strike]
+            matches = [
+                opt
+                for opt in chain.options
+                if opt.type == parsed_right and opt.strike == parsed_strike
+            ]
             if not matches:
                 raise DataNotFoundError("OptionContract", option_id)
             return matches[0]
 
-        parsed_underlying, parsed_expiry, parsed_right, parsed_strike = self._parse_occ_symbol(option_id)
+        parsed_underlying, parsed_expiry, parsed_right, parsed_strike = (
+            self._parse_occ_symbol(option_id)
+        )
         last = quote.get("lastPrice", quote.get("last"))
         mark = quote.get("mark")
         price_raw = last or mark
@@ -780,10 +890,18 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             expiry=parsed_expiry,
             type=parsed_right,
             price=Decimal(str(price_raw)),
-            bid=Decimal(str(quote["bidPrice"])) if quote.get("bidPrice") is not None else None,
-            ask=Decimal(str(quote["askPrice"])) if quote.get("askPrice") is not None else None,
-            volume=int(quote["totalVolume"]) if quote.get("totalVolume") is not None else None,
-            open_interest=int(quote["openInterest"]) if quote.get("openInterest") is not None else None,
+            bid=Decimal(str(quote["bidPrice"]))
+            if quote.get("bidPrice") is not None
+            else None,
+            ask=Decimal(str(quote["askPrice"]))
+            if quote.get("askPrice") is not None
+            else None,
+            volume=int(quote["totalVolume"])
+            if quote.get("totalVolume") is not None
+            else None,
+            open_interest=int(quote["openInterest"])
+            if quote.get("openInterest") is not None
+            else None,
             implied_volatility=quote.get("volatility"),
             delta=delta,
             gamma=gamma,

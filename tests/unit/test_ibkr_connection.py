@@ -14,10 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+
 from app.providers.ibkr import IBKRProvider
 from app.utils.errors import ProviderConnectionError
+
 
 @pytest.fixture
 def ibkr_provider():

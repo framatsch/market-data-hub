@@ -14,13 +14,17 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
 from pydantic import SecretStr
-from app.utils.secrets import unwrap_secret
+
 from app.utils.errors import (
-    AppError, ProviderError, DataNotFoundError, 
-    ProviderConnectionError, DataValidationError
+    AppError,
+    DataNotFoundError,
+    DataValidationError,
+    ProviderConnectionError,
+    ProviderError,
 )
+from app.utils.secrets import unwrap_secret
+
 
 def test_unwrap_secret():
     assert unwrap_secret("plain") == "plain"
@@ -39,15 +43,25 @@ def test_app_errors():
     assert DataValidationError("msg").code == "DATA_VALIDATION_ERROR"
 
 def test_specific_errors():
-    from app.utils.errors import InvalidProviderError, ProviderTimeoutError, ProviderNotAvailableError
+    from app.utils.errors import (
+        InvalidProviderError,
+        ProviderNotAvailableError,
+        ProviderTimeoutError,
+    )
     assert InvalidProviderError("name").code == "INVALID_PROVIDER"
     assert ProviderTimeoutError("msg").code == "PROVIDER_TIMEOUT"
     assert ProviderNotAvailableError("msg").code == "PROVIDER_NOT_AVAILABLE"
 
 def test_map_httpx_http_error():
-    import httpx
     from unittest.mock import MagicMock
-    from app.utils.errors import map_httpx_http_error, DataNotFoundError, ProviderNotAvailableError
+
+    import httpx
+
+    from app.utils.errors import (
+        DataNotFoundError,
+        ProviderNotAvailableError,
+        map_httpx_http_error,
+    )
     
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 404

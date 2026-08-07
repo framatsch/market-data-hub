@@ -66,14 +66,18 @@ class JsonRequestFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
             "provider": getattr(record, "provider", "none"),
-            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat().replace("+00:00", "Z"),
+            "timestamp": datetime.fromtimestamp(record.created, UTC)
+            .isoformat()
+            .replace("+00:00", "Z"),
         }
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)
 
 
-def _apply_formatter_to_all_handlers(formatter: logging.Formatter, context_filter: logging.Filter) -> None:
+def _apply_formatter_to_all_handlers(
+    formatter: logging.Formatter, context_filter: logging.Filter
+) -> None:
     """Apply formatter + filter to every handler on the root logger and known uvicorn loggers."""
     root_logger = logging.getLogger()
     if not root_logger.handlers:
@@ -168,10 +172,22 @@ def get_uvicorn_log_config(log_level: str = "info") -> dict[str, Any]:
         },
         "loggers": {
             "uvicorn": {"handlers": ["default"], "level": level, "propagate": False},
-            "uvicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
-            "uvicorn.access": {"handlers": ["default"], "level": level, "propagate": False},
+            "uvicorn.error": {
+                "handlers": ["default"],
+                "level": level,
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": ["default"],
+                "level": level,
+                "propagate": False,
+            },
             # Silence ib_async subscription noise
-            "ib_async.wrapper": {"handlers": ["default"], "level": "CRITICAL", "propagate": False},
+            "ib_async.wrapper": {
+                "handlers": ["default"],
+                "level": "CRITICAL",
+                "propagate": False,
+            },
         },
         "root": {
             "handlers": ["default"],

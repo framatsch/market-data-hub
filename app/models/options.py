@@ -39,6 +39,7 @@ class OptionQuote(BaseModel):
     vega: float | None = None
     provider: str
 
+
 class OptionChain(BaseModel):
     underlying_symbol: str
     expiry: date

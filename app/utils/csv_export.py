@@ -54,7 +54,9 @@ def to_csv(data: Any, filename: str = "export.csv") -> tuple[str, bytes]:
         writer.writeheader()
         for row in data:
             # Convert Decimal to string for CSV
-            row_converted = {k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()}
+            row_converted = {
+                k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()
+            }
             writer.writerow(row_converted)
     else:
         # Pydantic model - convert to dict
@@ -64,7 +66,9 @@ def to_csv(data: Any, filename: str = "export.csv") -> tuple[str, bytes]:
         for item in data:
             row_dict = item.model_dump()
             # Convert Decimal to string for CSV
-            row_converted = {k: str(v) if isinstance(v, Decimal) else v for k, v in row_dict.items()}
+            row_converted = {
+                k: str(v) if isinstance(v, Decimal) else v for k, v in row_dict.items()
+            }
             writer.writerow(row_converted)
 
     csv_bytes = output.getvalue().encode()

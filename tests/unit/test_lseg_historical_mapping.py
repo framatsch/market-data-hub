@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from decimal import Decimal
-from unittest.mock import patch, MagicMock
-from datetime import datetime
+import pytest
+
 from app.providers.lseg import LSEGProvider
+
 
 @pytest.fixture
 def lseg_provider():
@@ -30,7 +31,7 @@ def lseg_provider():
 
 def test_extract_bars(lseg_provider):
     # Mock historical data DataFrame
-    df = pd.DataFrame([
+    pd.DataFrame([
         {
             "TIMESTAMP": "2024-01-01T00:00:00",
             "OPEN": 150.0,
@@ -44,7 +45,6 @@ def test_extract_bars(lseg_provider):
     # We need to test the logic in get_historical_prices that iterates df
     # but it's wrapped in a local function.
     # We'll just test the part we can or mock the whole fetch_bars.
-    pass
 
 def test_map_interval_all_v2(lseg_provider):
     with patch("app.providers.lseg.historical_pricing") as mock_hp:

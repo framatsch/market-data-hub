@@ -29,22 +29,20 @@ from app.utils.csv_export import to_csv
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
+
 @router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
 async def search_companies(
-    q: str,
-    service: CompanyServiceDep,
-    provider: str | None = None
+    q: str, service: CompanyServiceDep, provider: str | None = None
 ) -> Any:
     """Search for companies by query string."""
     provider = provider.lower() if provider else None
     results = await service.search_companies(q, provider)
     return ResponseEnvelope(data=results)
 
+
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
 async def get_company_profile(
-    symbol: str,
-    service: CompanyServiceDep,
-    provider: str | None = None
+    symbol: str, service: CompanyServiceDep, provider: str | None = None
 ) -> Any:
     """Get company profile information."""
     symbol = symbol.upper()
@@ -57,15 +55,21 @@ async def get_company_profile(
 async def get_company_news(
     symbol: str,
     service: NewsServiceDep,
-    provider: str | None = Query(None, description="Data provider (finnhub, lseg, ibkr, mock)"),
+    provider: str | None = Query(
+        None, description="Data provider (finnhub, lseg, ibkr, mock)"
+    ),
     days: int | None = Query(None, description="Last N days (overrides from/to dates)"),
     from_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
     to_date: date | None = Query(None, description="End date (YYYY-MM-DD)"),
     limit: int = Query(20, ge=1, le=100, description="Results per page (max 100)"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
-    language: str = Query("en", description="Language code (ISO 639-1: en, de, fr, etc.)"),
-    category: str | None = Query(None, description="Filter by category (earnings, merger, product, legal)"),
-    format: str = Query("json", description="Response format (json, csv)")
+    language: str = Query(
+        "en", description="Language code (ISO 639-1: en, de, fr, etc.)"
+    ),
+    category: str | None = Query(
+        None, description="Filter by category (earnings, merger, product, legal)"
+    ),
+    format: str = Query("json", description="Response format (json, csv)"),
 ) -> Any:
     """
     Get news articles for a company.
@@ -110,11 +114,13 @@ async def get_company_news(
         limit=limit,
         offset=offset,
         language=language,
-        category=category
+        category=category,
     )
 
     # 4. Calculate metadata
-    total = len(articles) + offset  # Simplified - actual total unknown without full scan
+    total = (
+        len(articles) + offset
+    )  # Simplified - actual total unknown without full scan
     has_more = len(articles) == limit  # If we got exactly limit, there may be more
 
     # 5. CSV export if requested
@@ -123,9 +129,7 @@ async def get_company_news(
         return StreamingResponse(
             io.BytesIO(csv_bytes),
             media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={symbol}_news.csv"
-            }
+            headers={"Content-Disposition": f"attachment; filename={symbol}_news.csv"},
         )
 
     # 6. Return JSON response
@@ -138,6 +142,6 @@ async def get_company_news(
             has_more=has_more,
             provider=response_provider,
             from_date=from_date_calc,
-            to_date=to_date_calc
-        )
+            to_date=to_date_calc,
+        ),
     )

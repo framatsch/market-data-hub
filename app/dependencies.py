@@ -30,17 +30,21 @@ from app.services.price_service import PriceService
 def get_price_service() -> PriceService:
     return PriceService()
 
+
 @lru_cache
 def get_company_service() -> CompanyService:
     return CompanyService()
+
 
 @lru_cache
 def get_options_service() -> OptionsService:
     return OptionsService()
 
+
 @lru_cache
 def get_news_service() -> NewsService:
     return news_service
+
 
 PriceServiceDep = Annotated[PriceService, Depends(get_price_service)]
 CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]

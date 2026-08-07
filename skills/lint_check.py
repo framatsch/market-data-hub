@@ -62,7 +62,7 @@ def run_ruff_check(path: str, fix: bool = False) -> Tuple[int, str]:
     Returns:
         Tuple of (exit_code, output)
     """
-    cmd = ["ruff", "check", path]
+    cmd = ["uv", "run", "ruff", "check", path]
     if fix:
         cmd.append("--fix")
 

@@ -14,11 +14,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-import pandas as pd
-from unittest.mock import patch, MagicMock
 from datetime import date
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
+
 from app.providers.lseg import LSEGProvider
+
 
 @pytest.fixture
 def lseg_provider(monkeypatch):

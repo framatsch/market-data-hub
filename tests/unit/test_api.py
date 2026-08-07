@@ -14,18 +14,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from datetime import date, datetime
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime, date
-from decimal import Decimal
 
+from app.dependencies import (
+    get_company_service,
+    get_news_service,
+    get_options_service,
+    get_price_service,
+)
 from app.main import app
-from app.dependencies import get_price_service, get_company_service, get_options_service, get_news_service
-from app.models.price import PriceQuote, PriceBar
 from app.models.company import CompanyProfile, CompanySummary
-from app.models.options import OptionChain, OptionQuote
 from app.models.news import NewsArticle
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+
 
 @pytest.fixture
 def mock_price_service():
@@ -107,7 +114,7 @@ def test_get_option_chain(client, mock_options_service):
 
 def test_get_option_quote(client, mock_options_service):
     mock_options_service.get_option_quote = AsyncMock(return_value=OptionQuote(
-        symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal("150"), 
+        symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal(150), 
         expiry=date(2024, 1, 19), type="call", price=Decimal("5.00"), 
         currency="USD", provider="test"
     ))

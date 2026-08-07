@@ -16,6 +16,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 from app.admin.provider_config_repository import (
     KNOWN_PROVIDERS,
@@ -50,7 +51,7 @@ DEFAULT_PROVIDER_FALLBACKS = {
 
 
 class ProviderRegistry:
-    provider_classes = {
+    provider_classes: dict[str, type[Any]] = {
         "ibkr": IBKRProvider,
         "lseg": LSEGProvider,
         "schwab": SchwabProvider,
@@ -61,7 +62,7 @@ class ProviderRegistry:
     }
 
     def __init__(self) -> None:
-        self._providers: dict[str, object] = {}
+        self._providers: dict[str, Any] = {}
         self._reload_lock = asyncio.Lock()
         self.default_price_provider: str | None = None
         self.default_company_provider: str | None = None
@@ -72,7 +73,9 @@ class ProviderRegistry:
     def _get_reload_lock(self) -> asyncio.Lock:
         return self._reload_lock
 
-    def _resolve_default(self, configured: str | None, setting_key: str, base_class: type) -> str | None:
+    def _resolve_default(
+        self, configured: str | None, setting_key: str, base_class: type
+    ) -> str | None:
         """Return configured provider name only when loaded and implementing the expected base class."""
         if configured is None:
             return None
@@ -89,16 +92,24 @@ class ProviderRegistry:
         )
         return None
 
-    def _apply_default_settings(self, system_settings: dict[str, str | None] | None = None) -> None:
+    def _apply_default_settings(
+        self, system_settings: dict[str, str | None] | None = None
+    ) -> None:
         values = {**DEFAULT_PROVIDER_FALLBACKS, **(system_settings or {})}
         self.default_price_provider = self._resolve_default(
-            values["default_price_provider"], "default_price_provider", BasePriceProvider
+            values["default_price_provider"],
+            "default_price_provider",
+            BasePriceProvider,
         )
         self.default_company_provider = self._resolve_default(
-            values["default_company_provider"], "default_company_provider", BaseCompanyProvider
+            values["default_company_provider"],
+            "default_company_provider",
+            BaseCompanyProvider,
         )
         self.default_options_provider = self._resolve_default(
-            values["default_options_provider"], "default_options_provider", BaseOptionsProvider
+            values["default_options_provider"],
+            "default_options_provider",
+            BaseOptionsProvider,
         )
         self.default_news_provider = self._resolve_default(
             values["default_news_provider"], "default_news_provider", BaseNewsProvider
@@ -110,7 +121,11 @@ class ProviderRegistry:
         if enabled_str:
             enabled_list = [p.strip().lower() for p in enabled_str.split(",")]
             # Filter to only requested and valid names
-            to_load = {name: cls for name, cls in self.provider_classes.items() if name in enabled_list}
+            to_load = {
+                name: cls
+                for name, cls in self.provider_classes.items()
+                if name in enabled_list
+            }
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
             to_load = self.provider_classes
@@ -146,13 +161,22 @@ class ProviderRegistry:
                 settings_repository = None
 
         async with self._get_reload_lock():
-            configs = {config.provider_name: config for config in await config_repository.list_all()}
-            system_settings = await settings_repository.get_all() if settings_repository is not None else {}
+            configs = {
+                config.provider_name: config
+                for config in await config_repository.list_all()
+            }
+            system_settings = (
+                await settings_repository.get_all()
+                if settings_repository is not None
+                else {}
+            )
 
             for provider_name in KNOWN_PROVIDERS:
                 existing_config = configs.get(provider_name)
                 if existing_config is None or existing_config.updated_at is None:
-                    configs[provider_name] = await config_repository.save(provider_name, {"enabled": False})
+                    configs[provider_name] = await config_repository.save(
+                        provider_name, {"enabled": False}
+                    )
 
             if settings_repository is not None:
                 default_setting_keys = (
@@ -166,7 +190,11 @@ class ProviderRegistry:
                         await settings_repository.set(key, None)
                         system_settings[key] = None
 
-            enabled = {name for name, config in configs.items() if config.enabled and name in self.provider_classes}
+            enabled = {
+                name
+                for name, config in configs.items()
+                if config.enabled and name in self.provider_classes
+            }
 
             for name in list(self._providers):
                 if name not in enabled:
@@ -183,7 +211,9 @@ class ProviderRegistry:
                         logger.warning("Provider '%s' not available: %s", name, exc)
                         continue
                     except Exception as exc:
-                        logger.error("Failed to initialize provider '%s': %s", name, exc)
+                        logger.error(
+                            "Failed to initialize provider '%s': %s", name, exc
+                        )
                         continue
                 self._apply_runtime_config(self._providers[name], config)
 
@@ -200,7 +230,9 @@ class ProviderRegistry:
         except Exception:
             logger.warning("Error closing provider %s", name, exc_info=True)
 
-    def _apply_runtime_config(self, provider: object, config: ProviderRuntimeConfig) -> None:
+    def _apply_runtime_config(
+        self, provider: Any, config: ProviderRuntimeConfig
+    ) -> None:
         configure = getattr(provider, "configure", None)
         if callable(configure):
             configure(config)
@@ -215,7 +247,7 @@ class ProviderRegistry:
         if callable(unpause):
             unpause()
 
-    def get_provider_instance(self, name: str) -> object | None:
+    def get_provider_instance(self, name: str) -> Any | None:
         return self._providers.get(name)
 
     def list_provider_instances(self) -> dict[str, object]:
@@ -223,10 +255,16 @@ class ProviderRegistry:
 
     def get_price_provider(self, name: str | None = None) -> BasePriceProvider:
         if name is None and self.default_price_provider is None:
-            raise AppError("No price provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No price provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider_name = name or self.default_price_provider
         if provider_name is None:
-            raise AppError("No price provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No price provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BasePriceProvider):
             raise InvalidProviderError(provider_name)
@@ -234,10 +272,16 @@ class ProviderRegistry:
 
     def get_company_provider(self, name: str | None = None) -> BaseCompanyProvider:
         if name is None and self.default_company_provider is None:
-            raise AppError("No company data provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No company data provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider_name = name or self.default_company_provider
         if provider_name is None:
-            raise AppError("No company data provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No company data provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseCompanyProvider):
             raise InvalidProviderError(provider_name)
@@ -245,10 +289,16 @@ class ProviderRegistry:
 
     def get_options_provider(self, name: str | None = None) -> BaseOptionsProvider:
         if name is None and self.default_options_provider is None:
-            raise AppError("No options provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No options provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider_name = name or self.default_options_provider
         if provider_name is None:
-            raise AppError("No options provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No options provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseOptionsProvider):
             raise InvalidProviderError(provider_name)
@@ -256,10 +306,16 @@ class ProviderRegistry:
 
     def get_news_provider(self, name: str | None = None) -> BaseNewsProvider:
         if name is None and self.default_news_provider is None:
-            raise AppError("No news provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No news provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider_name = name or self.default_news_provider
         if provider_name is None:
-            raise AppError("No news provider configured — enable a provider in the admin UI", "PROVIDER_NOT_AVAILABLE")
+            raise AppError(
+                "No news provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
         provider = self._providers.get(provider_name)
         if not provider or not isinstance(provider, BaseNewsProvider):
             raise InvalidProviderError(provider_name)
@@ -270,13 +326,13 @@ class ProviderRegistry:
         for name, provider in list(self._providers.items()):
             await self._close_provider(name, provider)
 
+
 # Global registry instance
 registry = ProviderRegistry()
 
+
 def get_registry() -> ProviderRegistry:
     return registry
-
-from typing import Any
 
 
 def get_provider(provider_type: str, name: str | None = None) -> Any:

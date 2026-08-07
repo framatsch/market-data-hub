@@ -9,7 +9,10 @@ def get_provider_credential_sync(provider_name: str, credential_name: str) -> st
         raise ProviderError(
             f"{provider_name} credentials are unavailable.",
             code="PROVIDER_NOT_AVAILABLE",
-            details={"provider": provider_name, "reason": "admin runtime not initialized"},
+            details={
+                "provider": provider_name,
+                "reason": "admin runtime not initialized",
+            },
         ) from exc
 
     if value:

@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
 
+
 class SubscriptionMessage(BaseModel):
-    type: str # "subscribe"
+    type: str  # "subscribe"
     symbols: list[str]
     provider: str = "ibkr"
+
 
 @router.websocket("/prices")
 async def websocket_prices(websocket: WebSocket) -> None:
@@ -54,7 +56,7 @@ async def websocket_prices(websocket: WebSocket) -> None:
                             "symbol": symbols[0] if symbols else "UNKNOWN",
                             "price": 150.0 + i,
                             "provider": provider,
-                            "ts": str(asyncio.get_event_loop().time())
+                            "ts": str(asyncio.get_event_loop().time()),
                         }
                         await websocket.send_json(response)
                         await asyncio.sleep(1)

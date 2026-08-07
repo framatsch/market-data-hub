@@ -14,20 +14,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
-from app.services.price_service import PriceService
-from app.services.company_service import CompanyService
-from app.services.options_service import OptionsService
-from app.services.news_service import NewsService
-from app.models.price import PriceQuote, PriceBar
-from app.models.company import CompanyProfile, CompanySummary
-from app.models.options import OptionChain, OptionQuote
-from app.models.news import NewsArticle
+import pytest
+
 from app.models.common import MarketStatus
+from app.models.company import CompanyProfile, CompanySummary
+from app.models.news import NewsArticle
+from app.models.options import OptionChain, OptionQuote
+from app.models.price import PriceBar, PriceQuote
+from app.services.company_service import CompanyService
+from app.services.news_service import NewsService
+from app.services.options_service import OptionsService
+from app.services.price_service import PriceService
+
 
 @pytest.fixture
 def mock_registry():
@@ -69,7 +71,7 @@ async def test_get_option_chain(options_service, mock_registry):
 async def test_get_option_quote(options_service, mock_registry):
     mock_provider = MagicMock()
     mock_provider.get_option_quote = AsyncMock(return_value=OptionQuote(
-        symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal("150"), 
+        symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal(150), 
         expiry=date(2024, 1, 19), type="call", price=Decimal("5.00"), 
         currency="USD", provider="test"
     ))

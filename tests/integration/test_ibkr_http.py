@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
+
 import httpx
 
 BASE_URL = "http://localhost:8000"

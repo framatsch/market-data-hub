@@ -36,7 +36,9 @@ class SettingsRepository:
                 """
             )
             columns = conn.execute("PRAGMA table_info(system_settings)").fetchall()
-            value_column = next((column for column in columns if column[1] == "value"), None)
+            value_column = next(
+                (column for column in columns if column[1] == "value"), None
+            )
             if value_column is not None and int(value_column[3]) == 1:
                 conn.execute(
                     """
@@ -55,7 +57,9 @@ class SettingsRepository:
                     """
                 )
                 conn.execute("DROP TABLE system_settings")
-                conn.execute("ALTER TABLE system_settings_new RENAME TO system_settings")
+                conn.execute(
+                    "ALTER TABLE system_settings_new RENAME TO system_settings"
+                )
 
     async def get(self, key: str) -> str | None:
         return await asyncio.to_thread(self._get_sync, key)

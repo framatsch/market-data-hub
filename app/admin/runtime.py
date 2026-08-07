@@ -11,7 +11,11 @@ _settings_repository: SettingsRepository | None = None
 
 
 def initialize_admin_runtime() -> None:
-    global _crypto_service, _key_repository, _provider_config_repository, _settings_repository
+    global \
+        _crypto_service, \
+        _key_repository, \
+        _provider_config_repository, \
+        _settings_repository
     _crypto_service = CryptoService(settings.APP_ENCRYPTION_KEY)
     _key_repository = KeyRepository(settings.KEYS_DB_PATH, _crypto_service)
     _provider_config_repository = ProviderConfigRepository(settings.KEYS_DB_PATH)
@@ -24,7 +28,11 @@ def set_admin_runtime(
     provider_config_repository: ProviderConfigRepository | None = None,
     settings_repository: SettingsRepository | None = None,
 ) -> None:
-    global _crypto_service, _key_repository, _provider_config_repository, _settings_repository
+    global \
+        _crypto_service, \
+        _key_repository, \
+        _provider_config_repository, \
+        _settings_repository
     _crypto_service = crypto_service
     _key_repository = key_repository
     _provider_config_repository = provider_config_repository

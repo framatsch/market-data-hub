@@ -176,7 +176,9 @@ def _get_schwab_callback_error() -> str | None:
 
 
 @router.get("/auth/url")
-async def get_admin_auth_url(code_challenge: Annotated[str, Query(min_length=43, max_length=128)]) -> dict[str, str]:
+async def get_admin_auth_url(
+    code_challenge: Annotated[str, Query(min_length=43, max_length=128)],
+) -> dict[str, str]:
     issuer = _require_oidc_config()
     params = {
         "client_id": settings.ADMIN_OIDC_CLIENT_ID,
@@ -200,8 +202,15 @@ async def exchange_admin_auth_token(payload: TokenExchangeRequest) -> dict[str, 
         "code_verifier": payload.code_verifier,
     }
     redirect_uri = settings.ADMIN_OIDC_REDIRECT_URI or payload.redirect_uri
-    if settings.ADMIN_OIDC_REDIRECT_URI and payload.redirect_uri and payload.redirect_uri != settings.ADMIN_OIDC_REDIRECT_URI:
-        raise HTTPException(status_code=400, detail="redirect_uri does not match configured admin redirect URI")
+    if (
+        settings.ADMIN_OIDC_REDIRECT_URI
+        and payload.redirect_uri
+        and payload.redirect_uri != settings.ADMIN_OIDC_REDIRECT_URI
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="redirect_uri does not match configured admin redirect URI",
+        )
     if redirect_uri:
         data["redirect_uri"] = redirect_uri
     client_secret = unwrap_secret(settings.ADMIN_OIDC_CLIENT_SECRET)
@@ -223,9 +232,14 @@ async def get_admin_auth_me(principal: PrincipalDep) -> dict[str, Any]:
 def _validate_credential(provider_name: str, credential_name: str) -> None:
     credentials = CREDENTIAL_ALLOWLIST.get(provider_name)
     if credentials is None:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider_name}")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown provider: {provider_name}"
+        )
     if credential_name not in credentials:
-        raise HTTPException(status_code=400, detail=f"Unknown credential: {credential_name} for provider {provider_name}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown credential: {credential_name} for provider {provider_name}",
+        )
 
 
 def _mask_credential_value(value: str) -> str:
@@ -241,9 +255,13 @@ async def list_admin_keys(_principal: PrincipalDep) -> list[dict[str, Any]]:
 
 
 @router.post("/keys")
-async def save_admin_key(payload: KeySaveRequest, _principal: PrincipalDep) -> dict[str, Any]:
+async def save_admin_key(
+    payload: KeySaveRequest, _principal: PrincipalDep
+) -> dict[str, Any]:
     _validate_credential(payload.provider_name, payload.credential_name)
-    metadata = await get_key_repository().save(payload.provider_name, payload.credential_name, payload.value)
+    metadata = await get_key_repository().save(
+        payload.provider_name, payload.credential_name, payload.value
+    )
     return metadata.__dict__
 
 
@@ -258,13 +276,19 @@ async def list_admin_credentials(_principal: PrincipalDep) -> list[dict[str, Any
     for provider_name, credentials in CREDENTIAL_ALLOWLIST.items():
         for credential_name in sorted(credentials):
             metadata = configured.get((provider_name, credential_name))
-            value = await key_repository.get(provider_name, credential_name) if metadata is not None else None
+            value = (
+                await key_repository.get(provider_name, credential_name)
+                if metadata is not None
+                else None
+            )
             response.append(
                 {
                     "provider": provider_name,
                     "credential_name": credential_name,
                     "set": metadata is not None,
-                    "masked_value": _mask_credential_value(value) if value is not None else None,
+                    "masked_value": _mask_credential_value(value)
+                    if value is not None
+                    else None,
                     "updated_at": metadata.updated_at if metadata is not None else None,
                 }
             )
@@ -281,7 +305,11 @@ async def reveal_admin_credential(
     value = await get_key_repository().get(provider_name, credential_name)
     if value is None:
         raise HTTPException(status_code=404, detail="Credential is not configured")
-    logger.warning("Admin credential revealed for provider=%s credential=%s", provider_name, credential_name)
+    logger.warning(
+        "Admin credential revealed for provider=%s credential=%s",
+        provider_name,
+        credential_name,
+    )
     return {"value": value}
 
 
@@ -292,7 +320,9 @@ async def update_admin_credentials(
     _principal: PrincipalDep,
 ) -> dict[str, Any]:
     if provider_name not in CREDENTIAL_ALLOWLIST:
-        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider_name}")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown provider: {provider_name}"
+        )
     updated: list[str] = []
     for credential_name, value in credentials.items():
         _validate_credential(provider_name, credential_name)
@@ -321,7 +351,13 @@ def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]
     provider = registry.get_provider_instance(name)
     capabilities = _provider_capabilities(name, provider)
     if not config.enabled:
-        return {"name": name, "enabled": False, "status": "disabled", "error": None, "capabilities": capabilities}
+        return {
+            "name": name,
+            "enabled": False,
+            "status": "disabled",
+            "error": None,
+            "capabilities": capabilities,
+        }
     if registry.is_provider_paused(name):
         return {
             "name": name,
@@ -338,7 +374,13 @@ def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]
             "error": "Provider not loaded",
             "capabilities": capabilities,
         }
-    return {"name": name, "enabled": True, "status": "healthy", "error": None, "capabilities": capabilities}
+    return {
+        "name": name,
+        "enabled": True,
+        "status": "healthy",
+        "error": None,
+        "capabilities": capabilities,
+    }
 
 
 def _system_defaults() -> dict[str, str]:
@@ -356,19 +398,23 @@ async def get_admin_settings_defaults(_principal: PrincipalDep) -> dict[str, str
 
 
 @router.put("/settings/defaults")
-async def update_admin_settings_defaults(payload: SystemDefaultsUpdate, _principal: PrincipalDep) -> dict[str, str]:
+async def update_admin_settings_defaults(
+    payload: SystemDefaultsUpdate, _principal: PrincipalDep
+) -> dict[str, str]:
     values = payload.model_dump(exclude_unset=True)
     settings_repo = get_settings_repository()
     for key, value in values.items():
         if value is not None:
             await settings_repo.set(key, value.lower())
     await registry.reload_from_config(get_provider_config_repository(), settings_repo)
-    
+
     return _system_defaults()
 
 
 @router.get("/settings/capabilities")
-async def get_admin_settings_capabilities(_principal: PrincipalDep) -> dict[str, list[str]]:
+async def get_admin_settings_capabilities(
+    _principal: PrincipalDep,
+) -> dict[str, list[str]]:
     capabilities: dict[str, list[str]] = {
         "prices": [],
         "options": [],
@@ -402,7 +448,9 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
 
 
 @router.post("/providers/{provider_name}/enable")
-async def enable_admin_provider(provider_name: str, _principal: PrincipalDep) -> dict[str, Any]:
+async def enable_admin_provider(
+    provider_name: str, _principal: PrincipalDep
+) -> dict[str, Any]:
     repo = get_provider_config_repository()
     try:
         config = await repo.save(provider_name, {"enabled": True})
@@ -413,7 +461,9 @@ async def enable_admin_provider(provider_name: str, _principal: PrincipalDep) ->
 
 
 @router.post("/providers/{provider_name}/disable")
-async def disable_admin_provider(provider_name: str, _principal: PrincipalDep) -> dict[str, Any]:
+async def disable_admin_provider(
+    provider_name: str, _principal: PrincipalDep
+) -> dict[str, Any]:
     repo = get_provider_config_repository()
     try:
         config = await repo.save(provider_name, {"enabled": False})
@@ -424,7 +474,9 @@ async def disable_admin_provider(provider_name: str, _principal: PrincipalDep) -
 
 
 @router.get("/providers/{provider_name}/config")
-async def get_admin_provider_config(provider_name: str, _principal: PrincipalDep) -> dict[str, Any]:
+async def get_admin_provider_config(
+    provider_name: str, _principal: PrincipalDep
+) -> dict[str, Any]:
     try:
         return (await get_provider_config_repository().get(provider_name)).model_dump()
     except ValueError as exc:
@@ -492,7 +544,9 @@ async def update_admin_provider_config(
         500: {"description": "Unexpected provider test error"},
     },
 )
-async def test_admin_provider_connection(provider_name: str, _principal: PrincipalDep) -> ConnectionTestResult:
+async def test_admin_provider_connection(
+    provider_name: str, _principal: PrincipalDep
+) -> ConnectionTestResult:
     provider_key = provider_name.lower()
     try:
         provider_config = await get_provider_config_repository().get(provider_key)
@@ -508,16 +562,22 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
 
     test_connection = getattr(provider, "test_connection", None)
     if not callable(test_connection):
-        raise HTTPException(status_code=500, detail="Provider does not support connection testing")
+        raise HTTPException(
+            status_code=500, detail="Provider does not support connection testing"
+        )
     test_connection_call = cast(Callable[[], Awaitable[Any]], test_connection)
 
     timeout_seconds = max(
         provider_config.timeout_seconds,
-        _LSEG_CONNECTION_TEST_TIMEOUT_SECONDS if provider_key == "lseg" else _DEFAULT_CONNECTION_TEST_TIMEOUT_SECONDS,
+        _LSEG_CONNECTION_TEST_TIMEOUT_SECONDS
+        if provider_key == "lseg"
+        else _DEFAULT_CONNECTION_TEST_TIMEOUT_SECONDS,
     )
 
     try:
-        result_payload = await asyncio.wait_for(test_connection_call(), timeout=timeout_seconds)
+        result_payload = await asyncio.wait_for(
+            test_connection_call(), timeout=timeout_seconds
+        )
     except TimeoutError:
         timeout_result = ConnectionTestResult(
             status_code=503,
@@ -553,7 +613,10 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
         )
         raise HTTPException(
             status_code=500,
-            detail={"provider": provider_key, "error": "Invalid test_connection() response format"},
+            detail={
+                "provider": provider_key,
+                "error": "Invalid test_connection() response format",
+            },
         ) from exc
 
     if not result.success:
@@ -568,7 +631,9 @@ async def test_admin_provider_connection(provider_name: str, _principal: Princip
 
 
 @router.put("/providers/ibkr/gateway")
-async def update_ibkr_gateway(payload: IbkrGatewayUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+async def update_ibkr_gateway(
+    payload: IbkrGatewayUpdate, _principal: PrincipalDep
+) -> dict[str, Any]:
     repo = get_provider_config_repository()
     existing_config = await repo.get("ibkr")
     connection_config = dict(existing_config.connection_config or {})
@@ -612,7 +677,9 @@ async def get_schwab_config(_principal: PrincipalDep) -> dict[str, Any]:
 
 
 @router.put("/schwab/config")
-async def update_schwab_config(payload: SchwabConfigUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+async def update_schwab_config(
+    payload: SchwabConfigUpdate, _principal: PrincipalDep
+) -> dict[str, Any]:
     """Save Schwab connection_config fields (callback_url, manual_token_mode, force_refresh_token)."""
     repo = get_provider_config_repository()
     existing = await repo.get("schwab")
@@ -625,17 +692,22 @@ async def update_schwab_config(payload: SchwabConfigUpdate, _principal: Principa
 
 
 @router.post("/schwab/auth/token/manual")
-async def save_schwab_token_manually(payload: SchwabManualTokenRequest, _principal: PrincipalDep) -> dict[str, Any]:
+async def save_schwab_token_manually(
+    payload: SchwabManualTokenRequest, _principal: PrincipalDep
+) -> dict[str, Any]:
     """Save a manually pasted Schwab token_json directly in the keys DB.
 
     Used when manual_token_mode=True, when the OAuth redirect does not work and
     the token is manually extracted from the callback URL after login.
     """
     import json as _json
+
     try:
         _json.loads(payload.token_json)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"token_json is not valid JSON: {exc}") from exc
+        raise HTTPException(
+            status_code=422, detail=f"token_json is not valid JSON: {exc}"
+        ) from exc
 
     key_repo = get_key_repository()
     await key_repo.save("schwab", "token_json", payload.token_json)
@@ -646,13 +718,16 @@ async def save_schwab_token_manually(payload: SchwabManualTokenRequest, _princip
 
 
 @router.post("/schwab/auth/update-tokens")
-async def schwab_update_tokens(_principal: PrincipalDep, force_refresh_token: bool = True) -> dict[str, Any]:
+async def schwab_update_tokens(
+    _principal: PrincipalDep, force_refresh_token: bool = True
+) -> dict[str, Any]:
     """Call client.update_tokens(force_refresh_token=...) on the running Schwab client.
 
     Can be used to manually renew the refresh token, for example on weekends,
     before it expires after 7 days.
     """
     from app.providers.registry import registry as _registry
+
     provider = _registry.get_provider_instance("schwab")
     if provider is None:
         raise HTTPException(status_code=404, detail="Schwab provider is not loaded")
@@ -660,17 +735,24 @@ async def schwab_update_tokens(_principal: PrincipalDep, force_refresh_token: bo
     schwab_provider = provider
     client = getattr(schwab_provider, "_client", None)
     if client is None:
-        raise HTTPException(status_code=503, detail="Schwab client is not initialized; connect first")
+        raise HTTPException(
+            status_code=503, detail="Schwab client is not initialized; connect first"
+        )
 
     try:
         update_fn = getattr(client, "update_tokens", None)
         if update_fn is None:
-            raise HTTPException(status_code=503, detail="schwab-py client does not support update_tokens()")
+            raise HTTPException(
+                status_code=503,
+                detail="schwab-py client does not support update_tokens()",
+            )
         await asyncio.to_thread(update_fn, force_refresh_token=force_refresh_token)
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"update_tokens failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"update_tokens failed: {exc}"
+        ) from exc
 
     return {"status": "ok", "force_refresh_token": force_refresh_token}
 
@@ -711,17 +793,23 @@ def _extract_token_json(client: Any) -> str:
 
 
 @router.get("/schwab/callback", response_class=HTMLResponse)
-async def complete_schwab_auth_callback_redirect(request: Request, code: str, state: str) -> HTMLResponse:
+async def complete_schwab_auth_callback_redirect(
+    request: Request, code: str, state: str
+) -> HTMLResponse:
     _ = code
     if client_from_received_url is None:
-        return HTMLResponse(status_code=503, content="<h1>schwab-py is not installed.</h1>")
+        return HTMLResponse(
+            status_code=503, content="<h1>schwab-py is not installed.</h1>"
+        )
 
     key_repo = get_key_repository()
     api_key = await key_repo.get("schwab", "api_key")
     app_secret = await key_repo.get("schwab", "app_secret")
     if not api_key or not app_secret:
         _set_schwab_callback_error("Schwab credentials not configured")
-        return HTMLResponse(status_code=400, content="<h1>Schwab credentials not configured.</h1>")
+        return HTMLResponse(
+            status_code=400, content="<h1>Schwab credentials not configured.</h1>"
+        )
 
     # If manual_token_mode is active, this callback should never be called. If it
     # is, return a helpful response instead of continuing the flow.
@@ -730,7 +818,9 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
     _evict_expired_schwab_states(now)
     pending = _schwab_pending_states.pop(state, None)
     if pending is None:
-        _set_schwab_callback_error("Invalid or expired state. Please retry authorization.")
+        _set_schwab_callback_error(
+            "Invalid or expired state. Please retry authorization."
+        )
         return HTMLResponse(
             status_code=400,
             content="<h1>Invalid or expired state. Please retry authorization.</h1>",
@@ -738,7 +828,9 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
 
     auth_context, created_at = pending
     if now - created_at > _SCHWAB_PENDING_STATE_TTL:
-        _set_schwab_callback_error("Invalid or expired state. Please retry authorization.")
+        _set_schwab_callback_error(
+            "Invalid or expired state. Please retry authorization."
+        )
         return HTMLResponse(
             status_code=400,
             content="<h1>Invalid or expired state. Please retry authorization.</h1>",
@@ -747,7 +839,9 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
     token_holder: dict[str, str] = {}
 
     def _token_write_func(token: Any) -> None:
-        token_holder["token_json"] = token if isinstance(token, str) else json.dumps(token)
+        token_holder["token_json"] = (
+            token if isinstance(token, str) else json.dumps(token)
+        )
 
     try:
         client = await asyncio.to_thread(
@@ -762,7 +856,10 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
         await key_repo.save("schwab", "token_json", token_json)
         registry.unpause_provider("schwab")
         _schwab_callback_error.pop(_SCHWAB_CALLBACK_ERROR_KEY, None)
-        return HTMLResponse(status_code=200, content="<h1>Authorization successful. You may close this tab.</h1>")
+        return HTMLResponse(
+            status_code=200,
+            content="<h1>Authorization successful. You may close this tab.</h1>",
+        )
     except Exception as exc:
         error_message = str(exc)
         _set_schwab_callback_error(error_message)
@@ -773,8 +870,10 @@ async def complete_schwab_auth_callback_redirect(request: Request, code: str, st
 
 
 @router.post("/schwab/auth/callback", deprecated=True)
-async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _principal: PrincipalDep) -> dict[str, Any]:
-    """Deprecated: use GET /api/admin/schwab/callback automatic redirect flow."""
+async def complete_schwab_auth_callback(
+    payload: SchwabCallbackRequest, _principal: PrincipalDep
+) -> dict[str, Any]:
+    """Fallback manual URL flow"""
     if client_from_received_url is None:
         raise HTTPException(status_code=503, detail="schwab-py is not installed")
     key_repo = get_key_repository()
@@ -783,25 +882,54 @@ async def complete_schwab_auth_callback(payload: SchwabCallbackRequest, _princip
     if not api_key or not app_secret:
         raise HTTPException(status_code=503, detail="Schwab credentials not configured")
 
-    callback_url = await _get_schwab_callback_url()
+    from urllib.parse import parse_qs, urlparse
+
+    parsed_url = urlparse(payload.received_url)
+    qs = parse_qs(parsed_url.query)
+    state_list = qs.get("state")
+    if not state_list:
+        raise HTTPException(status_code=400, detail="Missing state parameter in URL")
+    state = state_list[0]
+
+    now = _utcnow()
+    _evict_expired_schwab_states(now)
+    pending = _schwab_pending_states.pop(state, None)
+    if pending is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired state. Please click 'Open Auth-Link' again.",
+        )
+    auth_context, _ = pending
+
+    token_holder: dict[str, str] = {}
+
+    def _token_write_func(token: Any) -> None:
+        token_holder["token_json"] = (
+            token if isinstance(token, str) else json.dumps(token)
+        )
+
     try:
         client = await asyncio.to_thread(
             client_from_received_url,
-            api_key=api_key,
-            app_secret=app_secret,
-            callback_url=callback_url,
-            token_path=None,
+            api_key,
+            app_secret,
+            auth_context=auth_context,
             received_url=payload.received_url,
+            token_write_func=_token_write_func,
         )
-        token_json = _extract_token_json(client)
+        token_json = token_holder.get("token_json") or _extract_token_json(client)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid callback URL: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Invalid callback URL: {exc}"
+        ) from exc
 
     await key_repo.save("schwab", "token_json", token_json)
     registry.unpause_provider("schwab")
     return {
         "status": "ok",
-        "token_expires_at": (datetime.now(UTC) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat(),
+        "token_expires_at": (
+            datetime.now(UTC) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)
+        ).isoformat(),
     }
 
 
@@ -817,7 +945,14 @@ async def get_schwab_auth_status(_principal: PrincipalDep) -> dict[str, Any]:
     if not token_json:
         return {"status": "not_configured", "paused": paused, "token_configured": False}
     if paused:
-        return {"status": "expired", "paused": True, "token_configured": True, "storage": storage, "expires_at": None, "days_remaining": 0}
+        return {
+            "status": "expired",
+            "paused": True,
+            "token_configured": True,
+            "storage": storage,
+            "expires_at": None,
+            "days_remaining": 0,
+        }
     expires_at = datetime.now(UTC) + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)
     return {
         "status": "active",
@@ -834,22 +969,30 @@ async def get_alert_webhook(_principal: PrincipalDep) -> dict[str, Any]:
     webhook_url = await get_key_repository().get("schwab", "alert_webhook_url")
     repo = get_provider_config_repository()
     config = await repo.get("schwab")
-    webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
-    return {
-        "webhook_url": webhook_url or "",
-        "format": webhook_format
-    }
+    webhook_format = (
+        config.connection_config.get("alert_webhook_format", "slack")
+        if config.connection_config
+        else "slack"
+    )
+    return {"webhook_url": webhook_url or "", "format": webhook_format}
 
 
 @router.put("/alerts/webhook", deprecated=True)
-async def update_alert_webhook(payload: AlertWebhookUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+async def update_alert_webhook(
+    payload: AlertWebhookUpdate, _principal: PrincipalDep
+) -> dict[str, Any]:
     if payload.format not in {"slack", "generic", "discord"}:
-        raise HTTPException(status_code=422, detail="format must be slack, generic, or discord")
+        raise HTTPException(
+            status_code=422, detail="format must be slack, generic, or discord"
+        )
     _validate_webhook_url(payload.webhook_url)
     await get_key_repository().save("schwab", "alert_webhook_url", payload.webhook_url)
     repo = get_provider_config_repository()
     config = await repo.get("schwab")
-    connection_config = {**config.connection_config, "alert_webhook_format": payload.format}
+    connection_config = {
+        **config.connection_config,
+        "alert_webhook_format": payload.format,
+    }
     await repo.save("schwab", {"connection_config": connection_config})
     return {"status": "configured", "format": payload.format}
 
@@ -860,11 +1003,15 @@ async def test_alert_webhook(_principal: PrincipalDep) -> dict[str, str]:
     if not webhook_url:
         raise HTTPException(status_code=503, detail="Alert webhook URL not configured")
     _validate_webhook_url(webhook_url)
-    
+
     repo = get_provider_config_repository()
     config = await repo.get("schwab")
-    webhook_format = config.connection_config.get("alert_webhook_format", "slack") if config.connection_config else "slack"
-    
+    webhook_format = (
+        config.connection_config.get("alert_webhook_format", "slack")
+        if config.connection_config
+        else "slack"
+    )
+
     if webhook_format == "discord":
         payload = {"content": "Market Data Hub test alert"}
     elif webhook_format == "slack":
@@ -875,5 +1022,7 @@ async def test_alert_webhook(_principal: PrincipalDep) -> dict[str, str]:
     async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
         response = await client.post(webhook_url, json=payload)
     if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"Webhook returned HTTP {response.status_code}")
+        raise HTTPException(
+            status_code=502, detail=f"Webhook returned HTTP {response.status_code}"
+        )
     return {"status": "sent"}

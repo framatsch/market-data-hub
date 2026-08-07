@@ -14,18 +14,21 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock
+
 from app.main import app
-from app.utils.errors import DataNotFoundError, ProviderError, InvalidProviderError
+from app.utils.errors import DataNotFoundError, InvalidProviderError, ProviderError
+
 
 @pytest.fixture
 def client():
     return TestClient(app, raise_server_exceptions=False)
 
 def test_data_not_found_handler(client):
-    with pytest.MonkeyPatch.context() as m:
+    with pytest.MonkeyPatch.context():
         # We need a route that throws AppError
         from app.api.routes_prices import router
         @router.get("/test-error-404")

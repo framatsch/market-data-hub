@@ -14,12 +14,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-import httpx
-from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from app.providers.finnhub import FinnhubProvider
 from app.utils.errors import ProviderError
+
 
 @pytest.fixture
 def finnhub_provider():

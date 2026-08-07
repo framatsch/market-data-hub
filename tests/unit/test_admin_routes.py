@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from app.admin.crypto import CryptoService
 from app.admin.key_repository import KeyRepository
 from app.admin.provider_config_repository import ProviderConfigRepository
-from app.admin.settings_repository import SettingsRepository
 from app.admin.runtime import get_provider_config_repository, set_admin_runtime
+from app.admin.settings_repository import SettingsRepository
 from app.api.routes_admin import router
 from app.config import settings
 from app.providers.schwab import SchwabProvider
@@ -137,7 +137,11 @@ def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> N
     client.put("/api/admin/credentials/schwab", json={"api_key": "key", "app_secret": "secret"})
     saved = {}
 
-    def fake_client_from_received_url(**kwargs):
+    def fake_client_from_received_url(*args, **kwargs):
+        if len(args) >= 1:
+            saved["api_key"] = args[0]
+        if len(args) >= 2:
+            saved["app_secret"] = args[1]
         saved.update(kwargs)
         return SimpleNamespace(token={"access_token": "token"})
 
@@ -146,11 +150,16 @@ def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> N
     monkeypatch.setattr("app.api.routes_admin.client_from_received_url", fake_client_from_received_url)
     monkeypatch.setitem(__import__("app.api.routes_admin", fromlist=["registry"]).registry._providers, "schwab", provider)
 
-    response = client.post("/api/admin/schwab/auth/callback", json={"received_url": "https://callback?code=abc"})
+    from app.api.routes_admin import _schwab_pending_states, _utcnow
+    mock_auth_context = SimpleNamespace(state="test_state")
+    _schwab_pending_states["test_state"] = (mock_auth_context, _utcnow())
 
+    response = client.post("/api/admin/schwab/auth/callback", json={"received_url": "https://callback?code=abc&state=test_state"})
+
+    print(response.json())
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert saved["received_url"] == "https://callback?code=abc"
+    assert saved["received_url"] == "https://callback?code=abc&state=test_state"
     assert provider._paused is False
     status = client.get("/api/admin/schwab/auth/status")
     assert status.json()["storage"] == "sqlite"

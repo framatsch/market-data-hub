@@ -16,10 +16,11 @@
 
 """Unit tests for LSEG Provider with mocked API calls."""
 
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+import pytest
 
 from app.providers.lseg import LSEGProvider
 from app.utils.errors import DataNotFoundError, ProviderConnectionError
@@ -32,7 +33,7 @@ class TestRICCaching:
         """Test RIC cache returns cached value without API call."""
         provider = LSEGProvider()
         provider._ric_cache = {
-            "AAPL": ("AAPL.O", datetime.now(timezone.utc))
+            "AAPL": ("AAPL.O", datetime.now(UTC))
         }
 
         # Should not make API call
@@ -65,7 +66,7 @@ class TestRICCaching:
     def test_ric_cache_expiry(self):
         """Test expired cache entries trigger new search."""
         provider = LSEGProvider()
-        old_timestamp = datetime.now(timezone.utc) - timedelta(hours=25)
+        old_timestamp = datetime.now(UTC) - timedelta(hours=25)
         provider._ric_cache = {
             "AAPL": ("AAPL.O", old_timestamp)
         }
@@ -85,7 +86,7 @@ class TestRICCaching:
                     ric = provider._ticker_to_ric("AAPL")
                     assert ric == "AAPL.O"
                     # Should have updated cache
-                    assert (datetime.now(timezone.utc) - provider._ric_cache["AAPL"][1]).total_seconds() < 10
+                    assert (datetime.now(UTC) - provider._ric_cache["AAPL"][1]).total_seconds() < 10
 
     def test_ric_search_retries_once_after_empty_results(self):
         """Test empty RIC search results trigger one forced session refresh."""
@@ -196,7 +197,7 @@ class TestSessionManagement:
         """Test session refreshes after TTL expires."""
         provider = LSEGProvider()
         provider._session = Mock()  # Pretend we have a session
-        provider._session_created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        provider._session_created_at = datetime.now(UTC) - timedelta(hours=1)
 
         # Track if _create_session is called
         create_called = []
@@ -204,7 +205,7 @@ class TestSessionManagement:
         def mock_create():
             create_called.append(True)
             provider._session = Mock()
-            provider._session_created_at = datetime.now(timezone.utc)
+            provider._session_created_at = datetime.now(UTC)
 
         # Mock rd.session.default
         with patch('app.providers.lseg.rd.session') as mock_session:
@@ -218,7 +219,7 @@ class TestSessionManagement:
         """Test valid session is not refreshed."""
         provider = LSEGProvider()
         provider._session = SimpleNamespace(opened=True)
-        provider._session_created_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        provider._session_created_at = datetime.now(UTC) - timedelta(minutes=30)
 
         # Mock to check _create_session not called
         create_called = []
@@ -238,14 +239,14 @@ class TestSessionManagement:
         """Test closed session refreshes even before TTL expires."""
         provider = LSEGProvider()
         provider._session = SimpleNamespace(opened=False)
-        provider._session_created_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        provider._session_created_at = datetime.now(UTC) - timedelta(minutes=5)
 
         create_called = []
 
         def mock_create():
             create_called.append(True)
             provider._session = SimpleNamespace(opened=True)
-            provider._session_created_at = datetime.now(timezone.utc)
+            provider._session_created_at = datetime.now(UTC)
 
         provider._create_session = mock_create
 
@@ -267,14 +268,14 @@ class TestSessionManagement:
         """Test missing Refinitiv default session is restored from provider session."""
         provider = LSEGProvider()
         provider._session = SimpleNamespace(opened=True)
-        provider._session_created_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        provider._session_created_at = datetime.now(UTC) - timedelta(minutes=5)
 
         create_called = []
 
         def mock_create():
             create_called.append(True)
             provider._session = SimpleNamespace(opened=True)
-            provider._session_created_at = datetime.now(timezone.utc)
+            provider._session_created_at = datetime.now(UTC)
 
         provider._create_session = mock_create
 
@@ -289,7 +290,7 @@ class TestSessionManagement:
         """Test closed Refinitiv default session is replaced by provider session."""
         provider = LSEGProvider()
         provider._session = SimpleNamespace(opened=True)
-        provider._session_created_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        provider._session_created_at = datetime.now(UTC) - timedelta(minutes=5)
         closed_default_session = SimpleNamespace(opened=False)
 
         create_called = []
@@ -297,7 +298,7 @@ class TestSessionManagement:
         def mock_create():
             create_called.append(True)
             provider._session = SimpleNamespace(opened=True)
-            provider._session_created_at = datetime.now(timezone.utc)
+            provider._session_created_at = datetime.now(UTC)
 
         provider._create_session = mock_create
 
@@ -383,7 +384,7 @@ class TestQuoteCaching:
         cached_quote = Mock()
         cached_quote.symbol = "AAPL"
         provider._quote_cache = {
-            "AAPL": (cached_quote, datetime.now(timezone.utc))
+            "AAPL": (cached_quote, datetime.now(UTC))
         }
 
         result = provider._get_cached_quote("AAPL")
@@ -401,7 +402,7 @@ class TestQuoteCaching:
         provider = LSEGProvider()
 
         old_quote = Mock()
-        old_timestamp = datetime.now(timezone.utc) - timedelta(seconds=10)
+        old_timestamp = datetime.now(UTC) - timedelta(seconds=10)
         provider._quote_cache = {
             "AAPL": (old_quote, old_timestamp)
         }

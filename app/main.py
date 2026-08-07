@@ -42,8 +42,12 @@ from app.utils.errors import AppError, ErrorDetail, ErrorResponse
 logger = logging.getLogger(__name__)
 
 # Suppress known deprecation warnings from upstream libraries (uvicorn/websockets migration in progress)
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets.legacy")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn.protocols.websockets")
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="websockets.legacy"
+)
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module="uvicorn.protocols.websockets"
+)
 
 # Setup custom logging
 setup_logging()
@@ -54,6 +58,7 @@ def _public_base_url() -> str:
     host = os.getenv("PUBLIC_APP_HOST", "localhost")
     return f"http://{host}:{settings.APP_PORT}"
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     """Manage application lifecycle."""
@@ -62,12 +67,12 @@ async def lifespan(app: FastAPI) -> Any:
 
     initialize_admin_runtime()
     await registry.reload_from_config()
-    
+
     # --- STARTUP PROTOCOL OVERVIEW ---
     active_providers = list(registry._providers.keys())
     mcp_status = "ENABLED ✅" if settings.MCP_ENABLED else "DISABLED ❌"
     base_url = _public_base_url()
-    
+
     banner = f"""
 {"=" * 60}
 {settings.APP_NAME} - STARTUP PROTOCOL
@@ -81,7 +86,7 @@ ACTIVE PROVIDERS:
     for p in ["ibkr", "lseg", "finnhub", "polygon", "prixe"]:
         status = "✅ Active" if p in active_providers else "❌ Unavailable"
         banner += f"  - {p.upper():<8}: {status}\n"
-    
+
     banner += (
         f"{'-' * 60}\n"
         f"Admin UI    : {base_url}/admin\n"
@@ -89,23 +94,22 @@ ACTIVE PROVIDERS:
         "Service is ready to accept requests\n"
         f"{'=' * 60}"
     )
-    
+
     # Force print to stdout to ensure it shows in Docker logs immediately
     print(banner, flush=True)
     logger.info("Startup protocol displayed.")
-    
+
     yield
-    
+
     logger.info(f"Shutting down {settings.APP_NAME}")
     await registry.shutdown()
-
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     description="Real-time market data aggregation from IBKR, LSEG, and Finnhub",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Enable CORS for MCP Inspector and other clients.
@@ -118,9 +122,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",   # Vite dev server
-        "http://localhost:4173",   # Vite preview server
-        "http://localhost:8000",   # same-origin explicit
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:4173",  # Vite preview server
+        "http://localhost:8000",  # same-origin explicit
         "http://127.0.0.1:8000",
     ],
     allow_credentials=True,
@@ -139,6 +143,7 @@ app.include_router(routes_options.router)
 app.include_router(routes_ws.router)
 app.include_router(routes_admin.router)
 
+
 def _resolve_admin_static_dir() -> Path:
     """Resolve the admin static directory at call time (not at module load).
 
@@ -147,8 +152,8 @@ def _resolve_admin_static_dir() -> Path:
     """
     # 1. Sibling static/ next to the app/ package — used in Docker with volume mount
     #    ./admin/dist:/app/static/admin  →  /app/static/admin
-    app_package_dir = Path(__file__).resolve().parent          # /app/app
-    repo_root = app_package_dir.parent                         # /app
+    app_package_dir = Path(__file__).resolve().parent  # /app/app
+    repo_root = app_package_dir.parent  # /app
     candidate = repo_root / "static" / "admin"
     if candidate.exists():
         return candidate
@@ -191,6 +196,7 @@ async def serve_admin_spa(full_path: str) -> Any:
         return FileResponse(index)
     return JSONResponse(status_code=404, content={"detail": "Admin UI not built"})
 
+
 # MCP router (opt-in via MCP_ENABLED=true)
 if settings.MCP_ENABLED:
     from app.api.mcp import metadata_router as mcp_metadata_router
@@ -198,6 +204,7 @@ if settings.MCP_ENABLED:
 
     app.include_router(mcp_metadata_router)
     app.include_router(mcp_router)
+
 
 # Exception Handlers
 @app.exception_handler(AppError)
@@ -207,18 +214,18 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
         status_code = 404
     elif exc.code == "INVALID_PROVIDER":
         status_code = 400
-    elif exc.code in ("PROVIDER_NOT_AVAILABLE", "PROVIDER_TIMEOUT", "PROVIDER_CONNECTION_ERROR"):
+    elif exc.code in (
+        "PROVIDER_NOT_AVAILABLE",
+        "PROVIDER_TIMEOUT",
+        "PROVIDER_CONNECTION_ERROR",
+    ):
         status_code = 503
 
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(
-            error=ErrorDetail(
-                code=exc.code,
-                message=exc.message,
-                details=exc.details
-            )
-        ).model_dump()
+            error=ErrorDetail(code=exc.code, message=exc.message, details=exc.details)
+        ).model_dump(),
     )
 
 
@@ -226,10 +233,7 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
 async def general_error_handler(request: Request, exc: Exception) -> Any:
     """Handle unexpected errors."""
     logger.error(f"Unexpected error: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 if __name__ == "__main__":

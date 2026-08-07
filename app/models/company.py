@@ -25,6 +25,7 @@ class CompanySummary(BaseModel):
     sector: str | None = None
     provider: str
 
+
 class CompanyProfile(BaseModel):
     symbol: str
     name: str

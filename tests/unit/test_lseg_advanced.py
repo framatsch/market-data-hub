@@ -14,11 +14,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+import pytest
+
 from app.providers.lseg import LSEGProvider
 from app.utils.errors import DataValidationError
+
 
 @pytest.fixture
 def lseg_provider():
@@ -41,6 +44,7 @@ def test_safe_decimal_strict_validation(lseg_provider):
 
 def test_safe_decimal_nan_strict(lseg_provider):
     import numpy as np
+
     from app.config import settings
     original_strict = settings.LSEG_STRICT_VALIDATION
     settings.LSEG_STRICT_VALIDATION = True

@@ -43,10 +43,16 @@ class KeyRepository:
                 """
             )
 
-    async def save(self, provider_name: str, credential_name: str, plaintext: str) -> CredentialMetadata:
-        return await asyncio.to_thread(self._save_sync, provider_name, credential_name, plaintext)
+    async def save(
+        self, provider_name: str, credential_name: str, plaintext: str
+    ) -> CredentialMetadata:
+        return await asyncio.to_thread(
+            self._save_sync, provider_name, credential_name, plaintext
+        )
 
-    def _save_sync(self, provider_name: str, credential_name: str, plaintext: str) -> CredentialMetadata:
+    def _save_sync(
+        self, provider_name: str, credential_name: str, plaintext: str
+    ) -> CredentialMetadata:
         blob = self._crypto.encrypt(plaintext)
         updated_at = datetime.now(UTC).isoformat()
         with self._connect() as conn:
@@ -61,9 +67,18 @@ class KeyRepository:
                     auth_tag = excluded.auth_tag,
                     updated_at = excluded.updated_at
                 """,
-                (provider_name, credential_name, blob.ciphertext, blob.iv, blob.auth_tag, updated_at),
+                (
+                    provider_name,
+                    credential_name,
+                    blob.ciphertext,
+                    blob.iv,
+                    blob.auth_tag,
+                    updated_at,
+                ),
             )
-        return CredentialMetadata(provider_name, credential_name, "configured", updated_at)
+        return CredentialMetadata(
+            provider_name, credential_name, "configured", updated_at
+        )
 
     async def get(self, provider_name: str, credential_name: str) -> str | None:
         return await asyncio.to_thread(self._get_sync, provider_name, credential_name)

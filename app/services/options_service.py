@@ -36,16 +36,17 @@ class OptionsService:
         min_strike: Decimal | None = None,
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
-        market_data_type: int | None = None
+        market_data_type: int | None = None,
     ) -> OptionChain:
         provider = self.registry.get_options_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_option_chain(
-            symbol, expiry,
+            symbol,
+            expiry,
             min_strike=min_strike,
             max_strike=max_strike,
             right=right,
-            market_data_type=market_data_type
+            market_data_type=market_data_type,
         )
 
     async def get_option_quote(
@@ -53,10 +54,13 @@ class OptionsService:
         symbol: str,
         option_id: str,
         provider_name: str | None = None,
-        market_data_type: int | None = None
+        market_data_type: int | None = None,
     ) -> OptionQuote:
         provider = self.registry.get_options_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_option_quote(symbol, option_id, market_data_type=market_data_type)
+        return await provider.get_option_quote(
+            symbol, option_id, market_data_type=market_data_type
+        )
+
 
 options_service = OptionsService()

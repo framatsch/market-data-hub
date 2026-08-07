@@ -47,12 +47,13 @@ _REFINITIV_HTTPX_PROXY_PATCHED = False
 try:
     import refinitiv.data as rd
     from refinitiv.data.content import historical_pricing, search
+
     REFINITIV_AVAILABLE = True
 except ImportError:
     REFINITIV_AVAILABLE = False
     logger.warning("refinitiv.data not available - LSEG provider will not work")
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def _patch_refinitiv_httpx_proxy_handling() -> None:
@@ -142,12 +143,25 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 "status_code": 200,
                 "success": True,
                 "message": "LSEG session active",
-                "details": {"session_created_at": self._session_created_at.isoformat() if self._session_created_at else None},
+                "details": {
+                    "session_created_at": self._session_created_at.isoformat()
+                    if self._session_created_at
+                    else None
+                },
             }
         except Exception as exc:
             error_message = str(exc)
             lowered = error_message.lower()
-            if any(token in lowered for token in ("auth", "unauthor", "forbidden", "invalid credential", "signon")):
+            if any(
+                token in lowered
+                for token in (
+                    "auth",
+                    "unauthor",
+                    "forbidden",
+                    "invalid credential",
+                    "signon",
+                )
+            ):
                 return {
                     "status_code": 401,
                     "success": False,
@@ -186,8 +200,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         if needs_refresh:
             self._create_session()
 
-        if self._session is None or not self._is_session_open(self._session) or not self._is_default_session_open():
-            raise ProviderConnectionError("LSEG session is not open after initialization")
+        if (
+            self._session is None
+            or not self._is_session_open(self._session)
+            or not self._is_default_session_open()
+        ):
+            raise ProviderConnectionError(
+                "LSEG session is not open after initialization"
+            )
 
         return self._session
 
@@ -222,7 +242,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         if state is not None:
             state_value = getattr(state, "name", state)
             normalized_state = str(state_value).lower()
-            if any(token in normalized_state for token in ("closed", "close", "pending")):
+            if any(
+                token in normalized_state for token in ("closed", "close", "pending")
+            ):
                 return False
             return any(token in normalized_state for token in ("opened", "open"))
 
@@ -236,7 +258,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             # Workaround for httpx proxy issue in refinitiv.data v1.6.2
             # Clear proxy environment variables that cause TypeError in httpx
             import os
-            for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+
+            for proxy_var in [
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "ALL_PROXY",
+                "all_proxy",
+            ]:
                 if proxy_var in os.environ:
                     del os.environ[proxy_var]
 
@@ -250,7 +280,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     username=username,
                     password=password,
                 ),
-                signon_control=True
+                signon_control=True,
             ).get_session()
 
             logger.info("Session definition created, opening session...")
@@ -262,7 +292,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             if not self._is_session_open(session):
                 raise ProviderConnectionError(
                     "LSEG session did not open successfully.",
-                    details={"error": open_output or "Session open returned without an open session"},
+                    details={
+                        "error": open_output
+                        or "Session open returned without an open session"
+                    },
                 )
 
             logger.info("Session opened, setting as default...")
@@ -275,12 +308,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             # refinitiv.data creates its own plain-text StreamHandler on rd.* loggers
             # (lazy, after session open). Patch them to use our JSON formatter.
             from app.logging_config import patch_refinitiv_loggers
+
             patch_refinitiv_loggers()
 
         except ProviderConnectionError:
             raise
         except Exception as e:
-            logger.error(f"❌ Failed to create Refinitiv session: {type(e).__name__}: {e}")
+            logger.error(
+                f"❌ Failed to create Refinitiv session: {type(e).__name__}: {e}"
+            )
             self._raise_if_auth_error(str(e))
             raise ProviderConnectionError(
                 "Could not authenticate with Refinitiv. Check LSEG credentials.",
@@ -295,10 +331,18 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 session.open()
         except Exception as exc:
-            output = "\n".join(part.strip() for part in (stdout.getvalue(), stderr.getvalue(), str(exc)) if part.strip())
+            output = "\n".join(
+                part.strip()
+                for part in (stdout.getvalue(), stderr.getvalue(), str(exc))
+                if part.strip()
+            )
             self._raise_if_auth_error(output)
             raise
-        return "\n".join(part.strip() for part in (stdout.getvalue(), stderr.getvalue()) if part.strip())
+        return "\n".join(
+            part.strip()
+            for part in (stdout.getvalue(), stderr.getvalue())
+            if part.strip()
+        )
 
     def _raise_if_auth_error(self, error_text: str) -> None:
         """Surface LSEG auth failures with their real message."""
@@ -332,14 +376,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 "name": "EQUITY_QUOTES_WITH_FILTER",
                 "view": search.Views.EQUITY_QUOTES,
                 "filter": f"TickerSymbol eq '{ticker}'",
-                "select": "RIC, DisplayName, TickerSymbol, ExchCode"
+                "select": "RIC, DisplayName, TickerSymbol, ExchCode",
             },
             # Strategy 2: EQUITY_INSTRUMENTS with TickerSymbol filter
             {
                 "name": "EQUITY_INSTRUMENTS_WITH_FILTER",
                 "view": search.Views.EQUITY_INSTRUMENTS,
                 "filter": f"TickerSymbol eq '{ticker}'",
-                "select": "RIC, TickerSymbol"
+                "select": "RIC, TickerSymbol",
             },
         ]
 
@@ -359,7 +403,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                         "query": ticker,
                         "view": strategy["view"],
                         "select": strategy["select"],
-                        "top": 10  # Get more results to filter for non-futures/options
+                        "top": 10,  # Get more results to filter for non-futures/options
                     }
 
                     if strategy["filter"]:
@@ -369,21 +413,36 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
                     if response.data.df is not None and not response.data.df.empty:
                         # Filter to prefer non-futures RICs (avoid 'c1', 'c2', etc. suffixes)
-                        rics = response.data.df['RIC'].tolist()
+                        rics = response.data.df["RIC"].tolist()
 
                         # Prefer RICs without continuation/futures markers
                         for ric_val in rics:
                             ric_str = str(ric_val)
                             # Skip continuation contracts, options, and other derivatives
-                            if not any(x in ric_str.lower() for x in ['c1', 'c2', 'c3', 'c4', 'p6.ba', 'call', 'put']):
+                            if not any(
+                                x in ric_str.lower()
+                                for x in [
+                                    "c1",
+                                    "c2",
+                                    "c3",
+                                    "c4",
+                                    "p6.ba",
+                                    "call",
+                                    "put",
+                                ]
+                            ):
                                 self._ric_cache[ticker] = (ric_str, datetime.now(UTC))
-                                logger.info(f"Ticker {ticker} mapped to RIC {ric_str} (strategy: {strategy['name']})")
+                                logger.info(
+                                    f"Ticker {ticker} mapped to RIC {ric_str} (strategy: {strategy['name']})"
+                                )
                                 return ric_str
 
                         # If no clean RIC found, use first one anyway (fallback)
                         ric_str = str(rics[0])
                         self._ric_cache[ticker] = (ric_str, datetime.now(UTC))
-                        logger.warning(f"Ticker {ticker} mapped to RIC {ric_str} (no clean RIC, using first result)")
+                        logger.warning(
+                            f"Ticker {ticker} mapped to RIC {ric_str} (no clean RIC, using first result)"
+                        )
                         return ric_str
 
                 except Exception as e:
@@ -403,14 +462,21 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     continue
 
             if search_attempt == 0:
-                logger.info(f"RIC search returned no results for {ticker}; refreshing LSEG session and retrying once")
+                logger.info(
+                    f"RIC search returned no results for {ticker}; refreshing LSEG session and retrying once"
+                )
                 self._session = None
                 self._session_created_at = None
 
         # All strategies failed
-        logger.error(f"RIC search failed for {ticker} after {len(search_strategies)} strategies")
-        raise DataNotFoundError("Ticker", ticker,
-            details={"reason": "No RIC found for ticker", "ticker": ticker})
+        logger.error(
+            f"RIC search failed for {ticker} after {len(search_strategies)} strategies"
+        )
+        raise DataNotFoundError(
+            "Ticker",
+            ticker,
+            details={"reason": "No RIC found for ticker", "ticker": ticker},
+        )
 
     def _is_session_closed_error(self, error: Exception) -> bool:
         """Detect Refinitiv errors caused by requests on a closed session."""
@@ -465,7 +531,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
     # Retry Logic with Exponential Backoff
     # ========================================================================
 
-    def _retry_with_backoff(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    def _retry_with_backoff(
+        self, func: Callable[..., T], *args: Any, **kwargs: Any
+    ) -> T:
         """Execute function with retry logic and exponential backoff."""
         max_retries = 3
         base_delay = 1.0
@@ -479,14 +547,16 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     raise
 
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
                 else:
                     logger.error(f"All {max_retries} attempts failed")
                     raise ProviderConnectionError(
                         f"Refinitiv API failed after {max_retries} retries",
-                        details={"error": str(e), "attempts": max_retries}
+                        details={"error": str(e), "attempts": max_retries},
                     )
         raise RuntimeError("Unreachable")
 
@@ -501,17 +571,16 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             "not found",
             "no such",
             "unknown",
-            "invalid ric"
+            "invalid ric",
         ]
         if any(keyword in error_str for keyword in non_retryable_keywords):
             return False
 
         # Retry on connection, timeout, rate limit, server errors
-        return any(keyword in error_str for keyword in [
-            "timeout", "connection", "429", "500", "502", "503"
-        ])
-
-
+        return any(
+            keyword in error_str
+            for keyword in ["timeout", "connection", "429", "500", "502", "503"]
+        )
 
     # ========================================================================
     # Data Validation & Extraction
@@ -559,15 +628,19 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             open=safe_decimal("OPEN_PRC"),
             high=safe_decimal("HIGH_1"),
             low=safe_decimal("LOW_1"),
-            volume=int(row["ACVOL_UNS"]) if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"]) else None,
-            timestamp=datetime.now(UTC)
+            volume=int(row["ACVOL_UNS"])
+            if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"])
+            else None,
+            timestamp=datetime.now(UTC),
         )
 
     # ========================================================================
     # Price Provider Methods (BasePriceProvider)
     # ========================================================================
 
-    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(
+        self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock"
+    ) -> PriceQuote:
         """Get current price quote for a symbol.
 
         Note: LSEG uses historical pricing summaries (daily) and does not support
@@ -596,12 +669,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             response = historical_pricing.summaries.Definition(
                 universe=ric,
                 interval=historical_pricing.Intervals.DAILY,
-                count=1  # Get most recent day
+                count=1,  # Get most recent day
             ).get_data()
 
             if response.data.df is None or response.data.df.empty:
-                raise DataNotFoundError("Quote", symbol,
-                    details={"ric": ric, "reason": "No historical data returned"})
+                raise DataNotFoundError(
+                    "Quote",
+                    symbol,
+                    details={"ric": ric, "reason": "No historical data returned"},
+                )
 
             return response.data.df
 
@@ -613,7 +689,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
         return quote
 
-    async def get_historical_prices(self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False, sec_type: str = "STK") -> list[PriceBar]:
+    async def get_historical_prices(
+        self,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended_hours: bool = False,
+        sec_type: str = "STK",
+    ) -> list[PriceBar]:
         """
         Get historical price bars for a symbol.
 
@@ -665,7 +749,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         else:
             count = 100  # Default
 
-        logger.debug(f"LSEG historical request: RIC={ric}, interval={interval}, count={count}, duration={duration.days}d")
+        logger.debug(
+            f"LSEG historical request: RIC={ric}, interval={interval}, count={count}, duration={duration.days}d"
+        )
 
         # Fetch historical data with retry
         def fetch_historical() -> Any:
@@ -674,31 +760,34 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
 
             # Format dates for LSEG (YYYY-MM-DD for daily, full ISO for intraday)
             # Summaries Definition supports start and end strings
-            start_str = start.strftime("%Y-%m-%d") if interval == "1d" else start.isoformat()
+            start_str = (
+                start.strftime("%Y-%m-%d") if interval == "1d" else start.isoformat()
+            )
             end_str = end.strftime("%Y-%m-%d") if interval == "1d" else end.isoformat()
 
             kwargs = {
                 "universe": ric,
                 "interval": refinitiv_interval,
                 "start": start_str,
-                "end": end_str
+                "end": end_str,
             }
-            
+
             if not extended_hours and is_intraday:
-                kwargs["sessions"] = [
-                    historical_pricing.MarketSession.NORMAL
-                ]
+                kwargs["sessions"] = [historical_pricing.MarketSession.NORMAL]
 
             response = historical_pricing.summaries.Definition(**kwargs).get_data()
 
             if response.data.df is None or response.data.df.empty:
-                raise DataNotFoundError("Historical data", symbol,
+                raise DataNotFoundError(
+                    "Historical data",
+                    symbol,
                     details={
                         "ric": ric,
                         "interval": interval,
                         "duration_days": duration.days,
-                        "note": "LSEG limitation: intraday data only available for ~2 years; very old data needs daily interval"
-                    })
+                        "note": "LSEG limitation: intraday data only available for ~2 years; very old data needs daily interval",
+                    },
+                )
 
             return response.data.df
 
@@ -707,7 +796,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         except ProviderConnectionError as e:
             # Re-wrap connection errors with data availability context
             error_msg = str(e).lower()
-            if "system cannot return data" in error_msg or "no data to return" in error_msg:
+            if (
+                "system cannot return data" in error_msg
+                or "no data to return" in error_msg
+            ):
                 raise DataNotFoundError(
                     "Historical data",
                     f"{symbol} ({interval}, {duration.days}d)",
@@ -720,8 +812,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                             "Try a shorter date range",
                             "Use daily interval instead of intraday for data >2 years old",
                             "Try more recent dates (last 2 years typically available)",
-                        ]
-                    }
+                        ],
+                    },
                 )
             raise
         except Exception as e:
@@ -741,8 +833,8 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                             "Use daily interval instead of intraday for data >2 years old",
                             "Try more recent dates (last 2 years typically available)",
                         ],
-                        "original_error": str(e)
-                    }
+                        "original_error": str(e),
+                    },
                 )
             raise
 
@@ -751,7 +843,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         for idx, row in df.iterrows():
             try:
                 # Parse timestamp from index (row.name is the date index)
-                timestamp = pd.to_datetime(row.name if hasattr(row, 'name') else idx).to_pydatetime()
+                timestamp = pd.to_datetime(
+                    row.name if hasattr(row, "name") else idx
+                ).to_pydatetime()
                 # Make timezone-aware if naive
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=UTC)
@@ -761,12 +855,22 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     symbol=symbol,
                     start=timestamp,
                     end=timestamp,
-                    open=Decimal(str(row['OPEN_PRC'])) if 'OPEN_PRC' in df.columns and pd.notna(row['OPEN_PRC']) else Decimal(0),
-                    high=Decimal(str(row['HIGH_1'])) if 'HIGH_1' in df.columns and pd.notna(row['HIGH_1']) else Decimal(0),
-                    low=Decimal(str(row['LOW_1'])) if 'LOW_1' in df.columns and pd.notna(row['LOW_1']) else Decimal(0),
-                    close=Decimal(str(row['TRDPRC_1'])) if 'TRDPRC_1' in df.columns and pd.notna(row['TRDPRC_1']) else Decimal(0),
-                    volume=int(row['ACVOL_UNS']) if 'ACVOL_UNS' in df.columns and pd.notna(row['ACVOL_UNS']) else 0,
-                    provider="lseg"
+                    open=Decimal(str(row["OPEN_PRC"]))
+                    if "OPEN_PRC" in df.columns and pd.notna(row["OPEN_PRC"])
+                    else Decimal(0),
+                    high=Decimal(str(row["HIGH_1"]))
+                    if "HIGH_1" in df.columns and pd.notna(row["HIGH_1"])
+                    else Decimal(0),
+                    low=Decimal(str(row["LOW_1"]))
+                    if "LOW_1" in df.columns and pd.notna(row["LOW_1"])
+                    else Decimal(0),
+                    close=Decimal(str(row["TRDPRC_1"]))
+                    if "TRDPRC_1" in df.columns and pd.notna(row["TRDPRC_1"])
+                    else Decimal(0),
+                    volume=int(row["ACVOL_UNS"])
+                    if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"])
+                    else 0,
+                    provider="lseg",
                 )
                 bars.append(bar)
             except Exception as e:
@@ -788,12 +892,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             "30m": historical_pricing.Intervals.THIRTY_MINUTES,
             "1h": historical_pricing.Intervals.HOURLY,
             "1d": historical_pricing.Intervals.DAILY,
-            "1w": historical_pricing.Intervals.WEEKLY
+            "1w": historical_pricing.Intervals.WEEKLY,
         }
         if interval not in mapping:
             raise ProviderError(
                 f"Unsupported interval '{interval}' for LSEG provider.",
-                details={"supported_intervals": list(mapping.keys())}
+                details={"supported_intervals": list(mapping.keys())},
             )
         return mapping[interval]
 
@@ -816,7 +920,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             sector="Technology",
             industry="Consumer Electronics",
             employees=150000,
-            provider="lseg"
+            provider="lseg",
         )
 
     async def search_companies(self, query: str) -> list[CompanySummary]:
@@ -827,15 +931,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 name=f"{query.capitalize()} Inc.",
                 exchange="NASDAQ",
                 sector="Technology",
-                provider="lseg"
+                provider="lseg",
             ),
             CompanySummary(
                 symbol=f"{query.upper()}B",
                 name=f"{query.capitalize()} Class B",
                 exchange="NYSE",
                 sector="Technology",
-                provider="lseg"
-            )
+                provider="lseg",
+            ),
         ]
 
     # ========================================================================
@@ -850,7 +954,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: str | None = None
+        category: str | None = None,
     ) -> list[NewsArticle]:
         """Get news articles for a company from LSEG."""
         try:
@@ -865,7 +969,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 query=f"R:{ric}",
                 count=limit + offset,
                 start=f"{from_date.isoformat()}T00:00:00",
-                end=f"{to_date.isoformat()}T23:59:59"
+                end=f"{to_date.isoformat()}T23:59:59",
             )
 
             # 3. Check response validity
@@ -882,18 +986,18 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             for _, row in df.iterrows():
                 # Extract basic fields
                 article_id = f"lseg:{row.get('storyId', '')}"
-                title = row.get('headline', 'No title')
-                published_at = pd.to_datetime(row.get('versionCreated'))
-                source = row.get('sourceCode', 'LSEG')
-                url = row.get('storyUrl', '')
+                title = row.get("headline", "No title")
+                published_at = pd.to_datetime(row.get("versionCreated"))
+                source = row.get("sourceCode", "LSEG")
+                url = row.get("storyUrl", "")
 
                 # 6. Map LSEG subjects to categories
-                subjects = row.get('subjects', [])
+                subjects = row.get("subjects", [])
                 category_map = {
-                    'EARN': 'earnings',
-                    'M&A': 'merger',
-                    'PROD': 'product',
-                    'REG': 'legal'
+                    "EARN": "earnings",
+                    "M&A": "merger",
+                    "PROD": "product",
+                    "REG": "legal",
                 }
                 article_category = None
                 if isinstance(subjects, list):
@@ -907,18 +1011,20 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                     continue
 
                 # 8. Create article object (full_text is optional for LSEG)
-                articles.append(NewsArticle(
-                    article_id=article_id,
-                    title=title,
-                    summary=row.get('firstParagraph', title),
-                    published_at=published_at,
-                    source=source,
-                    url=url,
-                    full_text=None,  # Full text requires separate API call
-                    category=article_category,
-                    image=None,
-                    sentiment=None
-                ))
+                articles.append(
+                    NewsArticle(
+                        article_id=article_id,
+                        title=title,
+                        summary=row.get("firstParagraph", title),
+                        published_at=published_at,
+                        source=source,
+                        url=url,
+                        full_text=None,  # Full text requires separate API call
+                        category=article_category,
+                        image=None,
+                        sentiment=None,
+                    )
+                )
 
             return articles
 

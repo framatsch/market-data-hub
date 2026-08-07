@@ -38,6 +38,7 @@ class PriceQuote(BaseModel):
     def last_price(self) -> Decimal:
         return self.price
 
+
 class PriceBar(BaseModel):
     symbol: str
     start: datetime
@@ -48,5 +49,3 @@ class PriceBar(BaseModel):
     close: Decimal
     volume: int
     provider: str
-
-

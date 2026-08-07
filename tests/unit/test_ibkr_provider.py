@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-import math
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.providers.ibkr import IBKRProvider
+
 
 @pytest.fixture
 def ibkr_provider():

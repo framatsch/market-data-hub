@@ -128,7 +128,7 @@ class MockNewsProvider(BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: str | None = None
+        category: str | None = None,
     ) -> list[NewsArticle]:
         """Get mock news articles for a company."""
         try:
@@ -167,7 +167,9 @@ class MockNewsProvider(BaseNewsProvider):
                     source=str(article_data["source"]),
                     url=str(article_data["url"]),
                     full_text=None,
-                    category=str(article_data["category"]) if article_data["category"] is not None else None,
+                    category=str(article_data["category"])
+                    if article_data["category"] is not None
+                    else None,
                     image=None,
                     sentiment=None,
                 )
@@ -176,7 +178,9 @@ class MockNewsProvider(BaseNewsProvider):
             # Apply pagination
             articles = articles[offset : offset + limit]
 
-            logger.info(f"Mock provider: returned {len(articles)} articles for {symbol}")
+            logger.info(
+                f"Mock provider: returned {len(articles)} articles for {symbol}"
+            )
             return articles
 
         except DataNotFoundError:

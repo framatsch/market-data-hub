@@ -64,25 +64,41 @@ class FinnhubProvider(BaseNewsProvider):
         # Category keywords for sentiment-based categorization
         self._category_keywords = {
             "earnings": [
-                r"\bearnings?\b", r"\beps\b", r"\brev(enue)?\b", r"\bguidance\b",
-                r"\bprofit\b", r"\bloss\b", r"\bmargin\b", r"\bshares?\b",
-                r"\bdividend\b", r"\bq[1-4]\s*result", r"\bfiscal\b"
+                r"\bearnings?\b",
+                r"\beps\b",
+                r"\brev(enue)?\b",
+                r"\bguidance\b",
+                r"\bprofit\b",
+                r"\bloss\b",
+                r"\bmargin\b",
+                r"\bshares?\b",
+                r"\bdividend\b",
+                r"\bq[1-4]\s*result",
+                r"\bfiscal\b",
             ],
             "merger": [
                 r"\b(m&a|merger|acquisition|acquires?|acquired|deal)\b",
-                r"\btakeover\b", r"\bipo\b", r"\bspac\b", r"\bmarket cap\b",
-                r"\b(buyout|buy[- ]?out)\b", r"\bcombination\b"
+                r"\btakeover\b",
+                r"\bipo\b",
+                r"\bspac\b",
+                r"\bmarket cap\b",
+                r"\b(buyout|buy[- ]?out)\b",
+                r"\bcombination\b",
             ],
             "product": [
                 r"\b(launch|release|announce|unveiled?|new\s+product)\b",
-                r"\b(app|service|feature|update|version)\b", r"\bsoftware\b",
-                r"\bhardware\b", r"\bdevice\b", r"\bplatform\b"
+                r"\b(app|service|feature|update|version)\b",
+                r"\bsoftware\b",
+                r"\bhardware\b",
+                r"\bdevice\b",
+                r"\bplatform\b",
             ],
             "legal": [
                 r"\b(lawsuit|sued|settlement|conviction|guilty)\b",
                 r"\b(regulatory|fda|sec|antitrust|investigation)\b",
-                r"\b(fine|penalty|compliance|illegal)\b", r"\blegal\b"
-            ]
+                r"\b(fine|penalty|compliance|illegal)\b",
+                r"\blegal\b",
+            ],
         }
 
         logger.info("FinnhubProvider initialized")
@@ -94,6 +110,7 @@ class FinnhubProvider(BaseNewsProvider):
 
         try:
             from app.admin.runtime import get_key_repository
+
             db_key = await get_key_repository().get("finnhub", "api_key")
             if db_key:
                 self._api_key = db_key
@@ -105,7 +122,7 @@ class FinnhubProvider(BaseNewsProvider):
         raise ProviderError(
             "Finnhub API key not configured. Add it in the admin UI.",
             code="PROVIDER_NOT_AVAILABLE",
-            details={"provider": "finnhub"}
+            details={"provider": "finnhub"},
         )
 
     # ========================================================================
@@ -117,7 +134,7 @@ class FinnhubProvider(BaseNewsProvider):
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=settings.FINNHUB_BASE_URL,
-                timeout=settings.PROVIDER_REQUEST_TIMEOUT
+                timeout=settings.PROVIDER_REQUEST_TIMEOUT,
             )
         return self._client
 
@@ -160,7 +177,12 @@ class FinnhubProvider(BaseNewsProvider):
     # Category Detection
     # ========================================================================
 
-    def _detect_category(self, headline: str, summary: str | None = None, sentiment: dict[str, Any] | None = None) -> str | None:
+    def _detect_category(
+        self,
+        headline: str,
+        summary: str | None = None,
+        sentiment: dict[str, Any] | None = None,
+    ) -> str | None:
         """Detect article category from headline/summary.
 
         Priority:
@@ -187,7 +209,9 @@ class FinnhubProvider(BaseNewsProvider):
 
                 # Strong negative sentiment → legal/regulatory issues
                 if negative > 0.6:
-                    logger.debug(f"Category 'legal' detected from negative sentiment for: {headline[:50]}")
+                    logger.debug(
+                        f"Category 'legal' detected from negative sentiment for: {headline[:50]}"
+                    )
                     return "legal"
 
                 # Strong positive sentiment → product/earnings
@@ -200,7 +224,9 @@ class FinnhubProvider(BaseNewsProvider):
     # Sentiment Parsing
     # ========================================================================
 
-    def _parse_sentiment(self, sentiment_obj: dict[str, Any] | None) -> dict[str, float]:
+    def _parse_sentiment(
+        self, sentiment_obj: dict[str, Any] | None
+    ) -> dict[str, float]:
         """Parse sentiment object into normalized format.
 
         Finnhub returns:
@@ -216,7 +242,7 @@ class FinnhubProvider(BaseNewsProvider):
         return {
             "positive": float(sentiment_obj.get("positive", 0.0)),
             "negative": float(sentiment_obj.get("negative", 0.0)),
-            "neutral": float(sentiment_obj.get("neutral", 1.0))
+            "neutral": float(sentiment_obj.get("neutral", 1.0)),
         }
 
     # ========================================================================
@@ -245,14 +271,20 @@ class FinnhubProvider(BaseNewsProvider):
                     "status_code": 401,
                     "success": False,
                     "message": "Invalid Finnhub API key",
-                    "details": {"status_code": response.status_code, "response": response.text[:500]},
+                    "details": {
+                        "status_code": response.status_code,
+                        "response": response.text[:500],
+                    },
                 }
 
             return {
                 "status_code": 503,
                 "success": False,
                 "message": "Finnhub service unavailable",
-                "details": {"status_code": response.status_code, "response": response.text[:500]},
+                "details": {
+                    "status_code": response.status_code,
+                    "response": response.text[:500],
+                },
             }
         except httpx.TimeoutException as exc:
             return {
@@ -277,7 +309,7 @@ class FinnhubProvider(BaseNewsProvider):
         limit: int = 20,
         offset: int = 0,
         language: str = "en",
-        category: str | None = None
+        category: str | None = None,
     ) -> list[NewsArticle]:
         """Get company news from Finnhub.
 
@@ -329,8 +361,8 @@ class FinnhubProvider(BaseNewsProvider):
                     "symbol": symbol.upper(),
                     "from": from_date.isoformat(),
                     "to": to_date.isoformat(),
-                    "token": api_key
-                }
+                    "token": api_key,
+                },
             )
 
             # Handle response
@@ -339,12 +371,18 @@ class FinnhubProvider(BaseNewsProvider):
             elif response.status_code == 429:
                 raise ProviderError(
                     "Finnhub rate limit exceeded",
-                    details={"status_code": 429, "retry_after": response.headers.get("Retry-After")}
+                    details={
+                        "status_code": 429,
+                        "retry_after": response.headers.get("Retry-After"),
+                    },
                 )
             elif response.status_code != 200:
                 raise ProviderError(
                     f"Finnhub API error: {response.status_code}",
-                    details={"status_code": response.status_code, "response": response.text}
+                    details={
+                        "status_code": response.status_code,
+                        "response": response.text,
+                    },
                 )
 
             # Parse response
@@ -376,26 +414,30 @@ class FinnhubProvider(BaseNewsProvider):
                     sentiment = self._parse_sentiment(item.get("sentiment", {}))
 
                     # Detect category
-                    detected_category = self._detect_category(headline, summary, sentiment)
+                    detected_category = self._detect_category(
+                        headline, summary, sentiment
+                    )
 
                     # Apply category filter
                     if category and detected_category != category:
                         continue
 
                     # Create article
-                    articles.append(NewsArticle(
-                        article_id=article_id,
-                        title=headline,
-                        summary=summary,
-                        published_at=published_at,
-                        source=source,
-                        url=url,
-                        full_text=None,  # Finnhub doesn't provide full text
-                        category=detected_category,
-                        # Extra fields
-                        image=image,
-                        sentiment=sentiment
-                    ))
+                    articles.append(
+                        NewsArticle(
+                            article_id=article_id,
+                            title=headline,
+                            summary=summary,
+                            published_at=published_at,
+                            source=source,
+                            url=url,
+                            full_text=None,  # Finnhub doesn't provide full text
+                            category=detected_category,
+                            # Extra fields
+                            image=image,
+                            sentiment=sentiment,
+                        )
+                    )
 
                 except Exception as e:
                     logger.warning(f"Failed to parse article {idx}: {e}")
@@ -416,13 +458,13 @@ class FinnhubProvider(BaseNewsProvider):
         except httpx.TimeoutException:
             raise ProviderConnectionError(
                 f"Finnhub request timeout after {settings.PROVIDER_REQUEST_TIMEOUT}s",
-                details={"symbol": symbol}
+                details={"symbol": symbol},
             )
         except Exception as e:
             logger.error(f"Finnhub error for {symbol}: {e}")
             raise ProviderError(
                 f"Failed to fetch news from Finnhub: {e!s}",
-                details={"symbol": symbol, "error_type": type(e).__name__}
+                details={"symbol": symbol, "error_type": type(e).__name__},
             )
 
     # ========================================================================

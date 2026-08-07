@@ -14,11 +14,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from unittest.mock import patch, MagicMock
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
+
+import pytest
+
 from app.providers.ibkr import IBKRProvider
+
 
 @pytest.fixture
 def ibkr_provider():

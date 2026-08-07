@@ -14,15 +14,16 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
-import httpx
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from app.models.price import PriceBar
 from app.providers.polygon import PolygonProvider
-from app.models.price import PriceQuote, PriceBar
 from app.utils.errors import DataNotFoundError
+
 
 @pytest.fixture
 def polygon_provider():
@@ -99,7 +100,6 @@ async def test_get_last_price_404(polygon_provider):
     mock_resp.status_code = 404
     polygon_provider._client.get.return_value = mock_resp
     
-    from app.utils.errors import DataNotFoundError
     with pytest.raises(DataNotFoundError):
         await polygon_provider.get_last_price("UNKNOWN")
 

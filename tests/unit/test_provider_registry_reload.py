@@ -69,8 +69,8 @@ async def test_registry_reload_applies_runtime_config(tmp_path) -> None:
     await registry.reload_from_config(repo)
 
     provider = cast(FakePriceProvider, registry._providers["ibkr"])
-    assert getattr(provider, "timeout_seconds") == 22
-    assert getattr(provider, "retry_count") == 6
+    assert provider.timeout_seconds == 22
+    assert provider.retry_count == 6
 
 
 async def test_registry_reload_does_not_override_provider_configure(tmp_path) -> None:

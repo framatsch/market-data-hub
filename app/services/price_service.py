@@ -28,7 +28,13 @@ class PriceService:
     def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
-    async def get_latest_price(self, symbol: str, provider_name: str | None = None, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_latest_price(
+        self,
+        symbol: str,
+        provider_name: str | None = None,
+        market_data_type: int | None = None,
+        sec_type: str = "stock",
+    ) -> PriceQuote:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_last_price(symbol, market_data_type, sec_type)
@@ -41,15 +47,18 @@ class PriceService:
         end: datetime,
         extended_hours: bool = False,
         provider_name: str | None = None,
-        sec_type: str = "STK"
+        sec_type: str = "STK",
     ) -> list[PriceBar]:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_historical_prices(symbol, interval, start, end, extended_hours, sec_type=sec_type)
+        return await provider.get_historical_prices(
+            symbol, interval, start, end, extended_hours, sec_type=sec_type
+        )
 
     async def get_market_status(self, provider_name: str | None = None) -> MarketStatus:
         provider = self.registry.get_price_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_market_status()
+
 
 price_service = PriceService()

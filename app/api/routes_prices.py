@@ -26,23 +26,24 @@ from app.utils.csv_export import to_csv
 
 router = APIRouter(prefix="/prices", tags=["Prices"])
 
+
 @router.get("/{symbol}/last")
 async def get_last_price(
     symbol: str,
     service: PriceServiceDep,
     provider: str | None = Query(
         None,
-        description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type"
+        description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type",
     ),
     sec_type: str = Query(
         "stock",
-        description="Security type: 'stock' (default) or 'index'. For indices like ^RUT, use 'index'."
+        description="Security type: 'stock' (default) or 'index'. For indices like ^RUT, use 'index'.",
     ),
     market_data_type: int | None = Query(
         None,
-        description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter."
+        description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter.",
     ),
-    format: str = "json"
+    format: str = "json",
 ) -> Any:
     """
     Get the latest price quote for a symbol.
@@ -66,10 +67,13 @@ async def get_last_price(
         return StreamingResponse(
             iter([csv_data]),
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={symbol}_last_price.csv"}
+            headers={
+                "Content-Disposition": f"attachment; filename={symbol}_last_price.csv"
+            },
         )
 
     return ResponseEnvelope(data=quote)
+
 
 @router.get("/{symbol}/history")
 async def get_historical_prices(
@@ -78,10 +82,12 @@ async def get_historical_prices(
     interval: str = "1d",
     start: datetime | None = None,
     end: datetime | None = None,
-    extended_hours: bool = Query(False, description="Include extended trading hours (pre-market/after-hours)"),
+    extended_hours: bool = Query(
+        False, description="Include extended trading hours (pre-market/after-hours)"
+    ),
     provider: str | None = None,
     sec_type: str = Query("stock", description="Security type: 'stock' or 'index'"),
-    format: str = "json"
+    format: str = "json",
 ) -> Any:
     """
     Get historical price bars.
@@ -100,14 +106,18 @@ async def get_historical_prices(
     symbol = symbol.upper()
     provider = provider.lower() if provider else None
     sec_type = sec_type.lower()
-    bars = await service.get_historical_prices(symbol, interval, start, end, extended_hours, provider, sec_type)
+    bars = await service.get_historical_prices(
+        symbol, interval, start, end, extended_hours, provider, sec_type
+    )
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(bars, f"{symbol}_history_{interval}.csv")
         return StreamingResponse(
             iter([csv_data]),
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={symbol}_history_{interval}.csv"}
+            headers={
+                "Content-Disposition": f"attachment; filename={symbol}_history_{interval}.csv"
+            },
         )
 
     return ResponseEnvelope(data=bars)

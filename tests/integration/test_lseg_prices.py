@@ -24,14 +24,14 @@ These tests require valid LSEG credentials in .env file:
 Tests are marked with @pytest.mark.integration for selective execution.
 """
 
-import pytest
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
+import pytest
 
 from app.providers.lseg import LSEGProvider
 from app.utils.errors import DataNotFoundError
-
 
 # Skip all tests unless explicitly enabled.
 # LSEG credentials are now sourced from keys.db via admin runtime.
@@ -157,8 +157,7 @@ class TestGetHistoricalPrices:
     @pytest.mark.asyncio
     async def test_bars_in_date_range(self, lseg_provider):
         """Test returned bars are within requested date range."""
-        from datetime import timezone
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - timedelta(days=10)
 
         bars = await lseg_provider.get_historical_prices("AAPL", "1d", start, end)

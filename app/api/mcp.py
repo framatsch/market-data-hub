@@ -57,6 +57,7 @@ _ACTIVE_STREAMS: dict[str, asyncio.Queue[str]] = {}
 # SSE transport
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 @router.get("/sse")
 async def mcp_sse(request: Request) -> StreamingResponse:
@@ -117,7 +118,10 @@ async def oauth_protected_resource_metadata(request: Request) -> JSONResponse:
 async def oauth_not_required_metadata() -> JSONResponse:
     """Return a controlled response for OAuth discovery probes from MCP clients."""
     return JSONResponse(
-        {"error": "oauth_not_required", "error_description": "This MCP endpoint is public."},
+        {
+            "error": "oauth_not_required",
+            "error_description": "This MCP endpoint is public.",
+        },
         status_code=404,
     )
 
@@ -126,7 +130,10 @@ async def oauth_not_required_metadata() -> JSONResponse:
 async def oauth_dynamic_registration_not_required() -> JSONResponse:
     """Claude probes this during remote MCP setup; no registration is needed here."""
     return JSONResponse(
-        {"error": "oauth_not_required", "error_description": "This MCP endpoint is public."},
+        {
+            "error": "oauth_not_required",
+            "error_description": "This MCP endpoint is public.",
+        },
         status_code=400,
     )
 
@@ -134,6 +141,7 @@ async def oauth_dynamic_registration_not_required() -> JSONResponse:
 # ---------------------------------------------------------------------------
 # JSON-RPC message endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.post("/messages")
 async def mcp_messages(
@@ -183,7 +191,9 @@ async def mcp_streamable_http(request: Request) -> Response:
     return JSONResponse(response_payload)
 
 
-async def _handle_json_rpc(method: str, params: dict[str, Any], rpc_id: Any) -> dict[str, Any] | None:
+async def _handle_json_rpc(
+    method: str, params: dict[str, Any], rpc_id: Any
+) -> dict[str, Any] | None:
     """Dispatch a JSON-RPC request and serialise the response payload."""
     try:
         result = await _dispatch(method, params)
@@ -198,7 +208,9 @@ async def _handle_json_rpc(method: str, params: dict[str, Any], rpc_id: Any) -> 
             "error": {"message": exc.message, "code": exc.code},
         }
     except Exception as exc:
-        logger.error("MCP unexpected error in method=%s: %s", method, exc, exc_info=True)
+        logger.error(
+            "MCP unexpected error in method=%s: %s", method, exc, exc_info=True
+        )
         return {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -210,18 +222,14 @@ async def _handle_json_rpc(method: str, params: dict[str, Any], rpc_id: Any) -> 
 # Dispatch
 # ---------------------------------------------------------------------------
 
+
 async def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any] | None:
     """Route an MCP JSON-RPC call to the appropriate handler."""
     if method == "initialize":
         return {
             "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "tools": {}
-            },
-            "serverInfo": {
-                "name": "market-data-hub",
-                "version": "1.0.0"
-            }
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "market-data-hub", "version": "1.0.0"},
         }
 
     if method == "notifications/initialized":
@@ -250,6 +258,7 @@ async def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any] | Non
 # Shared service instances (re-use the same singletons as the HTTP layer)
 # ---------------------------------------------------------------------------
 
+
 def _price_service() -> PriceService:
     return PriceService(get_registry())
 
@@ -266,6 +275,7 @@ def _company_service() -> CompanyService:
 # Tool handlers
 # ---------------------------------------------------------------------------
 
+
 def _text_content(data: Any) -> dict[str, Any]:
     """Wrap serialised data in the standard MCP content envelope."""
     return {"content": [{"type": "text", "text": json.dumps(data, default=str)}]}
@@ -275,7 +285,9 @@ async def _tool_get_last_price(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     sec_type = args.get("sec_type", "stock")
     provider = args.get("provider")
-    quote = await _price_service().get_latest_price(symbol, provider_name=provider, sec_type=sec_type)
+    quote = await _price_service().get_latest_price(
+        symbol, provider_name=provider, sec_type=sec_type
+    )
     if not quote:
         return _text_content(f"No price data found for {symbol} ({sec_type})")
     return _text_content(quote.model_dump())
@@ -310,7 +322,9 @@ async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
     provider = args.get("provider")
-    chain = await _options_service().get_option_chain(symbol, expiry, provider_name=provider)
+    chain = await _options_service().get_option_chain(
+        symbol, expiry, provider_name=provider
+    )
     return _text_content(chain.model_dump())
 
 
@@ -318,14 +332,18 @@ async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     option_id = args["option_id"].upper()
     provider = args.get("provider")
-    quote = await _options_service().get_option_quote(symbol, option_id, provider_name=provider)
+    quote = await _options_service().get_option_quote(
+        symbol, option_id, provider_name=provider
+    )
     return _text_content(quote.model_dump())
 
 
 async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     provider = args.get("provider")
-    profile = await _company_service().get_company_profile(symbol, provider_name=provider)
+    profile = await _company_service().get_company_profile(
+        symbol, provider_name=provider
+    )
     return _text_content(profile.model_dump())
 
 

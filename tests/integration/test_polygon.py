@@ -16,10 +16,11 @@
 
 """Integration tests for Polygon.io Provider."""
 
-import pytest
 import os
 from datetime import datetime, timedelta
 from decimal import Decimal
+
+import pytest
 
 from app.providers.polygon import PolygonProvider
 

@@ -24,7 +24,9 @@ class PrixeProvider(BasePriceProvider):
     async def _get_api_key(self) -> str:
         if self._api_key:
             return self._api_key
-        self._api_key = await asyncio.to_thread(get_provider_credential_sync, "prixe", "api_key")
+        self._api_key = await asyncio.to_thread(
+            get_provider_credential_sync, "prixe", "api_key"
+        )
         return self._api_key
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -62,13 +64,19 @@ class PrixeProvider(BasePriceProvider):
                     "status_code": 401,
                     "success": False,
                     "message": "Invalid Prixe API key",
-                    "details": {"status_code": response.status_code, "response": response.text[:500]},
+                    "details": {
+                        "status_code": response.status_code,
+                        "response": response.text[:500],
+                    },
                 }
             return {
                 "status_code": 503,
                 "success": False,
                 "message": "Prixe service unavailable",
-                "details": {"status_code": response.status_code, "response": response.text[:500]},
+                "details": {
+                    "status_code": response.status_code,
+                    "response": response.text[:500],
+                },
             }
         except httpx.TimeoutException as exc:
             return {
@@ -191,7 +199,16 @@ class PrixeProvider(BasePriceProvider):
                 start=start,
                 end=end,
             )
-            if not extended_hours and normalized_interval in ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"]:
+            if not extended_hours and normalized_interval in [
+                "1m",
+                "2m",
+                "5m",
+                "15m",
+                "30m",
+                "60m",
+                "90m",
+                "1h",
+            ]:
                 bars = self._filter_rth(bars)
             return bars
         except httpx.HTTPStatusError as exc:
@@ -222,7 +239,9 @@ class PrixeProvider(BasePriceProvider):
                 details={"provider": "prixe", "payload_type": type(payload).__name__},
             )
 
-        result = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        result = (
+            payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        )
 
         if not isinstance(result, dict):
             raise ProviderError(
@@ -244,7 +263,9 @@ class PrixeProvider(BasePriceProvider):
         bid_value = result.get("bid")
         ask_value = result.get("ask")
 
-        timestamp = self._parse_timestamp(result.get("timestamp") or result.get("updated_at"))
+        timestamp = self._parse_timestamp(
+            result.get("timestamp") or result.get("updated_at")
+        )
 
         return PriceQuote(
             symbol=symbol_value,
@@ -296,7 +317,7 @@ class PrixeProvider(BasePriceProvider):
                 "Prixe historical response is missing OHLC/timestamp arrays.",
                 details={"provider": "prixe", "symbol": symbol},
             )
-            
+
         timestamps_list = cast(list[Any], timestamps)
         opens_list = cast(list[Any], opens)
         highs_list = cast(list[Any], highs)
@@ -316,7 +337,11 @@ class PrixeProvider(BasePriceProvider):
                 details={"provider": "prixe", "symbol": symbol, "lengths": lengths},
             )
 
-        if volumes is not None and isinstance(volumes, list) and len(volumes) != lengths["timestamp"]:
+        if (
+            volumes is not None
+            and isinstance(volumes, list)
+            and len(volumes) != lengths["timestamp"]
+        ):
             raise ProviderError(
                 "Prixe historical volume array length mismatch.",
                 details={"provider": "prixe", "symbol": symbol},
@@ -368,19 +393,19 @@ class PrixeProvider(BasePriceProvider):
         """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
         from datetime import time
         from zoneinfo import ZoneInfo
-        
+
         filtered = []
         tz = ZoneInfo("America/New_York")
         market_open = time(9, 30)
         market_close = time(16, 0)
-        
+
         for bar in bars:
             if bar.start.tzinfo is None:
                 ny_time = bar.start.replace(tzinfo=UTC).astimezone(tz)
             else:
                 ny_time = bar.start.astimezone(tz)
-                
+
             if ny_time.weekday() < 5 and market_open <= ny_time.time() < market_close:
                 filtered.append(bar)
-                
+
         return filtered

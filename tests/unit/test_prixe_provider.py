@@ -1,5 +1,5 @@
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -99,8 +99,8 @@ async def test_get_historical_prices_maps_to_price_bars():
 
         provider = PrixeProvider()
         provider._api_key = "test-prixe-key"
-        start = datetime(2024, 5, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 5, 3, tzinfo=timezone.utc)
+        start = datetime(2024, 5, 1, tzinfo=UTC)
+        end = datetime(2024, 5, 3, tzinfo=UTC)
 
         bars = await provider.get_historical_prices("msft", "1d", start, end)
 
@@ -132,8 +132,8 @@ async def test_get_historical_prices_rejects_unsupported_interval():
 
         provider = PrixeProvider()
         provider._api_key = "test-prixe-key"
-        start = datetime(2024, 5, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 5, 3, tzinfo=timezone.utc)
+        start = datetime(2024, 5, 1, tzinfo=UTC)
+        end = datetime(2024, 5, 3, tzinfo=UTC)
 
         with pytest.raises(ProviderError) as exc_info:
             await provider.get_historical_prices("MSFT", "2h", start, end)

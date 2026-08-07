@@ -27,17 +27,27 @@ from app.utils.csv_export import to_csv
 
 router = APIRouter(prefix="/options", tags=["Options"])
 
+
 @router.get("/{symbol}/chain")
 async def get_option_chain(
     symbol: str,
     service: OptionsServiceDep,
     expiry: date | None = None,
-    min_strike: Decimal | None = Query(None, description="Minimum strike price to include"),
-    max_strike: Decimal | None = Query(None, description="Maximum strike price to include"),
-    right: Literal["call", "put"] | None = Query(None, description="Filter by option type (call or put)"),
-    market_data_type: int | None = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
+    min_strike: Decimal | None = Query(
+        None, description="Minimum strike price to include"
+    ),
+    max_strike: Decimal | None = Query(
+        None, description="Maximum strike price to include"
+    ),
+    right: Literal["call", "put"] | None = Query(
+        None, description="Filter by option type (call or put)"
+    ),
+    market_data_type: int | None = Query(
+        None,
+        description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)",
+    ),
     provider: str | None = None,
-    format: str = "json"
+    format: str = "json",
 ) -> Any:
     """Get option chain for a symbol and expiry.
 
@@ -65,27 +75,35 @@ async def get_option_chain(
         min_strike=min_strike,
         max_strike=max_strike,
         right=right,
-        market_data_type=market_data_type
+        market_data_type=market_data_type,
     )
 
     if format.lower() == "csv":
-        content_type, csv_data = to_csv(chain.model_dump(), f"{symbol}_options_chain_{expiry}.csv")
+        content_type, csv_data = to_csv(
+            chain.model_dump(), f"{symbol}_options_chain_{expiry}.csv"
+        )
         return StreamingResponse(
             iter([csv_data]),
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={symbol}_options_chain_{expiry}.csv"}
+            headers={
+                "Content-Disposition": f"attachment; filename={symbol}_options_chain_{expiry}.csv"
+            },
         )
 
     return ResponseEnvelope(data=chain)
+
 
 @router.get("/{symbol}/quote/{option_id}")
 async def get_option_quote(
     symbol: str,
     option_id: str,
     service: OptionsServiceDep,
-    market_data_type: int | None = Query(None, description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)"),
+    market_data_type: int | None = Query(
+        None,
+        description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)",
+    ),
     provider: str | None = None,
-    format: str = "json"
+    format: str = "json",
 ) -> Any:
     """Get a specific option quote.
 
@@ -100,14 +118,18 @@ async def get_option_quote(
     symbol = symbol.upper()
     option_id = option_id.upper()
     provider = provider.lower() if provider else None
-    quote = await service.get_option_quote(symbol, option_id, provider, market_data_type=market_data_type)
+    quote = await service.get_option_quote(
+        symbol, option_id, provider, market_data_type=market_data_type
+    )
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(quote, f"{option_id}_quote.csv")
         return StreamingResponse(
             iter([csv_data]),
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={option_id}_quote.csv"}
+            headers={
+                "Content-Disposition": f"attachment; filename={option_id}_quote.csv"
+            },
         )
 
     return ResponseEnvelope(data=quote)

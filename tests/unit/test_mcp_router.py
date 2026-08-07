@@ -23,12 +23,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient  # noqa: F401 — used in TestMcpSse
-from httpx import AsyncClient, ASGITransport
-
-from app.api.mcp import metadata_router, router, _dispatch, TOOL_REGISTRY, TOOL_HANDLERS, _ACTIVE_STREAMS
-from app.utils.errors import AppError
+from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient as StarletteTestClient
 
+from app.api.mcp import (
+    _ACTIVE_STREAMS,
+    TOOL_HANDLERS,
+    TOOL_REGISTRY,
+    _dispatch,
+    metadata_router,
+    router,
+)
+from app.utils.errors import AppError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,7 +105,8 @@ class TestMcpSse:
         exactly the first item from the async generator it returns.
         """
         from starlette.requests import Request
-        from app.api.mcp import mcp_sse, _ACTIVE_STREAMS
+
+        from app.api.mcp import _ACTIVE_STREAMS, mcp_sse
 
         # Build a minimal scope for a GET /mcp/sse request
         scope = {
@@ -149,7 +156,8 @@ class TestMcpSse:
     async def test_root_mcp_get_starts_sse_transport(self):
         """GET /mcp is accepted for remote clients configured with the base MCP URL."""
         from starlette.requests import Request
-        from app.api.mcp import mcp_sse, _ACTIVE_STREAMS
+
+        from app.api.mcp import _ACTIVE_STREAMS, mcp_sse
 
         scope = {
             "type": "http",
@@ -207,7 +215,7 @@ class TestMcpMessages:
             assert not queue.empty()
             sse_event = await queue.get()
             assert "event: message" in sse_event
-            data_line = [line for line in sse_event.splitlines() if line.startswith("data:")][0]
+            data_line = next(line for line in sse_event.splitlines() if line.startswith("data:"))
             payload = json.loads(data_line[len("data:"):].strip())
             assert payload["id"] == 1
             assert payload["result"]["content"][0]["text"] == "42.00"
@@ -235,7 +243,7 @@ class TestMcpMessages:
                 )
             assert resp.status_code == 202
             sse_event = await queue.get()
-            data_line = [line for line in sse_event.splitlines() if line.startswith("data:")][0]
+            data_line = next(line for line in sse_event.splitlines() if line.startswith("data:"))
             payload = json.loads(data_line[len("data:"):].strip())
             assert "error" in payload
             assert payload["error"]["code"] == "UNKNOWN_TOOL"

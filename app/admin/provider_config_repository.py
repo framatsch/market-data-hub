@@ -12,7 +12,12 @@ KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prix
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
-    "schwab": {"callback_url", "alert_webhook_format", "manual_token_mode", "force_refresh_token"},
+    "schwab": {
+        "callback_url",
+        "alert_webhook_format",
+        "manual_token_mode",
+        "force_refresh_token",
+    },
     "lseg": set(),
     "finnhub": set(),
     "polygon": set(),
@@ -93,17 +98,26 @@ class ProviderConfigRepository:
             return self._default_config(provider_name)
         return self._row_to_config(row)
 
-    async def save(self, provider_name: str, config: ProviderRuntimeConfig | dict[str, Any]) -> ProviderRuntimeConfig:
+    async def save(
+        self, provider_name: str, config: ProviderRuntimeConfig | dict[str, Any]
+    ) -> ProviderRuntimeConfig:
         return await asyncio.to_thread(self._save_sync, provider_name, config)
 
-    def _save_sync(self, provider_name: str, config: ProviderRuntimeConfig | dict[str, Any]) -> ProviderRuntimeConfig:
+    def _save_sync(
+        self, provider_name: str, config: ProviderRuntimeConfig | dict[str, Any]
+    ) -> ProviderRuntimeConfig:
         current = self._get_sync(provider_name)
         if isinstance(config, ProviderRuntimeConfig):
             candidate = replace(config, provider_name=provider_name)
         else:
-            allowed = {field.name for field in ProviderRuntimeConfig.__dataclass_fields__.values()}
+            allowed = {
+                field.name
+                for field in ProviderRuntimeConfig.__dataclass_fields__.values()
+            }
             values = current.model_dump()
-            values.update({key: value for key, value in config.items() if key in allowed})
+            values.update(
+                {key: value for key, value in config.items() if key in allowed}
+            )
             values["provider_name"] = provider_name
             candidate = ProviderRuntimeConfig(**values)
         candidate = replace(candidate, updated_at=datetime.now(UTC).isoformat())
@@ -159,12 +173,19 @@ class ProviderConfigRepository:
                 FROM provider_config
                 """
             ).fetchall()
-        configs = {provider_name: self._default_config(provider_name) for provider_name in KNOWN_PROVIDERS}
+        configs = {
+            provider_name: self._default_config(provider_name)
+            for provider_name in KNOWN_PROVIDERS
+        }
         configs.update({row["provider_name"]: self._row_to_config(row) for row in rows})
         return [configs[provider_name] for provider_name in KNOWN_PROVIDERS]
 
     def _row_to_config(self, row: sqlite3.Row) -> ProviderRuntimeConfig:
-        connection_config = json.loads(row["connection_config_json"]) if row["connection_config_json"] else {}
+        connection_config = (
+            json.loads(row["connection_config_json"])
+            if row["connection_config_json"]
+            else {}
+        )
         allowed_connection_keys = CONNECTION_CONFIG_ALLOWLIST[row["provider_name"]]
         connection_config = {
             key: value
@@ -179,7 +200,9 @@ class ProviderConfigRepository:
             retry_backoff_seconds=float(row["retry_backoff_seconds"]),
             rate_limit_per_sec=float(row["rate_limit_per_sec"]),
             circuit_breaker_enabled=bool(row["circuit_breaker_enabled"]),
-            circuit_breaker_failure_threshold=int(row["circuit_breaker_failure_threshold"]),
+            circuit_breaker_failure_threshold=int(
+                row["circuit_breaker_failure_threshold"]
+            ),
             circuit_breaker_reset_seconds=float(row["circuit_breaker_reset_seconds"]),
             connection_config=connection_config,
             updated_at=row["updated_at"],
@@ -206,7 +229,9 @@ class ProviderConfigRepository:
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if not enabled_str:
             return True
-        enabled = {name.strip().lower() for name in enabled_str.split(",") if name.strip()}
+        enabled = {
+            name.strip().lower() for name in enabled_str.split(",") if name.strip()
+        }
         return provider_name in enabled
 
     def _default_rate_limit(self, provider_name: str) -> float:
@@ -262,4 +287,6 @@ class ProviderConfigRepository:
         unknown_keys = set(config.connection_config) - allowed_connection_keys
         if unknown_keys:
             unknown = ", ".join(sorted(unknown_keys))
-            raise ValueError(f"Unknown connection config for {config.provider_name}: {unknown}")
+            raise ValueError(
+                f"Unknown connection config for {config.provider_name}: {unknown}"
+            )

@@ -14,10 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+import pytest
+
 from app.providers.lseg import LSEGProvider
+
 
 @pytest.fixture
 def lseg_provider():
@@ -28,7 +31,7 @@ def lseg_provider():
 
 def test_extract_company_profile(lseg_provider):
     # Mock response DataFrame
-    df = pd.DataFrame([{
+    pd.DataFrame([{
         "Instrument": "AAPL.O",
         "Company Name": "Apple Inc",
         "Exchange Name": "NASDAQ",
@@ -42,4 +45,3 @@ def test_extract_company_profile(lseg_provider):
     
     # Testing the mapping logic inside get_company_profile is hard without full API mock
     # so we'll just test what we can.
-    pass

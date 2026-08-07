@@ -44,7 +44,10 @@ def _resolve_host_addresses(hostname: str, port: int | None) -> set[str]:
         return {hostname} if ipaddress.ip_address(hostname) else set()
     except ValueError:
         pass
-    return {str(item[4][0]) for item in socket.getaddrinfo(hostname, port or 443, type=socket.SOCK_STREAM)}
+    return {
+        str(item[4][0])
+        for item in socket.getaddrinfo(hostname, port or 443, type=socket.SOCK_STREAM)
+    }
 
 
 def _is_blocked_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:

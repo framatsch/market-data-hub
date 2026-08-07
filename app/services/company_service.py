@@ -26,14 +26,19 @@ class CompanyService:
     def __init__(self, registry: Any = None) -> None:
         self.registry = registry or get_registry()
 
-    async def get_company_profile(self, symbol: str, provider_name: str | None = None) -> CompanyProfile:
+    async def get_company_profile(
+        self, symbol: str, provider_name: str | None = None
+    ) -> CompanyProfile:
         provider = self.registry.get_company_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.get_company_profile(symbol)
 
-    async def search_companies(self, query: str, provider_name: str | None = None) -> list[CompanySummary]:
+    async def search_companies(
+        self, query: str, provider_name: str | None = None
+    ) -> list[CompanySummary]:
         provider = self.registry.get_company_provider(provider_name)
         structlog.contextvars.bind_contextvars(provider=provider.name)
         return await provider.search_companies(query)
+
 
 company_service = CompanyService()

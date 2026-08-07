@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import time
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -179,8 +179,8 @@ async def test_get_historical_prices_daily_success(provider: SchwabProvider):
 
     provider._get_client = AsyncMock(return_value=client)
 
-    start = datetime(2024, 5, 10, tzinfo=timezone.utc)
-    end = datetime(2024, 5, 20, tzinfo=timezone.utc)
+    start = datetime(2024, 5, 10, tzinfo=UTC)
+    end = datetime(2024, 5, 20, tzinfo=UTC)
     bars = await provider.get_historical_prices("AAPL", "1d", start, end)
 
     assert len(bars) == 1
@@ -214,8 +214,8 @@ async def test_get_historical_prices_intraday_success(provider: SchwabProvider):
     await provider.get_historical_prices(
         "AAPL",
         "1m",
-        datetime(2024, 5, 15, tzinfo=timezone.utc),
-        datetime(2024, 5, 16, tzinfo=timezone.utc),
+        datetime(2024, 5, 15, tzinfo=UTC),
+        datetime(2024, 5, 16, tzinfo=UTC),
     )
 
     client.get_price_history_every_minute.assert_awaited_once()
@@ -228,8 +228,8 @@ async def test_get_historical_prices_unsupported_interval(provider: SchwabProvid
         await provider.get_historical_prices(
             "AAPL",
             "2h",
-            datetime(2024, 5, 15, tzinfo=timezone.utc),
-            datetime(2024, 5, 16, tzinfo=timezone.utc),
+            datetime(2024, 5, 15, tzinfo=UTC),
+            datetime(2024, 5, 16, tzinfo=UTC),
         )
 
 
@@ -381,8 +381,8 @@ async def test_get_historical_prices_429_raises_timeout(provider: SchwabProvider
     with pytest.raises(ProviderTimeoutError):
         await provider.get_historical_prices(
             "AAPL", "1d",
-            datetime(2024, 1, 1, tzinfo=timezone.utc),
-            datetime(2024, 1, 31, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 1, 31, tzinfo=UTC),
         )
 
 
@@ -576,7 +576,7 @@ def test_decimal_conversion_uses_str_path(provider: SchwabProvider, field: str):
 @pytest.mark.asyncio
 async def test_get_option_chain_success(provider: SchwabProvider, option_chain_response: dict):
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
     provider._get_client = AsyncMock(return_value=client)
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5))
@@ -589,7 +589,7 @@ async def test_get_option_chain_success(provider: SchwabProvider, option_chain_r
 @pytest.mark.asyncio
 async def test_get_option_chain_min_strike_filter(provider: SchwabProvider, option_chain_response: dict):
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
     provider._get_client = AsyncMock(return_value=client)
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), min_strike=Decimal("187.0"))
@@ -601,7 +601,7 @@ async def test_get_option_chain_min_strike_filter(provider: SchwabProvider, opti
 @pytest.mark.asyncio
 async def test_get_option_chain_right_filter_call(provider: SchwabProvider, option_chain_response: dict):
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
     provider._get_client = AsyncMock(return_value=client)
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
@@ -614,7 +614,7 @@ async def test_get_option_chain_right_filter_call(provider: SchwabProvider, opti
 async def test_get_option_chain_uses_volatility_for_iv(provider: SchwabProvider, option_chain_response: dict):
     option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["volatility"] = 22.345
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
     provider._get_client = AsyncMock(return_value=client)
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
@@ -627,7 +627,7 @@ async def test_get_option_chain_last_zero_falls_back_to_mark(provider: SchwabPro
     option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["last"] = 0
     option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["mark"] = 4.45
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(200, option_chain_response))
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
     provider._get_client = AsyncMock(return_value=client)
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
@@ -638,7 +638,7 @@ async def test_get_option_chain_last_zero_falls_back_to_mark(provider: SchwabPro
 @pytest.mark.asyncio
 async def test_get_option_chain_429_raises_timeout(provider: SchwabProvider):
     client = Mock()
-    client.get_option_chain = Mock(return_value=_Response(429, {}))
+    client.get_option_chain = AsyncMock(return_value=_Response(429, {}))
     provider._get_client = AsyncMock(return_value=client)
 
     with pytest.raises(ProviderTimeoutError) as exc:
@@ -650,7 +650,7 @@ async def test_get_option_chain_429_raises_timeout(provider: SchwabProvider):
 @pytest.mark.asyncio
 async def test_get_option_quote_success(provider: SchwabProvider):
     client = Mock()
-    client.get_quotes = Mock(
+    client.get_quotes = AsyncMock(
         return_value=_Response(
             200,
             {
@@ -685,7 +685,7 @@ async def test_get_option_quote_success(provider: SchwabProvider):
 @pytest.mark.asyncio
 async def test_get_option_quote_invalid_occ_symbol(provider: SchwabProvider):
     client = Mock()
-    client.get_quotes = Mock(return_value=_Response(200, {"bad-occ": {"quote": {}}}))
+    client.get_quotes = AsyncMock(return_value=_Response(200, {"bad-occ": {"quote": {}}}))
     provider._get_client = AsyncMock(return_value=client)
 
     with pytest.raises(AppError) as exc:

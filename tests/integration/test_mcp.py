@@ -16,23 +16,24 @@
 
 """Integration tests for MCP (Model Context Protocol) endpoints."""
 
-import pytest
-import json
 import asyncio
-import threading
-import uvicorn
+import json
+import os
 import socket
+import threading
 import time
 from datetime import datetime
 from decimal import Decimal
+
+import pytest
+import uvicorn
 from httpx import AsyncClient
-from app.main import app
+
 from app.config import settings
+from app.main import app
 from app.models.price import PriceQuote
 from app.providers.base import BasePriceProvider
 from app.providers.registry import registry
-
-import os
 
 # Skip if explicitly in CI.
 pytestmark = [

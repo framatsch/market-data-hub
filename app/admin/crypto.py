@@ -31,7 +31,9 @@ class CryptoService:
             raise ValueError("APP_ENCRYPTION_KEY must be valid base64url") from exc
 
         if len(key) != 32:
-            raise ValueError("APP_ENCRYPTION_KEY must decode to exactly 32 bytes (AES-256)")
+            raise ValueError(
+                "APP_ENCRYPTION_KEY must decode to exactly 32 bytes (AES-256)"
+            )
         return key
 
     def encrypt(self, plaintext: str) -> EncryptedBlob:

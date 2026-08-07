@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
 import os
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,7 +8,6 @@ from app.dependencies import get_price_service
 from app.main import app
 from app.providers.registry import ProviderRegistry
 from app.services.price_service import PriceService
-
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PRIXE_INTEGRATION", "false").lower() not in {"1", "true", "yes"},
@@ -30,7 +29,7 @@ def prixe_client():
 
 @pytest.mark.integration
 def test_prices_history_endpoint_with_prixe(prixe_client):
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=14)
 
     response = prixe_client.get(

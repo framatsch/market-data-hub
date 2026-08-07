@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
+
 from app.main import app
+
 
 def test_websocket_connect():
     client = TestClient(app)

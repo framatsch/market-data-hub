@@ -14,10 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import pytest
 from datetime import date, timedelta
+
+import pytest
+
 from app.providers.mock_news import MockNewsProvider
 from app.utils.errors import DataNotFoundError
+
 
 @pytest.fixture
 def mock_news_provider():

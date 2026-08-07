@@ -8,7 +8,14 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.observability.audit import audit_log
 from app.observability.metrics import record_request, status_class
 
-SKIP_AUDIT_PATH_PREFIXES = ("/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/admin")
+SKIP_AUDIT_PATH_PREFIXES = (
+    "/health",
+    "/metrics",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/admin",
+)
 
 
 class ObservabilityMiddleware:
@@ -93,7 +100,9 @@ class ObservabilityMiddleware:
             return query_provider.lower()
         return "none"
 
-    def _audit_request(self, request: Request, provider: str, status_code: int, duration_seconds: float) -> None:
+    def _audit_request(
+        self, request: Request, provider: str, status_code: int, duration_seconds: float
+    ) -> None:
         level = self._level_for_status(status_code)
         log = getattr(audit_log, level)
         log(

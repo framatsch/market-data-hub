@@ -38,7 +38,9 @@ class AdminAuth:
             raise HTTPException(status_code=401, detail="Not authenticated")
         return await self.validate_credentials(credentials)
 
-    async def validate_credentials(self, credentials: HTTPAuthorizationCredentials) -> AdminPrincipal:
+    async def validate_credentials(
+        self, credentials: HTTPAuthorizationCredentials
+    ) -> AdminPrincipal:
         token = credentials.credentials
         try:
             claims = await self._decode_token(token, refresh_on_unknown_kid=True)
@@ -47,12 +49,16 @@ class AdminAuth:
         except JWTError as exc:
             raise HTTPException(status_code=401, detail="Invalid token") from exc
         return AdminPrincipal(
-            user=str(claims.get("sub") or claims.get("preferred_username") or "unknown"),
+            user=str(
+                claims.get("sub") or claims.get("preferred_username") or "unknown"
+            ),
             auth_enabled=True,
             claims=claims,
         )
 
-    async def _decode_token(self, token: str, refresh_on_unknown_kid: bool) -> dict[str, Any]:
+    async def _decode_token(
+        self, token: str, refresh_on_unknown_kid: bool
+    ) -> dict[str, Any]:
         try:
             header = jwt.get_unverified_header(token)
         except JWTError as exc:
@@ -71,25 +77,37 @@ class AdminAuth:
             raise HTTPException(status_code=401, detail="Invalid token")
 
         from typing import cast
-        return cast(dict[str, Any], jwt.decode(
-            token,
-            key,
-            algorithms=[key.get("alg", "RS256")],
-            audience=settings.ADMIN_OIDC_CLIENT_ID or None,
-            issuer=settings.ADMIN_OIDC_ISSUER or None,
-            options={"verify_aud": bool(settings.ADMIN_OIDC_CLIENT_ID)},
-        ))
+
+        return cast(
+            dict[str, Any],
+            jwt.decode(
+                token,
+                key,
+                algorithms=[key.get("alg", "RS256")],
+                audience=settings.ADMIN_OIDC_CLIENT_ID or None,
+                issuer=settings.ADMIN_OIDC_ISSUER or None,
+                options={"verify_aud": bool(settings.ADMIN_OIDC_CLIENT_ID)},
+            ),
+        )
 
     async def _get_jwks(self, force_refresh: bool = False) -> dict[str, Any]:
         now = time.monotonic()
-        if not force_refresh and self._jwks is not None and now - self._jwks_loaded_at < _JWKS_CACHE_SECONDS:
+        if (
+            not force_refresh
+            and self._jwks is not None
+            and now - self._jwks_loaded_at < _JWKS_CACHE_SECONDS
+        ):
             return self._jwks
         if not settings.ADMIN_OIDC_ISSUER:
             raise HTTPException(status_code=401, detail="Invalid token")
 
         async with self._jwks_lock:
             now = time.monotonic()
-            if not force_refresh and self._jwks is not None and now - self._jwks_loaded_at < _JWKS_CACHE_SECONDS:
+            if (
+                not force_refresh
+                and self._jwks is not None
+                and now - self._jwks_loaded_at < _JWKS_CACHE_SECONDS
+            ):
                 return self._jwks
             issuer = settings.ADMIN_OIDC_ISSUER.rstrip("/")
             async with httpx.AsyncClient(timeout=10) as client:
@@ -107,6 +125,7 @@ class AdminAuth:
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
                 from typing import cast
+
                 return cast(dict[str, Any], key)
         return None
 

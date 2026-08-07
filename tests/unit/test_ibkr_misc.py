@@ -14,9 +14,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from app.providers.ibkr import IBKRProvider
+
 
 @pytest.fixture
 def ibkr_provider():
@@ -45,7 +48,6 @@ def test_ibkr_calculate_duration_logic(ibkr_provider):
     assert "3 D" in ibkr_provider._calculate_duration(now - timedelta(days=2), now)
 
 def test_ibkr_is_valid_nan(ibkr_provider):
-    import math
     assert ibkr_provider._is_valid(float('nan')) is False
     assert ibkr_provider._is_valid(None) is False
     assert ibkr_provider._is_valid(10.0) is True
