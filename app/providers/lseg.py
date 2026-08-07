@@ -686,7 +686,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             
             if not extended_hours and is_intraday:
                 kwargs["sessions"] = [
-                    historical_pricing.Sessions.NORMAL
+                    historical_pricing.MarketSession.NORMAL
                 ]
 
             response = historical_pricing.summaries.Definition(**kwargs).get_data()
