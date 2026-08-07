@@ -155,7 +155,7 @@ def suggest_category(status: Dict[str, List[str]], diff: str) -> str:
             scores[category] = score
 
     if not scores:
-        return "Doc"  # Default fallback
+        return "Docs"  # Default fallback
 
     # Return category with highest score
     return max(scores.items(), key=lambda x: x[1])[0]
