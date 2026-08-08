@@ -739,7 +739,7 @@ wheels = [
 
 [[package]]
 name = "market-data-hub"
-version = "1.1.0"
+version = "1.1.1.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
