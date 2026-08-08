@@ -105,12 +105,18 @@ State is managed via `ocr state` CLI commands (stored in SQLite at `.ocr/data/oc
 
 ### State Management Commands
 
+Prefer the **atomic, invariant-checked** verbs (v2.0). `finish` refuses to
+close a map whose current run was never finalized.
+
 | Command | When to Use |
 |---------|-------------|
-| `ocr state init --session-id <id> --branch <branch> --workflow-type map --session-dir <path>` | Create a new session |
-| `ocr state transition --phase <phase> --phase-number <N> --current-map-run <N>` | Each phase boundary |
-| `ocr state show` | Check current session state |
-| `ocr state close` | Close the session (if ending) |
+| `ocr state begin --session-id <id> --branch <branch> --workflow-type map --session-dir <path>` | Create/resume a session |
+| `ocr state advance --phase <phase> [--current-map-run <N>]` | Each phase boundary (graph-validated) |
+| `ocr state status --json` | On resume: "is it done, and what's missing?" |
+| `ocr state complete-map --stdin` | Finalize the map run (validate + record + transition) — only after `synthesis` |
+| `ocr state finish` | Close the session (`--abort` to abandon) |
+
+> v2.0.0 **retired** `ocr state init` / `transition` / `round-complete` / `map-complete` / `close` — use the atomic verbs above. Calling a retired verb exits `2` with a pointer to its replacement.
 
 ### Checkpoint Rules
 

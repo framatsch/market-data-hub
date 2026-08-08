@@ -13,7 +13,7 @@ tags: [ocr, review, code-review]
 **Arguments**
 - `target` (optional): Branch, commit, or file to review. Defaults to staged changes.
 - `--fresh` (optional): Clear any existing session for today's date and start from scratch.
-- `--team` (optional): Override the default reviewer team. Format: `reviewer-id:count,reviewer-id:count`. Example: `--team principal:2,martin-fowler:1`.
+- `--team` (optional): Replace the default reviewer team for this run. Strict format: `reviewer-id:count[,reviewer-id:count...]` — the `:count` is required, each reviewer-id appears once, and ids are lowercase (e.g. `principal`, `martin-fowler`). Example: `--team principal:2,martin-fowler:1`. Forwarded as-is to `ocr team resolve --team`, which parses and validates it.
 - `--reviewer` (optional, repeatable): Add an ephemeral reviewer described in natural language. The Tech Lead will synthesize a focused reviewer persona from the description. Does not persist. Example: `--reviewer "Focus on error handling in the auth flow"`.
 
 **Examples**
@@ -73,7 +73,7 @@ ocr state show
 - **If session exists and status is `closed`**: Start new round (round-{n+1}) — reuse existing `discovered-standards.md` and `context.md`, create new `rounds/round-{n+1}/` directory
 - **If session exists, status is `active`, and files match**: Resume from `current_phase`
 - **If session exists but state and files mismatch**: Report discrepancy and ask user which to trust
-- **If no state in SQLite but session files exist**: Start new round — use `ocr state init` to recreate the session, then start round-{n+1} from Phase 4 (reuse existing standards and context)
+- **If no state in SQLite but session files exist**: Start new round — use `ocr state begin` to recreate/resume the session, then start round-{n+1} from Phase 4 (reuse existing standards and context)
 - **If no session exists**: Start fresh from Phase 1
 
 ---
@@ -104,12 +104,19 @@ State is managed via `ocr state` CLI commands (stored in SQLite at `.ocr/data/oc
 
 ### State Management Commands
 
+Prefer the **atomic, invariant-checked** verbs (v2.0). The CLI enforces the
+lifecycle — `finish` refuses to close a workflow whose current round was never
+finalized, so "completed too soon" cannot happen.
+
 | Command | When to Use |
 |---------|-------------|
-| `ocr state init --session-id <id> --branch <branch> --workflow-type review --session-dir <path>` | Phase 1: Create the session |
-| `ocr state transition --phase <phase> --phase-number <N> [--current-round <N>]` | Each phase boundary |
-| `ocr state show` | Check current session state |
-| `ocr state close` | Phase 8: Close the session |
+| `ocr state begin --session-id <id> --branch <branch> --workflow-type review --session-dir <path>` | Phase 1: Create/resume the session (returns round + completeness) |
+| `ocr state advance --phase <phase> [--current-round <N>]` | Each phase boundary (graph-validated; phase number derived) |
+| `ocr state status --json` | On resume: "is it done, and what's missing?" |
+| `ocr state complete-round --stdin` | Phase 7: atomically finalize the round (validate + record + transition) — only after `synthesis` |
+| `ocr state finish` | Phase 8: close the session (`--abort` to abandon) |
+
+> v2.0.0 **retired** `ocr state init` / `transition` / `round-complete` / `map-complete` / `close` — use the atomic verbs above. Calling a retired verb exits `2` with a pointer to its replacement.
 
 ### Checkpoint Rules
 
@@ -121,7 +128,7 @@ State is managed via `ocr state` CLI commands (stored in SQLite at `.ocr/data/oc
 
 ### Why This Matters
 
-The `ocr progress` CLI reads session state from SQLite for real-time progress display. If you skip phases or don't call `ocr state transition`, the progress display breaks and users see incorrect state.
+The `ocr progress` CLI reads session state from SQLite for real-time progress display. If you skip phases or don't call `ocr state advance`, the progress display breaks and users see incorrect state. The CLI also rejects illegal phase jumps and refuses a premature `finish`, so the recorded lifecycle always matches reality.
 
 ---
 

@@ -2,9 +2,9 @@
 
 Complete 6-phase process for generating a Code Review Map.
 
-> **CRITICAL**: You MUST call `ocr state transition` **BEFORE starting work** on each phase. Transition the `current_phase` and `phase_number` immediately when entering a new phase.
+> **CRITICAL**: You MUST call `ocr state advance` **BEFORE starting work** on each phase. Transition the `current_phase` and `phase_number` immediately when entering a new phase.
 
-> **PREREQUISITE**: The `ocr` CLI must be installed (`npm install -g @open-code-review/cli`) or accessible via `npx`. Every phase transition calls `ocr state transition`, which requires the CLI.
+> **PREREQUISITE**: The `ocr` CLI must be installed (`npm install -g @open-code-review/cli`) or accessible via `npx`. Every phase transition calls `ocr state advance`, which requires the CLI.
 
 ---
 
@@ -75,7 +75,7 @@ fi
 
 If this is a **new session** (no prior review or map in this session):
 ```bash
-ocr state init \
+ocr state begin \
   --session-id "$SESSION_ID" \
   --branch "$BRANCH" \
   --workflow-type map \
@@ -84,17 +84,17 @@ ocr state init \
 
 Then transition to the first map phase:
 ```bash
-ocr state transition \
+ocr state advance \
   --phase "map-context" \
-  --phase-number 1 \
+  \
   --current-map-run $CURRENT_RUN
 ```
 
-If this is an **existing session** (e.g., a map after a prior review), the session already exists in SQLite — just call `ocr state transition` to switch to the map workflow:
+If this is an **existing session** (e.g., a map after a prior review), the session already exists in SQLite — just call `ocr state advance` to switch to the map workflow:
 ```bash
-ocr state transition \
+ocr state advance \
   --phase "map-context" \
-  --phase-number 1 \
+  \
   --current-map-run $CURRENT_RUN
 ```
 
@@ -113,12 +113,12 @@ Action: [Starting fresh | Resuming from Phase X]
 
 ## State Tracking
 
-At **every phase transition**, call `ocr state transition` with the `--current-map-run` flag:
+At **every phase transition**, call `ocr state advance` with the `--current-map-run` flag:
 
 ```bash
-ocr state transition \
+ocr state advance \
   --phase "flow-analysis" \
-  --phase-number 3 \
+  \
   --current-map-run $CURRENT_RUN
 ```
 
@@ -132,7 +132,7 @@ This updates the session in SQLite and logs an orchestration event.
 
 **Goal**: Build context from config + discovered files + user requirements.
 
-**State**: Call `ocr state transition --phase "map-context" --phase-number 1 --current-map-run $CURRENT_RUN`
+**State**: Call `ocr state advance --phase "map-context" --current-map-run $CURRENT_RUN`
 
 This phase is **identical** to the review workflow's context discovery. See `references/context-discovery.md` for the complete algorithm.
 
@@ -169,7 +169,7 @@ code-review-map:
 - [ ] `discovered-standards.md` written (or reused from existing session)
 - [ ] If requirements provided: `requirements.md` written
 - [ ] Agent redundancy config loaded
-- [ ] `ocr state transition` called with `--phase "map-context"`
+- [ ] `ocr state advance` called with `--phase "map-context"`
 
 ---
 
@@ -177,7 +177,7 @@ code-review-map:
 
 **Goal**: Enumerate changed files and identify logical structure.
 
-**State**: Call `ocr state transition --phase "topology" --phase-number 2 --current-map-run $CURRENT_RUN`
+**State**: Call `ocr state advance --phase "topology" --current-map-run $CURRENT_RUN`
 
 ### Steps
 
@@ -232,7 +232,7 @@ code-review-map:
 - [ ] Files categorized by type
 - [ ] Logical sections identified
 - [ ] `topology.md` written
-- [ ] `ocr state transition` called with `--phase "topology"`
+- [ ] `ocr state advance` called with `--phase "topology"`
 
 ---
 
@@ -240,7 +240,7 @@ code-review-map:
 
 **Goal**: Trace upstream/downstream dependencies for each changed file.
 
-**State**: Call `ocr state transition --phase "flow-analysis" --phase-number 3 --current-map-run $CURRENT_RUN`
+**State**: Call `ocr state advance --phase "flow-analysis" --current-map-run $CURRENT_RUN`
 
 ### Steps
 
@@ -280,7 +280,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 - [ ] All changed files have flow context
 - [ ] Findings aggregated
 - [ ] `flow-analysis.md` written
-- [ ] `ocr state transition` called with `--phase "flow-analysis"`
+- [ ] `ocr state advance` called with `--phase "flow-analysis"`
 
 ---
 
@@ -288,7 +288,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 
 **Goal**: Map changes to requirements and identify coverage.
 
-**State**: Call `ocr state transition --phase "requirements-mapping" --phase-number 4 --current-map-run $CURRENT_RUN`
+**State**: Call `ocr state advance --phase "requirements-mapping" --current-map-run $CURRENT_RUN`
 
 **Skip this phase** if no requirements were provided.
 
@@ -322,7 +322,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 - [ ] Coverage matrix created
 - [ ] Gaps identified
 - [ ] `requirements-mapping.md` written
-- [ ] `ocr state transition` called with `--phase "requirements-mapping"`
+- [ ] `ocr state advance` called with `--phase "requirements-mapping"`
 
 ---
 
@@ -330,7 +330,7 @@ See `references/map-personas/flow-analyst.md` for persona details.
 
 **Goal**: Combine all findings into the final Code Review Map optimized for reviewer workflow.
 
-**State**: Call `ocr state transition --phase "synthesis" --phase-number 5 --current-map-run $CURRENT_RUN`
+**State**: Call `ocr state advance --phase "synthesis" --current-map-run $CURRENT_RUN`
 
 ### Template Structure (in order)
 
@@ -405,12 +405,16 @@ See `references/map-personas/flow-analyst.md` for persona details.
    [ "$EXPECTED" -ne "$MAPPED" ] && echo "ERROR: Missing files!"
    ```
 
-11. **Pipe structured map data to CLI**:
+11. **Atomically finalize the map run** (v2.0):
 
-    Construct a JSON object with the map's structured data and pipe it to the CLI. The CLI validates, writes `map-meta.json`, and records a `map_completed` orchestration event — all in one command.
+    After reaching `synthesis` via `ocr state advance`, pipe the structured
+    map data to `ocr state complete-map --stdin`. In one transaction the CLI
+    validates the schema, writes `map-meta.json`, records the `map_completed`
+    event, and transitions to `complete`. (`ocr state map-complete` was retired
+    in v2.0.0 — `complete-map` replaces it.)
 
     ```bash
-    cat <<'JSON' | ocr state map-complete --stdin
+    cat <<'JSON' | ocr state complete-map --stdin
     {
       "schema_version": 1,
       "sections": [
@@ -465,9 +469,9 @@ See `references/map-template.md` for the complete template.
 - [ ] Section Dependencies table generated
 - [ ] File Index complete
 - [ ] Completeness validated (all files appear in tables)
-- [ ] `map-meta.json` piped to CLI via `ocr state map-complete --stdin`
+- [ ] `map-meta.json` piped to CLI via `ocr state complete-map --stdin`
 - [ ] `map.md` written
-- [ ] `ocr state transition` called with `--phase "synthesis"`
+- [ ] `ocr state advance` called with `--phase "synthesis"`
 
 ---
 
@@ -475,7 +479,7 @@ See `references/map-template.md` for the complete template.
 
 **Goal**: Display the map to the user.
 
-**State**: Call `ocr state transition --phase "complete" --phase-number 6 --current-map-run $CURRENT_RUN` after presenting.
+**State**: Call `ocr state advance --phase "complete" --current-map-run $CURRENT_RUN` after presenting.
 
 ### Steps
 
@@ -499,9 +503,9 @@ See `references/map-template.md` for the complete template.
 
 3. **Update state**:
    ```bash
-   ocr state transition \
+   ocr state advance \
      --phase "complete" \
-     --phase-number 6 \
+     \
      --current-map-run $CURRENT_RUN
    ```
 
@@ -510,7 +514,7 @@ See `references/map-template.md` for the complete template.
 ### Phase 6 Checkpoint
 
 - [ ] Map presented to user
-- [ ] `ocr state transition` called with `--phase "complete"`
+- [ ] `ocr state advance` called with `--phase "complete"`
 
 ---
 

@@ -24,3 +24,4 @@ admin/node_modules/
 keys.db
 paseo.json
 tmp
+.serena

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-22T16:47:10.448Z",
+  "generated_at": "2026-08-08T10:47:01.688Z",
   "reviewers": [
     {
       "id": "accessibility",
@@ -302,7 +302,7 @@
       "focus_areas": [
         "Algorithmic Complexity"
       ],
-      "is_default": false,
+      "is_default": true,
       "is_builtin": true
     },
     {

@@ -198,6 +198,16 @@ The Tech Lead determines the verdict based on simple rules:
 
 **Important**: The Tech Lead does NOT override blockers. If any reviewer flags a blocker, the verdict is REQUEST CHANGES regardless of other opinions.
 
+**Verdict and blocker count must point the same direction (CLI-enforced).** The verdict is now cross-checked against the deduplicated blocker count at `complete-round`:
+
+- `REQUEST CHANGES` **requires at least one blocker** — if nothing is a blocker, the change is mergeable, so the verdict is `APPROVE` (carry the residual work as `should_fix`/`suggestion`/`style`).
+- `APPROVE` **requires zero blockers** — a mergeable gate cannot coexist with a must-fix. If something truly must be fixed before merge, categorize it `blocker` and use `REQUEST CHANGES`.
+- `NEEDS DISCUSSION` is unconstrained on blockers.
+
+The CLI **rejects** a contradictory pair (exit 7, nothing written), so pick the verdict and the blocker categorization together.
+
+**The verdict is the merge gate — one axis, three values.** It answers only "can this land?" Residual work is a *separate* axis: follow-ups (`should_fix`) and suggestions are finding **categories**, never verdict states. An `APPROVE` with open should-fix items is the normal, correct outcome — the work is tracked in the counts, not by bending the verdict into a composite like "approve with suggestions". Never emit a verdict outside the three canonical values.
+
 ---
 
 ## Final Review Template
@@ -357,6 +367,6 @@ Full reviews available in session directory:
 
 6. **Tech Lead facilitates** — The Tech Lead synthesizes and recommends, but doesn't override individual blockers or suppress feedback.
 
-7. **`round-meta.json` matches `final.md`** — When piping data to `ocr state round-complete --stdin`:
+7. **`round-meta.json` matches `final.md`** — When piping data to `ocr state complete-round --stdin`:
    - The `category` on each finding MUST reflect the **post-synthesis** classification (promoted/demoted categories).
    - The `synthesis_counts` object MUST contain the **deduplicated** counts matching the actual numbered items in `final.md`. Multiple reviewers flag the same issue → one item in `final.md`. Count the `### N.` headings under Blockers, Should Fix, and Suggestions in your final output and set `synthesis_counts.blockers`, `synthesis_counts.should_fix`, and `synthesis_counts.suggestions` accordingly. The dashboard uses these counts when present.
