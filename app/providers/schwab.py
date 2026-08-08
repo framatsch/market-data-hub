@@ -93,6 +93,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         self._client: Any = None
         self._paused = False
         self._temp_token_path: str | None = None
+        self._token_watcher_task: asyncio.Task[None] | None = None
         self._client_lock = asyncio.Lock()
         self._rate_limit_lock = asyncio.Lock()
         self._request_times: deque[float] = deque()  # no maxlen — managed manually
@@ -146,8 +147,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             url = (config.connection_config or {}).get("callback_url")
             if url and isinstance(url, str) and url.strip():
                 return str(url.strip())
+        except RuntimeError:
+            logger.debug("Admin runtime not initialized while resolving Schwab callback URL")
         except Exception:
-            pass
+            logger.warning(
+                "Unexpected error while resolving Schwab callback URL",
+                exc_info=True,
+            )
         return settings.SCHWAB_CALLBACK_URL
 
     async def _resolve_force_refresh_token(self) -> bool:
@@ -160,8 +166,15 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             val = (config.connection_config or {}).get("force_refresh_token")
             if val is not None:
                 return bool(val)
+        except RuntimeError:
+            logger.debug(
+                "Admin runtime not initialized while resolving Schwab force_refresh_token"
+            )
         except Exception:
-            pass
+            logger.warning(
+                "Unexpected error while resolving Schwab force_refresh_token",
+                exc_info=True,
+            )
         return True
 
     async def _get_credentials(self) -> tuple[str, str]:
@@ -200,7 +213,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                             },
                         )
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to parse Schwab token_json while checking expiry",
+                    exc_info=True,
+                )
 
             self._cleanup_temp_token_file()
             fd, path = tempfile.mkstemp(suffix=".json")
@@ -228,7 +244,8 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 self._last_token_mtime = mtime
                 with open(self._temp_token_path, "r", encoding="utf-8") as f:
                     new_token = f.read()
-                from app.admin.key_repository import get_key_repository
+                from app.admin.runtime import get_key_repository
+
                 await get_key_repository().save("schwab", "token_json", new_token)
                 logger.info("Schwab token update detected and persisted to DB.")
         except Exception as e:
@@ -236,10 +253,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
     def _start_token_watcher(self) -> None:
         """Start a background task to watch for token refreshes."""
-        if hasattr(self, "_token_watcher_task") and not self._token_watcher_task.done():
+        if self._token_watcher_task is not None and not self._token_watcher_task.done():
             return
 
-        async def _watch():
+        async def _watch() -> None:
             while not self._paused and self._client is not None:
                 await asyncio.sleep(60)
                 await self._persist_token_if_changed()
@@ -565,7 +582,16 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 if config.connection_config
                 else "slack"
             )
+        except RuntimeError:
+            logger.debug(
+                "Admin runtime not initialized while resolving Schwab webhook format"
+            )
+            webhook_format = settings.SCHWAB_ALERT_WEBHOOK_FORMAT
         except Exception:
+            logger.warning(
+                "Unexpected error while resolving Schwab webhook format",
+                exc_info=True,
+            )
             webhook_format = settings.SCHWAB_ALERT_WEBHOOK_FORMAT
 
         if webhook_format == "discord":
@@ -947,12 +973,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
     async def close(self) -> None:
         """Gracefully close the underlying schwab-py HTTP session."""
-        if hasattr(self, "_token_watcher_task"):
+        if self._token_watcher_task is not None:
             self._token_watcher_task.cancel()
             try:
                 await self._token_watcher_task
             except asyncio.CancelledError:
                 pass
+            self._token_watcher_task = None
 
         async with self._get_client_lock():
             try:

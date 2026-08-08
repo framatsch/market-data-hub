@@ -18,6 +18,7 @@
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -469,3 +470,25 @@ class TestRateLimiting:
                 mock_sleep.assert_called_once()
                 sleep_duration = mock_sleep.call_args[0][0]
                 assert 0 < sleep_duration <= 0.5
+
+
+@pytest.mark.asyncio
+async def test_get_last_price_runs_sync_work_off_event_loop_thread(monkeypatch):
+    provider = LSEGProvider()
+    event_loop_thread_id = threading.get_ident()
+    observed: dict[str, int] = {}
+
+    def fake_sync(symbol: str, market_data_type=None):
+        observed["thread_id"] = threading.get_ident()
+        class Quote:
+            pass
+        quote = Quote()
+        quote.provider = "lseg"
+        return quote
+
+    monkeypatch.setattr(provider, "_get_last_price_sync", fake_sync)
+
+    result = await provider.get_last_price("AAPL")
+
+    assert result.provider == "lseg"
+    assert observed["thread_id"] != event_loop_thread_id

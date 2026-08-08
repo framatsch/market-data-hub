@@ -16,6 +16,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -51,7 +52,13 @@ def options_service(mock_registry):
 def news_service(mock_registry):
     return NewsService(registry=mock_registry)
 
-# ... (previous service tests) ...
+
+def _context_for(provider):
+    @asynccontextmanager
+    async def _ctx():
+        yield provider
+
+    return _ctx()
 
 @pytest.mark.asyncio
 async def test_get_option_chain(options_service, mock_registry):
@@ -59,12 +66,12 @@ async def test_get_option_chain(options_service, mock_registry):
     mock_provider.get_option_chain = AsyncMock(return_value=OptionChain(
         underlying_symbol="AAPL", expiry=date(2024, 1, 19), options=[], provider="test"
     ))
-    mock_registry.get_options_provider.return_value = mock_provider
+    mock_registry.use_options_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await options_service.get_option_chain("AAPL", date(2024, 1, 19), provider_name="test")
     
     assert result.underlying_symbol == "AAPL"
-    mock_registry.get_options_provider.assert_called_with("test")
+    mock_registry.use_options_provider.assert_called_with("test")
     mock_provider.get_option_chain.assert_called_once()
 
 @pytest.mark.asyncio
@@ -75,12 +82,12 @@ async def test_get_option_quote(options_service, mock_registry):
         expiry=date(2024, 1, 19), type="call", price=Decimal("5.00"), 
         currency="USD", provider="test"
     ))
-    mock_registry.get_options_provider.return_value = mock_provider
+    mock_registry.use_options_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await options_service.get_option_quote("AAPL", "AAPL240119C00150000", provider_name="test")
     
     assert result.symbol == "AAPL240119C00150000"
-    mock_registry.get_options_provider.assert_called_with("test")
+    mock_registry.use_options_provider.assert_called_with("test")
     mock_provider.get_option_quote.assert_called_once()
 
 @pytest.mark.asyncio
@@ -89,12 +96,12 @@ async def test_get_company_profile(company_service, mock_registry):
     mock_provider.get_company_profile = AsyncMock(return_value=CompanyProfile(
         symbol="AAPL", name="Apple Inc.", exchange="NASDAQ", currency="USD", provider="test"
     ))
-    mock_registry.get_company_provider.return_value = mock_provider
+    mock_registry.use_company_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await company_service.get_company_profile("AAPL", provider_name="test")
     
     assert result.symbol == "AAPL"
-    mock_registry.get_company_provider.assert_called_with("test")
+    mock_registry.use_company_provider.assert_called_with("test")
     mock_provider.get_company_profile.assert_called_once()
 
 @pytest.mark.asyncio
@@ -103,12 +110,12 @@ async def test_search_companies(company_service, mock_registry):
     mock_provider.search_companies = AsyncMock(return_value=[
         CompanySummary(symbol="AAPL", name="Apple Inc.", exchange="NASDAQ", provider="test")
     ])
-    mock_registry.get_company_provider.return_value = mock_provider
+    mock_registry.use_company_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await company_service.search_companies("Apple", provider_name="test")
     
     assert len(result) == 1
-    mock_registry.get_company_provider.assert_called_with("test")
+    mock_registry.use_company_provider.assert_called_with("test")
     mock_provider.search_companies.assert_called_once()
 
 @pytest.mark.asyncio
@@ -118,12 +125,12 @@ async def test_get_latest_price(price_service, mock_registry):
         symbol="AAPL", price=Decimal("150.00"), currency="USD", 
         timestamp=datetime.now(), provider="test"
     ))
-    mock_registry.get_price_provider.return_value = mock_provider
+    mock_registry.use_price_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await price_service.get_latest_price("AAPL", provider_name="test")
     
     assert result.symbol == "AAPL"
-    mock_registry.get_price_provider.assert_called_with("test")
+    mock_registry.use_price_provider.assert_called_with("test")
     mock_provider.get_last_price.assert_called_once()
 
 @pytest.mark.asyncio
@@ -135,14 +142,14 @@ async def test_get_historical_prices(price_service, mock_registry):
                  low=Decimal("148.00"), close=Decimal("150.00"), 
                  volume=1000, provider="test")
     ])
-    mock_registry.get_price_provider.return_value = mock_provider
+    mock_registry.use_price_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     start = datetime(2024, 1, 1)
     end = datetime(2024, 1, 2)
     result = await price_service.get_historical_prices("AAPL", "1d", start, end, provider_name="test")
     
     assert len(result) == 1
-    mock_registry.get_price_provider.assert_called_with("test")
+    mock_registry.use_price_provider.assert_called_with("test")
     mock_provider.get_historical_prices.assert_called_once()
 
 @pytest.mark.asyncio
@@ -151,12 +158,12 @@ async def test_get_market_status(price_service, mock_registry):
     mock_provider.get_market_status = AsyncMock(return_value=MarketStatus(
         market="open", server_time=datetime.now(), provider="test"
     ))
-    mock_registry.get_price_provider.return_value = mock_provider
+    mock_registry.use_price_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
     result = await price_service.get_market_status(provider_name="test")
     
     assert result.market == "open"
-    mock_registry.get_price_provider.assert_called_with("test")
+    mock_registry.use_price_provider.assert_called_with("test")
     mock_provider.get_market_status.assert_called_once()
 
 @pytest.mark.asyncio
@@ -176,7 +183,7 @@ async def test_get_company_news(news_service, mock_registry):
             sentiment=None,
         )
     ])
-    mock_registry.get_news_provider.return_value = mock_provider
+    mock_registry.use_news_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
 
     from_date = date(2024, 1, 1)
     to_date = date(2024, 1, 2)
@@ -192,7 +199,7 @@ async def test_get_company_news(news_service, mock_registry):
     )
 
     assert len(result) == 1
-    mock_registry.get_news_provider.assert_called_with("test")
+    mock_registry.use_news_provider.assert_called_with("test")
     mock_provider.get_company_news.assert_awaited_once_with(
         symbol="AAPL",
         from_date=from_date,
@@ -207,8 +214,8 @@ async def test_get_company_news(news_service, mock_registry):
 async def test_get_company_news_uses_default_provider(news_service, mock_registry):
     mock_provider = MagicMock()
     mock_provider.get_company_news = AsyncMock(return_value=[])
-    mock_registry.get_news_provider.return_value = mock_provider
+    mock_registry.use_news_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
 
     await news_service.get_company_news("AAPL", date(2024, 1, 1), date(2024, 1, 2))
 
-    mock_registry.get_news_provider.assert_called_with(None)
+    mock_registry.use_news_provider.assert_called_with(None)

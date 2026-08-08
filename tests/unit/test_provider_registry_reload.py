@@ -161,3 +161,42 @@ async def test_registry_reload_seed_is_idempotent_for_existing_defaults(tmp_path
     await registry.reload_from_config(repo, settings_repo)
 
     assert await settings_repo.get("default_price_provider") == "ibkr"
+
+
+async def test_use_price_provider_defers_close_until_context_exits(tmp_path) -> None:
+    class HoldProvider(FakePriceProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.release_close = None
+
+        async def close(self) -> None:
+            if self.release_close is not None:
+                await self.release_close.wait()
+            self.closed = True
+
+    class HoldRegistry(ProviderRegistry):
+        provider_classes = {"ibkr": HoldProvider}
+
+        def _initialize_providers(self):
+            provider = HoldProvider()
+            provider.name = "ibkr"
+            self._providers = {"ibkr": provider}
+
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    settings_repo = SettingsRepository(str(tmp_path / "keys.db"))
+    await repo.save("ibkr", {"enabled": False})
+    registry = HoldRegistry()
+    provider = cast(HoldProvider, registry.get_provider_instance("ibkr"))
+
+    import asyncio
+
+    provider.release_close = asyncio.Event()
+
+    async with registry.use_price_provider("ibkr"):
+        reload_task = asyncio.create_task(registry.reload_from_config(repo, settings_repo))
+        await asyncio.sleep(0.01)
+        assert provider.closed is False
+        provider.release_close.set()
+        await reload_task
+
+    assert provider.closed is True

@@ -15,16 +15,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date
-from typing import Any
 
 import structlog
 
 from app.models.news import NewsArticle
-from app.providers.registry import get_registry
+from app.providers.registry import ProviderRegistry, get_registry
 
 
 class NewsService:
-    def __init__(self, registry: Any = None) -> None:
+    def __init__(self, registry: ProviderRegistry | None = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_company_news(
@@ -38,17 +37,17 @@ class NewsService:
         language: str = "en",
         category: str | None = None,
     ) -> list[NewsArticle]:
-        provider = self.registry.get_news_provider(provider_name)
-        structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_company_news(
-            symbol=symbol,
-            from_date=from_date,
-            to_date=to_date,
-            limit=limit,
-            offset=offset,
-            language=language,
-            category=category,
-        )
+        async with self.registry.use_news_provider(provider_name) as provider:
+            structlog.contextvars.bind_contextvars(provider=provider.name)
+            return await provider.get_company_news(
+                symbol=symbol,
+                from_date=from_date,
+                to_date=to_date,
+                limit=limit,
+                offset=offset,
+                language=language,
+                category=category,
+            )
 
 
 news_service = NewsService()

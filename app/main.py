@@ -168,10 +168,27 @@ def _resolve_admin_static_dir() -> Path:
     return candidate  # return non-existing path so callers get 404
 
 
+def _safe_join_static_path(base: Path, requested: str) -> Path | None:
+    """Resolve a user path under base and reject traversal outside base."""
+    try:
+        resolved_base = base.resolve()
+        candidate = (resolved_base / requested).resolve()
+    except (OSError, ValueError):
+        return None
+    try:
+        candidate.relative_to(resolved_base)
+    except ValueError:
+        return None
+    return candidate
+
+
 @app.get("/admin/assets/{asset_path:path}", include_in_schema=False)
 async def serve_admin_asset(asset_path: str) -> Any:
     """Serve admin JS/CSS assets dynamically so volume-mount updates are picked up without restart."""
-    asset_file = _resolve_admin_static_dir() / "assets" / asset_path
+    asset_base = _resolve_admin_static_dir() / "assets"
+    asset_file = _safe_join_static_path(asset_base, asset_path)
+    if asset_file is None:
+        return JSONResponse(status_code=404, content={"detail": "Asset not found"})
     if asset_file.exists() and asset_file.is_file():
         return FileResponse(asset_file)
     return JSONResponse(status_code=404, content={"detail": "Asset not found"})
@@ -188,8 +205,10 @@ async def serve_admin_root() -> Any:
 @app.get("/admin/{full_path:path}", include_in_schema=False)
 async def serve_admin_spa(full_path: str) -> Any:
     static_dir = _resolve_admin_static_dir()
-    file_path = static_dir / full_path
-    if file_path.exists() and file_path.is_file():
+    file_path = _safe_join_static_path(static_dir, full_path)
+    if file_path is None:
+        return JSONResponse(status_code=404, content={"detail": "Asset not found"})
+    if file_path is not None and file_path.exists() and file_path.is_file():
         return FileResponse(file_path)
     index = _resolve_admin_static_dir() / "index.html"
     if index.exists():
@@ -220,6 +239,21 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
         "PROVIDER_CONNECTION_ERROR",
     ):
         status_code = 503
+
+    if status_code >= 500:
+        logger.error(
+            "AppError response (%s): %s",
+            exc.code,
+            exc.message,
+            extra={"details": exc.details},
+        )
+    else:
+        logger.warning(
+            "AppError response (%s): %s",
+            exc.code,
+            exc.message,
+            extra={"details": exc.details},
+        )
 
     return JSONResponse(
         status_code=status_code,

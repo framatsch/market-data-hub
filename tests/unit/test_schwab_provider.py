@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
 import time
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -535,6 +536,33 @@ async def test_close_removes_temp_token_file(provider: SchwabProvider, tmp_path:
 
     assert provider._temp_token_path is None
     assert not temp_token.exists()
+
+
+@pytest.mark.asyncio
+async def test_persist_token_if_changed_saves_updated_token(provider: SchwabProvider, tmp_path: Path):
+    temp_token = tmp_path / "schwab-token.json"
+    temp_token.write_text('{"access_token":"new"}', encoding="utf-8")
+    provider._temp_token_path = str(temp_token)
+    provider._last_token_mtime = 0
+
+    saved = {}
+
+    class FakeRepo:
+        async def save(self, provider_name: str, credential_name: str, value: str):
+            saved["provider"] = provider_name
+            saved["credential"] = credential_name
+            saved["value"] = value
+
+    set_admin_runtime(key_repository=cast(Any, FakeRepo()))
+    os.utime(temp_token, None)
+
+    await provider._persist_token_if_changed()
+
+    assert saved == {
+        "provider": "schwab",
+        "credential": "token_json",
+        "value": '{"access_token":"new"}',
+    }
 
 
 # ---------------------------------------------------------------------------

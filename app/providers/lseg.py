@@ -652,6 +652,15 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             logger.info(
                 f"LSEGProvider: market_data_type={market_data_type} is ignored; using historical summaries (daily)."
             )
+        return await asyncio.to_thread(
+            self._get_last_price_sync,
+            symbol,
+            market_data_type,
+        )
+
+    def _get_last_price_sync(
+        self, symbol: str, market_data_type: int | None = None
+    ) -> PriceQuote:
         # Check cache first
         cached = self._get_cached_quote(symbol)
         if cached:
@@ -706,6 +715,23 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             - Intraday intervals (1m, 5m, etc.) limited to ~20 trading days max
             - Very old intraday data (>2 years) may not be available; use daily intervals
         """
+        return await asyncio.to_thread(
+            self._get_historical_prices_sync,
+            symbol,
+            interval,
+            start,
+            end,
+            extended_hours,
+        )
+
+    def _get_historical_prices_sync(
+        self,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended_hours: bool = False,
+    ) -> list[PriceBar]:
         # Ensure start/end are timezone-aware (convert naive to UTC)
         if start.tzinfo is None:
             start = start.replace(tzinfo=UTC)
@@ -957,6 +983,28 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         category: str | None = None,
     ) -> list[NewsArticle]:
         """Get news articles for a company from LSEG."""
+        return await asyncio.to_thread(
+            self._get_company_news_sync,
+            symbol,
+            from_date,
+            to_date,
+            limit,
+            offset,
+            language,
+            category,
+        )
+
+    def _get_company_news_sync(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: str | None = None,
+    ) -> list[NewsArticle]:
+        _ = language
         try:
             # 1. Convert ticker to RIC
             ric = self._ticker_to_ric(symbol)

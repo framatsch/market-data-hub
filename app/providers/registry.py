@@ -16,6 +16,8 @@
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from typing import Any
 
 from app.admin.provider_config_repository import (
@@ -64,6 +66,9 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self._providers: dict[str, Any] = {}
         self._reload_lock = asyncio.Lock()
+        self._provider_locks: dict[str, asyncio.Lock] = {}
+        self._provider_inflight: dict[int, int] = {}
+        self._provider_drained: dict[int, asyncio.Event] = {}
         self.default_price_provider: str | None = None
         self.default_company_provider: str | None = None
         self.default_options_provider: str | None = None
@@ -160,6 +165,8 @@ class ProviderRegistry:
             except RuntimeError:
                 settings_repository = None
 
+        providers_to_close: list[tuple[str, object]] = []
+
         async with self._get_reload_lock():
             configs = {
                 config.provider_name: config
@@ -196,17 +203,21 @@ class ProviderRegistry:
                 if config.enabled and name in self.provider_classes
             }
 
-            for name in list(self._providers):
+            current_providers = dict(self._providers)
+            next_providers = dict(self._providers)
+
+            for name in list(next_providers):
                 if name not in enabled:
-                    await self._close_provider(name, self._providers.pop(name))
+                    provider = next_providers.pop(name)
+                    providers_to_close.append((name, provider))
 
             for name in enabled:
                 config = configs[name]
-                if name not in self._providers:
+                if name not in next_providers:
                     try:
                         provider = self.provider_classes[name]()
                         provider.name = name
-                        self._providers[name] = provider
+                        next_providers[name] = provider
                     except ImportError as exc:
                         logger.warning("Provider '%s' not available: %s", name, exc)
                         continue
@@ -215,11 +226,22 @@ class ProviderRegistry:
                             "Failed to initialize provider '%s': %s", name, exc
                         )
                         continue
-                self._apply_runtime_config(self._providers[name], config)
+                self._apply_runtime_config(next_providers[name], config)
+
+            for name, provider in current_providers.items():
+                replacement = next_providers.get(name)
+                if replacement is not None and replacement is not provider:
+                    providers_to_close.append((name, provider))
+
+            self._providers = next_providers
 
             self._apply_default_settings(system_settings)
 
+        for name, provider in providers_to_close:
+            await self._close_provider(name, provider)
+
     async def _close_provider(self, name: str, provider: object) -> None:
+        await self._await_provider_drained(provider)
         close = getattr(provider, "close", None)
         if close is None:
             return
@@ -246,6 +268,52 @@ class ProviderRegistry:
         unpause = getattr(self._providers.get(name), "unpause", None)
         if callable(unpause):
             unpause()
+
+    async def _await_provider_drained(self, provider: object) -> None:
+        provider_id = id(provider)
+        inflight = self._provider_inflight.get(provider_id, 0)
+        if inflight <= 0:
+            return
+
+        drained_event = self._provider_drained.get(provider_id)
+        if drained_event is None:
+            drained_event = asyncio.Event()
+            self._provider_drained[provider_id] = drained_event
+
+        try:
+            await asyncio.wait_for(drained_event.wait(), timeout=5)
+        except TimeoutError:
+            logger.warning(
+                "Timed out waiting for provider %s to drain %s in-flight operations",
+                getattr(provider, "name", provider.__class__.__name__),
+                inflight,
+            )
+
+    async def _acquire_provider(self, provider_name: str, base_class: type) -> Any:
+        provider_lock = self._provider_locks.setdefault(provider_name, asyncio.Lock())
+        async with provider_lock:
+            provider = self._providers.get(provider_name)
+            if not provider or not isinstance(provider, base_class):
+                raise InvalidProviderError(provider_name)
+
+            provider_id = id(provider)
+            self._provider_inflight[provider_id] = (
+                self._provider_inflight.get(provider_id, 0) + 1
+            )
+            return provider
+
+    def _release_provider(self, provider: object) -> None:
+        provider_id = id(provider)
+        inflight = self._provider_inflight.get(provider_id)
+        if inflight is None:
+            return
+        if inflight <= 1:
+            self._provider_inflight.pop(provider_id, None)
+            drained_event = self._provider_drained.pop(provider_id, None)
+            if drained_event is not None:
+                drained_event.set()
+            return
+        self._provider_inflight[provider_id] = inflight - 1
 
     def get_provider_instance(self, name: str) -> Any | None:
         return self._providers.get(name)
@@ -320,6 +388,90 @@ class ProviderRegistry:
         if not provider or not isinstance(provider, BaseNewsProvider):
             raise InvalidProviderError(provider_name)
         return provider
+
+    @asynccontextmanager
+    async def use_price_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BasePriceProvider]:
+        if name is None and self.default_price_provider is None:
+            raise AppError(
+                "No price provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_price_provider
+        if provider_name is None:
+            raise AppError(
+                "No price provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BasePriceProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
+
+    @asynccontextmanager
+    async def use_company_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BaseCompanyProvider]:
+        if name is None and self.default_company_provider is None:
+            raise AppError(
+                "No company data provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_company_provider
+        if provider_name is None:
+            raise AppError(
+                "No company data provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BaseCompanyProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
+
+    @asynccontextmanager
+    async def use_options_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BaseOptionsProvider]:
+        if name is None and self.default_options_provider is None:
+            raise AppError(
+                "No options provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_options_provider
+        if provider_name is None:
+            raise AppError(
+                "No options provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BaseOptionsProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
+
+    @asynccontextmanager
+    async def use_news_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BaseNewsProvider]:
+        if name is None and self.default_news_provider is None:
+            raise AppError(
+                "No news provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_news_provider
+        if provider_name is None:
+            raise AppError(
+                "No news provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BaseNewsProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
 
     async def shutdown(self) -> None:
         """Gracefully close all providers that expose a close() coroutine."""

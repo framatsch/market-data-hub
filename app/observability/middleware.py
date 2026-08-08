@@ -1,5 +1,6 @@
 import time
 from http import HTTPStatus
+from typing import Any
 
 import structlog
 from starlette.requests import Request
@@ -15,7 +16,16 @@ SKIP_AUDIT_PATH_PREFIXES = (
     "/redoc",
     "/openapi.json",
     "/admin",
+    "/api/admin/auth",
 )
+
+_AUDIT_REDACTED_KEYS = {
+    "value",
+    "token_json",
+    "api_key",
+    "app_secret",
+    "password",
+}
 
 
 class ObservabilityMiddleware:
@@ -38,8 +48,6 @@ class ObservabilityMiddleware:
 
         try:
             await self.app(scope, receive, send_wrapper)
-        except Exception:
-            raise
         finally:
             request = Request(scope)
             duration_seconds = time.perf_counter() - start
@@ -68,6 +76,8 @@ class ObservabilityMiddleware:
             return "news"
         if path.startswith("/health"):
             return "health"
+        if path.startswith("/api/admin"):
+            return "admin"
         if path.startswith("/admin"):
             return "admin"
         if path.startswith("/mcp"):
@@ -111,10 +121,18 @@ class ObservabilityMiddleware:
             method=request.method,
             path=self._route_pattern(request),
             provider=provider,
-            params=dict(request.query_params),
+            params=self._redact_params(request.query_params),
             status_code=status_code,
             duration_ms=round(duration_seconds * 1000, 2),
         )
+
+    @staticmethod
+    def _redact_params(query_params: Any) -> dict[str, str]:
+        params = dict(query_params)
+        for key in list(params):
+            if key.lower() in _AUDIT_REDACTED_KEYS:
+                params[key] = "[REDACTED]"
+        return params
 
     @staticmethod
     def _level_for_status(status_code: int) -> str:

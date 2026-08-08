@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactored LSEG provider (test connections now validate session only).
 - Updated CI/CD pipeline to use `devel` branch triggers and Docker GHCR tags.
 - Consolidated agent memory instructions and runtime configuration documentation.
+- Refactored service-layer provider access to use async context-managed registry usage paths, enabling in-flight tracking and safer provider reload/close behavior.
 
 ### Fixed
 - Fixed silent fallbacks for unsupported historical data intervals across all providers (LSEG, IBKR, Polygon). Requests for unknown intervals (e.g. `4h`) now correctly fail with a `ProviderError` (HTTP 400).
@@ -34,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed admin credential handling and log attribution.
 - Resolved integration test flakiness by using mock providers for MCP tests.
 - Cleaned up unused variables and linting errors across the codebase.
+- Hardened admin static asset serving against path traversal and malformed path inputs (including null-byte edge cases).
+- Changed admin credentials listing to metadata-only and added guarded credential reveal behavior with explicit validation, per-user rate limiting, and reveal audit context.
+- Moved LSEG quote/history/news blocking operations off the event loop via thread offloading and added regression coverage.
+- Improved provider registry reload safety with copy-on-write swap, deferred close semantics, and in-flight provider drain tracking.
+- Fixed Schwab token persistence/watcher robustness (correct repository import, typed watcher task lifecycle, and logged fallback behavior).
+- Fixed strict typing regressions and updated service tests for async context-manager based provider access.
 
 
 ## [1.0.0] - 2026-05-31

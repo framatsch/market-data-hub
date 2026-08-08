@@ -16,16 +16,16 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Literal
 
 import structlog
 
 from app.models.options import OptionChain, OptionQuote
-from app.providers.registry import get_registry
+from app.providers.registry import ProviderRegistry, get_registry
 
 
 class OptionsService:
-    def __init__(self, registry: Any = None) -> None:
+    def __init__(self, registry: ProviderRegistry | None = None) -> None:
         self.registry = registry or get_registry()
 
     async def get_option_chain(
@@ -38,16 +38,16 @@ class OptionsService:
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
     ) -> OptionChain:
-        provider = self.registry.get_options_provider(provider_name)
-        structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_option_chain(
-            symbol,
-            expiry,
-            min_strike=min_strike,
-            max_strike=max_strike,
-            right=right,
-            market_data_type=market_data_type,
-        )
+        async with self.registry.use_options_provider(provider_name) as provider:
+            structlog.contextvars.bind_contextvars(provider=provider.name)
+            return await provider.get_option_chain(
+                symbol,
+                expiry,
+                min_strike=min_strike,
+                max_strike=max_strike,
+                right=right,
+                market_data_type=market_data_type,
+            )
 
     async def get_option_quote(
         self,
@@ -56,11 +56,11 @@ class OptionsService:
         provider_name: str | None = None,
         market_data_type: int | None = None,
     ) -> OptionQuote:
-        provider = self.registry.get_options_provider(provider_name)
-        structlog.contextvars.bind_contextvars(provider=provider.name)
-        return await provider.get_option_quote(
-            symbol, option_id, market_data_type=market_data_type
-        )
+        async with self.registry.use_options_provider(provider_name) as provider:
+            structlog.contextvars.bind_contextvars(provider=provider.name)
+            return await provider.get_option_quote(
+                symbol, option_id, market_data_type=market_data_type
+            )
 
 
 options_service = OptionsService()

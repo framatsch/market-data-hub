@@ -47,6 +47,7 @@ def test_classify_endpoint_uses_fixed_labels():
     assert ObservabilityMiddleware._classify_endpoint("/companies/AAPL/news") == "news"
     assert ObservabilityMiddleware._classify_endpoint("/health") == "health"
     assert ObservabilityMiddleware._classify_endpoint("/admin/providers") == "admin"
+    assert ObservabilityMiddleware._classify_endpoint("/api/admin/providers") == "admin"
     assert ObservabilityMiddleware._classify_endpoint("/mcp/sse") == "mcp"
     assert ObservabilityMiddleware._classify_endpoint("/metrics") == "metrics"
     assert ObservabilityMiddleware._classify_endpoint("/unexpected/AAPL") == "other"
@@ -111,3 +112,21 @@ def test_health_and_metrics_are_not_audit_logged(client, capfd):
     assert client.get("/metrics").status_code == 200
 
     assert audit_lines(capfd.readouterr().out) == []
+
+
+def test_redact_params_hides_secret_like_query_keys():
+    redacted = ObservabilityMiddleware._redact_params(
+        {
+            "provider": "lseg",
+            "api_key": "abc123",
+            "token_json": "secret",
+            "value": "v",
+            "password": "pw",
+        }
+    )
+
+    assert redacted["provider"] == "lseg"
+    assert redacted["api_key"] == "[REDACTED]"
+    assert redacted["token_json"] == "[REDACTED]"
+    assert redacted["value"] == "[REDACTED]"
+    assert redacted["password"] == "[REDACTED]"

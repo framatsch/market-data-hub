@@ -28,6 +28,7 @@ from app.providers.base import (
     BasePriceProvider,
 )
 from app.providers.registry import registry
+from app.utils.errors import AppError
 from app.utils.secrets import unwrap_secret
 from app.utils.webhooks import validate_webhook_url
 
@@ -48,9 +49,12 @@ _SCHWAB_TOKEN_LIFETIME_DAYS = 7
 _SCHWAB_PENDING_STATE_TTL = timedelta(minutes=10)
 _SCHWAB_CALLBACK_ERROR_TTL = timedelta(minutes=5)
 _SCHWAB_CALLBACK_ERROR_KEY = "schwab_callback_error"
+_REVEAL_RATE_LIMIT_WINDOW_SECONDS = 60
+_REVEAL_RATE_LIMIT_MAX_CALLS = 10
 
 _schwab_pending_states: dict[str, tuple[Any, datetime]] = {}
 _schwab_callback_error: dict[str, tuple[str, datetime]] = {}
+_credential_reveal_calls: dict[str, list[datetime]] = {}
 
 
 class TokenExchangeRequest(BaseModel):
@@ -242,6 +246,23 @@ def _validate_credential(provider_name: str, credential_name: str) -> None:
         )
 
 
+def _enforce_reveal_rate_limit(user: str) -> None:
+    now = _utcnow()
+    window_start = now - timedelta(seconds=_REVEAL_RATE_LIMIT_WINDOW_SECONDS)
+    calls = [
+        timestamp
+        for timestamp in _credential_reveal_calls.get(user, [])
+        if timestamp >= window_start
+    ]
+    if len(calls) >= _REVEAL_RATE_LIMIT_MAX_CALLS:
+        raise HTTPException(
+            status_code=429,
+            detail="Credential reveal rate limit exceeded",
+        )
+    calls.append(now)
+    _credential_reveal_calls[user] = calls
+
+
 
 @router.get("/keys")
 async def list_admin_keys(_principal: PrincipalDep) -> list[dict[str, Any]]:
@@ -271,21 +292,42 @@ async def list_admin_credentials(_principal: PrincipalDep) -> list[dict[str, Any
     for provider_name, credentials in CREDENTIAL_ALLOWLIST.items():
         for credential_name in sorted(credentials):
             metadata = configured.get((provider_name, credential_name))
-            value = (
-                await key_repository.get(provider_name, credential_name)
-                if metadata is not None
-                else None
-            )
             response.append(
                 {
                     "provider": provider_name,
                     "credential_name": credential_name,
                     "set": metadata is not None,
-                    "value": value,
                     "updated_at": metadata.updated_at if metadata is not None else None,
                 }
             )
     return response
+
+
+@router.get("/credentials/{provider_name}/{credential_name}/reveal")
+async def reveal_admin_credential(
+    provider_name: str, credential_name: str, principal: PrincipalDep
+) -> dict[str, Any]:
+    _validate_credential(provider_name, credential_name)
+    _enforce_reveal_rate_limit(principal.user)
+    value = await get_key_repository().get(provider_name, credential_name)
+
+    logger.warning(
+        "Credential revealed",
+        extra={
+            "event": "credential_revealed",
+            "user": principal.user,
+            "provider": provider_name,
+            "credential": credential_name,
+            "set": value is not None,
+        },
+    )
+
+    return {
+        "provider": provider_name,
+        "credential_name": credential_name,
+        "value": value,
+        "set": value is not None,
+    }
 
 
 @router.put("/credentials/{provider_name}")
@@ -567,6 +609,8 @@ async def test_admin_provider_connection(
             timeout_result.message,
         )
         return timeout_result
+    except AppError:
+        raise
     except Exception as exc:
         logger.warning(
             "Connection test raised exception for provider=%s: %s",
@@ -628,8 +672,15 @@ async def _get_schwab_callback_url() -> str:
         url = (config.connection_config or {}).get("callback_url")
         if url and isinstance(url, str) and url.strip():
             return url.strip()
+    except RuntimeError:
+        logger.debug("Admin runtime not initialized while reading Schwab callback URL")
+    except ValueError:
+        logger.warning("Schwab provider config row missing; using fallback callback URL")
     except Exception:
-        pass
+        logger.warning(
+            "Unexpected error while resolving Schwab callback URL",
+            exc_info=True,
+        )
     return settings.SCHWAB_CALLBACK_URL
 
 

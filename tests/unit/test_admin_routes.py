@@ -12,6 +12,7 @@ from app.admin.runtime import get_provider_config_repository, set_admin_runtime
 from app.admin.settings_repository import SettingsRepository
 from app.api.routes_admin import router
 from app.config import settings
+from app.main import app as main_app
 from app.providers.schwab import SchwabProvider
 
 
@@ -24,6 +25,9 @@ def client(monkeypatch, tmp_path):
     config_repo = ProviderConfigRepository(db_path)
     settings_repo = SettingsRepository(db_path)
     set_admin_runtime(key_repository=key_repo, provider_config_repository=config_repo, settings_repository=settings_repo)
+    from app.api import routes_admin as routes_admin_module
+
+    routes_admin_module._credential_reveal_calls.clear()
 
     async def noop_reload(*args):
         return None
@@ -33,6 +37,7 @@ def client(monkeypatch, tmp_path):
     app.include_router(router)
     yield TestClient(app)
     set_admin_runtime()
+    routes_admin_module._credential_reveal_calls.clear()
 
 
 def test_keys_and_credentials_metadata_only(client) -> None:
@@ -48,7 +53,69 @@ def test_keys_and_credentials_metadata_only(client) -> None:
     body = credentials.json()
     slot = next(item for item in body if item["provider"] == "finnhub" and item["credential_name"] == "api_key")
     assert slot["set"] is True
-    assert slot["value"] == "secret-key"
+    assert "value" not in slot
+
+
+def test_reveal_admin_credential_returns_plaintext_value(client) -> None:
+    response = client.post(
+        "/api/admin/keys",
+        json={"provider_name": "finnhub", "credential_name": "api_key", "value": "secret-key"},
+    )
+    assert response.status_code == 200
+
+    revealed = client.get("/api/admin/credentials/finnhub/api_key/reveal")
+
+    assert revealed.status_code == 200
+    assert revealed.json() == {
+        "provider": "finnhub",
+        "credential_name": "api_key",
+        "value": "secret-key",
+        "set": True,
+    }
+
+
+def test_reveal_admin_credential_returns_set_false_when_missing(client) -> None:
+    revealed = client.get("/api/admin/credentials/finnhub/api_key/reveal")
+
+    assert revealed.status_code == 200
+    assert revealed.json() == {
+        "provider": "finnhub",
+        "credential_name": "api_key",
+        "value": None,
+        "set": False,
+    }
+
+
+def test_reveal_admin_credential_rejects_unknown_provider(client) -> None:
+    revealed = client.get("/api/admin/credentials/not-a-provider/api_key/reveal")
+
+    assert revealed.status_code == 400
+    assert revealed.json()["detail"] == "Unknown provider: not-a-provider"
+
+
+def test_reveal_admin_credential_rejects_unknown_credential(client) -> None:
+    revealed = client.get("/api/admin/credentials/finnhub/not-a-credential/reveal")
+
+    assert revealed.status_code == 400
+    assert (
+        revealed.json()["detail"]
+        == "Unknown credential: not-a-credential for provider finnhub"
+    )
+
+
+def test_reveal_admin_credential_rate_limit(client) -> None:
+    client.post(
+        "/api/admin/keys",
+        json={"provider_name": "finnhub", "credential_name": "api_key", "value": "secret-key"},
+    )
+
+    for _ in range(10):
+        response = client.get("/api/admin/credentials/finnhub/api_key/reveal")
+        assert response.status_code == 200
+
+    limited = client.get("/api/admin/credentials/finnhub/api_key/reveal")
+    assert limited.status_code == 429
+    assert limited.json()["detail"] == "Credential reveal rate limit exceeded"
 
 
 def test_unknown_credential_rejected(client) -> None:
@@ -308,6 +375,58 @@ def test_admin_test_connection_timeout_returns_503_payload(client, monkeypatch) 
     assert body["status_code"] == 503
     assert body["success"] is False
     assert body["message"] == "Connection test timeout"
+
+
+def test_admin_test_connection_propagates_apperror(client, monkeypatch) -> None:
+    from app.utils.errors import ProviderConnectionError
+
+    class BrokenProvider:
+        async def test_connection(self):
+            raise ProviderConnectionError("service unavailable")
+
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+    monkeypatch.setattr(registry, "get_provider_instance", lambda _: BrokenProvider())
+
+    with pytest.raises(ProviderConnectionError):
+        client.post("/api/admin/test-connection/ibkr")
+
+
+def test_admin_test_connection_propagates_apperror_in_real_app(monkeypatch, tmp_path) -> None:
+    from app.utils.errors import ProviderConnectionError
+
+    key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    db_path = str(tmp_path / "keys.db")
+    key_repo = KeyRepository(db_path, CryptoService(key))
+    config_repo = ProviderConfigRepository(db_path)
+    settings_repo = SettingsRepository(db_path)
+    set_admin_runtime(
+        key_repository=key_repo,
+        provider_config_repository=config_repo,
+        settings_repository=settings_repo,
+    )
+
+    class BrokenProvider:
+        async def test_connection(self):
+            raise ProviderConnectionError("service unavailable")
+
+    registry = __import__("app.api.routes_admin", fromlist=["registry"]).registry
+
+    async def noop_reload(*args):
+        return None
+
+    monkeypatch.setattr("app.api.routes_admin.registry.reload_from_config", noop_reload)
+    monkeypatch.setattr(registry, "get_provider_instance", lambda _: BrokenProvider())
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", False)
+
+    client = TestClient(main_app, raise_server_exceptions=False)
+    response = client.post("/api/admin/test-connection/ibkr")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"]["code"] == "PROVIDER_CONNECTION_ERROR"
+    assert body["error"]["message"] == "service unavailable"
+
+    set_admin_runtime()
 
 
 def test_list_admin_providers(client) -> None:
