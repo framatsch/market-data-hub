@@ -231,6 +231,12 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             details={"hint": "Configure schwab.token_json in admin credentials."},
         )
 
+    @staticmethod
+    def _read_token_file(path: str) -> str:
+        """Read the temp token file contents (runs in a worker thread)."""
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+
     async def _persist_token_if_changed(self) -> None:
         """Read the temp token file and persist to KeyRepository if it differs."""
         if not hasattr(self, "_temp_token_path") or not self._temp_token_path:
@@ -242,8 +248,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             last_mtime = getattr(self, "_last_token_mtime", 0)
             if mtime > last_mtime:
                 self._last_token_mtime = mtime
-                with open(self._temp_token_path, "r", encoding="utf-8") as f:
-                    new_token = f.read()
+                new_token = await asyncio.to_thread(
+                    self._read_token_file, self._temp_token_path
+                )
                 from app.admin.runtime import get_key_repository
 
                 await get_key_repository().save("schwab", "token_json", new_token)

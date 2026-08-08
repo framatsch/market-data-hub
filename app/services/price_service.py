@@ -20,7 +20,6 @@ import structlog
 
 from app.models.common import MarketStatus
 from app.models.price import PriceBar, PriceQuote
-
 from app.providers.registry import ProviderRegistry, get_registry
 
 
