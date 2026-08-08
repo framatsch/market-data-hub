@@ -83,12 +83,12 @@
 ## 11. Testing & Verification
 
 - [x] 11.1 Run `uv run ruff check app/` — ensure no lint errors in backend changes
-- [ ] 11.2 Run `uv run pytest --maxfail=1 --disable-warnings` — ensure all existing tests pass
-- [ ] 11.3 Manual smoke test: configure LSEG API key via Providers → expand LSEG → Connection / Auth tab → enter key → Save
-- [ ] 11.4 Manual smoke test: configure IBKR host/port/client_id via Providers → expand IBKR → Connection / Auth tab → all 6 fields pre-filled → edit and Save
-- [ ] 11.5 Manual smoke test: Schwab Re-authorize — click "Re-authorize", complete OAuth in new tab, verify polling detects `status: "active"` and shows success snackbar
-- [ ] 11.6 Manual smoke test: Schwab Re-authorize error — use invalid credentials, verify polling detects `status: "callback_error"` and shows error snackbar (no 60s wait)
-- [ ] 11.7 Manual smoke test: Dashboard Schwab alert "Re-authorize" → navigates to `/admin/providers?expand=schwab` → Schwab accordion auto-expanded with "Connection / Auth" tab active
-- [ ] 11.8 Manual smoke test: Provider filter chips — verify each filter shows correct subset; verify IBKR "Not Configured" triggers on `account_id=DU123456`
-- [ ] 11.9 Verify navigation shows exactly 3 items (Dashboard, Providers, Settings)
-- [ ] 11.10 Verify `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts` redirect or 404
+- [x] 11.2 Run `uv run pytest --maxfail=1 --disable-warnings` — ensure all existing tests pass
+- [x] 11.3 Manual smoke test: configure LSEG API key via Providers → expand LSEG → Connection / Auth tab → enter key → Save
+- [x] 11.4 Manual smoke test: configure IBKR host/port/client_id via Providers → expand IBKR → Connection / Auth tab → all 6 fields pre-filled → edit and Save
+- [x] 11.5 Manual smoke test: Schwab Re-authorize — click "Re-authorize", complete OAuth in new tab, verify polling detects `status: "active"` and shows success snackbar
+- [x] 11.6 Manual smoke test: Schwab Re-authorize error — use invalid credentials, verify polling detects `status: "callback_error"` and shows error snackbar (no 60s wait)
+- [x] 11.7 Manual smoke test: Dashboard Schwab alert "Re-authorize" → navigates to `/admin/providers?expand=schwab` → Schwab accordion auto-expanded with "Connection / Auth" tab active
+- [x] 11.8 Manual smoke test: Provider filter chips — verify each filter shows correct subset; verify IBKR "Not Configured" triggers on `account_id=DU123456`
+- [x] 11.9 Verify navigation shows exactly 3 items (Dashboard, Providers, Settings)
+- [x] 11.10 Verify `/admin/credentials`, `/admin/schwab-auth`, `/admin/alerts` redirect or 404

@@ -64,7 +64,7 @@ interface CredentialMeta {
   provider: string;
   credential_name: string;
   set: boolean;
-  masked_value: string | null;
+  value: string | null;
   updated_at: string | null;
 }
 

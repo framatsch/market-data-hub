@@ -242,11 +242,6 @@ def _validate_credential(provider_name: str, credential_name: str) -> None:
         )
 
 
-def _mask_credential_value(value: str) -> str:
-    if len(value) <= 8:
-        return "*" * len(value)
-    return f"{value[:4]}{'*' * 4}{value[-4:]}"
-
 
 @router.get("/keys")
 async def list_admin_keys(_principal: PrincipalDep) -> list[dict[str, Any]]:
@@ -286,31 +281,11 @@ async def list_admin_credentials(_principal: PrincipalDep) -> list[dict[str, Any
                     "provider": provider_name,
                     "credential_name": credential_name,
                     "set": metadata is not None,
-                    "masked_value": _mask_credential_value(value)
-                    if value is not None
-                    else None,
+                    "value": value,
                     "updated_at": metadata.updated_at if metadata is not None else None,
                 }
             )
     return response
-
-
-@router.get("/credentials/{provider_name}/{credential_name}")
-async def reveal_admin_credential(
-    provider_name: str,
-    credential_name: str,
-    _principal: PrincipalDep,
-) -> dict[str, str]:
-    _validate_credential(provider_name, credential_name)
-    value = await get_key_repository().get(provider_name, credential_name)
-    if value is None:
-        raise HTTPException(status_code=404, detail="Credential is not configured")
-    logger.warning(
-        "Admin credential revealed for provider=%s credential=%s",
-        provider_name,
-        credential_name,
-    )
-    return {"value": value}
 
 
 @router.put("/credentials/{provider_name}")
@@ -716,45 +691,6 @@ async def save_schwab_token_manually(
     expires_at = (_utcnow() + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat()
     return {"status": "ok", "token_expires_at": expires_at}
 
-
-@router.post("/schwab/auth/update-tokens")
-async def schwab_update_tokens(
-    _principal: PrincipalDep, force_refresh_token: bool = True
-) -> dict[str, Any]:
-    """Call client.update_tokens(force_refresh_token=...) on the running Schwab client.
-
-    Can be used to manually renew the refresh token, for example on weekends,
-    before it expires after 7 days.
-    """
-    from app.providers.registry import registry as _registry
-
-    provider = _registry.get_provider_instance("schwab")
-    if provider is None:
-        raise HTTPException(status_code=404, detail="Schwab provider is not loaded")
-
-    schwab_provider = provider
-    client = getattr(schwab_provider, "_client", None)
-    if client is None:
-        raise HTTPException(
-            status_code=503, detail="Schwab client is not initialized; connect first"
-        )
-
-    try:
-        update_fn = getattr(client, "update_tokens", None)
-        if update_fn is None:
-            raise HTTPException(
-                status_code=503,
-                detail="schwab-py client does not support update_tokens()",
-            )
-        await asyncio.to_thread(update_fn, force_refresh_token=force_refresh_token)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"update_tokens failed: {exc}"
-        ) from exc
-
-    return {"status": "ok", "force_refresh_token": force_refresh_token}
 
 
 @router.get("/schwab/auth/url")

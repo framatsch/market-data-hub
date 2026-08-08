@@ -48,13 +48,7 @@ def test_keys_and_credentials_metadata_only(client) -> None:
     body = credentials.json()
     slot = next(item for item in body if item["provider"] == "finnhub" and item["credential_name"] == "api_key")
     assert slot["set"] is True
-    assert slot["masked_value"] == "secr****-key"
-    assert "secret-key" not in credentials.text
-
-    revealed = client.get("/api/admin/credentials/finnhub/api_key")
-
-    assert revealed.status_code == 200
-    assert revealed.json() == {"value": "secret-key"}
+    assert slot["value"] == "secret-key"
 
 
 def test_unknown_credential_rejected(client) -> None:

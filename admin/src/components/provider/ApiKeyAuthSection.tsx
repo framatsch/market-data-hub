@@ -20,7 +20,7 @@ interface CredentialMeta {
   provider: string;
   credential_name: string;
   set: boolean;
-  masked_value: string | null;
+  value: string | null;
   updated_at: string | null;
 }
 
@@ -39,7 +39,7 @@ export function ApiKeyAuthSection({
 
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
-  const [revealingCredentials, setRevealingCredentials] = useState<Record<string, boolean>>({});
+
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
@@ -52,49 +52,15 @@ export function ApiKeyAuthSection({
   const getFieldValue = (cred: CredentialMeta) => {
     const editedValue = formValues[cred.credential_name];
     if (editedValue !== undefined) return editedValue;
-    return cred.set ? cred.masked_value || '' : '';
+    return cred.value || '';
   };
-
-  const isShowingMaskedValue = (cred: CredentialMeta) => (
-    cred.set && formValues[cred.credential_name] === undefined && !showPasswords[cred.credential_name]
-  );
 
   const handleInputChange = (name: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleInputFocus = (cred: CredentialMeta) => {
-    if (!isShowingMaskedValue(cred)) return;
-    setFormValues((prev) => ({ ...prev, [cred.credential_name]: '' }));
-  };
-
-  const handleToggleVisibility = async (cred: CredentialMeta) => {
-    const isVisible = showPasswords[cred.credential_name];
-    if (isVisible) {
-      setShowPasswords((prev) => ({ ...prev, [cred.credential_name]: false }));
-      return;
-    }
-
-    // Fetch the stored value whenever the field is either empty OR contains
-    // only locally-typed (unsaved) text — i.e. there is a saved credential but
-    // the user hasn't explicitly loaded it yet.  We track this with a separate
-    // flag so that typing in the field doesn't prevent revealing the real value.
-    const alreadyRevealed = revealingCredentials[cred.credential_name + '_loaded'];
-    if (cred.set && !alreadyRevealed) {
-      setRevealingCredentials((prev) => ({ ...prev, [cred.credential_name]: true }));
-      try {
-        const res = await fetcher(`/api/admin/credentials/${providerName}/${cred.credential_name}`) as { value: string };
-        setFormValues((prev) => ({ ...prev, [cred.credential_name]: res.value }));
-        setRevealingCredentials((prev) => ({ ...prev, [cred.credential_name + '_loaded']: true }));
-      } catch (err: any) {
-        setSnackbar({ open: true, message: `Failed to reveal credential: ${err.message}`, severity: 'error' });
-        return;
-      } finally {
-        setRevealingCredentials((prev) => ({ ...prev, [cred.credential_name]: false }));
-      }
-    }
-
-    setShowPasswords((prev) => ({ ...prev, [cred.credential_name]: true }));
+  const handleToggleVisibility = (cred: CredentialMeta) => {
+    setShowPasswords((prev) => ({ ...prev, [cred.credential_name]: !prev[cred.credential_name] }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -119,10 +85,7 @@ export function ApiKeyAuthSection({
         body: JSON.stringify(payload),
       });
       setFormValues({});
-      // Reset visibility and loaded-flags so fields go back to masked placeholder
-      // and the next reveal fetches the freshly saved value from the server.
       setShowPasswords({});
-      setRevealingCredentials({});
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
       setSnackbar({ open: true, message: 'Credentials saved', severity: 'success' });
     } catch (err: any) {
@@ -163,19 +126,17 @@ export function ApiKeyAuthSection({
                 <TextField
                   fullWidth
                   label={cred.credential_name}
-                  type={isShowingMaskedValue(cred) || showPasswords[cred.credential_name] ? 'text' : 'password'}
+                  type={showPasswords[cred.credential_name] ? 'text' : 'password'}
                   value={getFieldValue(cred)}
                   onChange={(e) => handleInputChange(cred.credential_name, e.target.value)}
-                  onFocus={() => handleInputFocus(cred)}
                   size="small"
-                  placeholder={cred.set ? cred.masked_value || 'Configured' : 'Not set'}
+                  placeholder={cred.set ? 'Configured' : 'Not set'}
                   slotProps={{
                     input: {
                       endAdornment: (
                         <InputAdornment position="end">
                           <IconButton
                             onClick={() => handleToggleVisibility(cred)}
-                            disabled={revealingCredentials[cred.credential_name]}
                             edge="end"
                             size="small"
                           >

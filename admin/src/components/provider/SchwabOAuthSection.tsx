@@ -119,24 +119,6 @@ export function SchwabOAuthSection() {
       setSnackbar({ open: true, message: `Token Error: ${err.message}`, severity: 'error' }),
   });
 
-  const updateTokensMutation = useMutation({
-    mutationFn: (forceRefresh: boolean) =>
-      fetcher(
-        `/api/admin/schwab/auth/update-tokens?force_refresh_token=${forceRefresh}`,
-        { method: 'POST' }
-      ),
-    onSuccess: (_data, forceRefresh) =>
-      setSnackbar({
-        open: true,
-        message: forceRefresh
-          ? 'Refresh Token renewed'
-          : 'Access Token renewed',
-        severity: 'success',
-      }),
-    onError: (err: any) =>
-      setSnackbar({ open: true, message: `update_tokens error: ${err.message}`, severity: 'error' }),
-  });
-
   // --- OAuth-Redirect flow ---
   const handleReauthorize = async () => {
     try {
@@ -323,38 +305,6 @@ export function SchwabOAuthSection() {
             </Alert>
           )}
         </Box>
-      )}
-
-      {/* ── Token manuell erneuern ── */}
-      {status === 'active' && (
-        <>
-          <Divider sx={{ my: 2 }} />
-          <Typography variant="subtitle2" gutterBottom>
-            Renew Token
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Renews the Refresh Token manually — recommended on weekends to keep it valid during the week.
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => updateTokensMutation.mutate(true)}
-              disabled={updateTokensMutation.isPending}
-            >
-              {updateTokensMutation.isPending ? <CircularProgress size={16} /> : 'Renew Refresh Token'}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              color="secondary"
-              onClick={() => updateTokensMutation.mutate(false)}
-              disabled={updateTokensMutation.isPending}
-            >
-              Renew Access Token
-            </Button>
-          </Box>
-        </>
       )}
 
       <Snackbar

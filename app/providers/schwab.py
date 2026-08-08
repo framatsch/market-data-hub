@@ -215,6 +215,37 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             details={"hint": "Configure schwab.token_json in admin credentials."},
         )
 
+    async def _persist_token_if_changed(self) -> None:
+        """Read the temp token file and persist to KeyRepository if it differs."""
+        if not hasattr(self, "_temp_token_path") or not self._temp_token_path:
+            return
+        try:
+            if not os.path.exists(self._temp_token_path):
+                return
+            mtime = os.path.getmtime(self._temp_token_path)
+            last_mtime = getattr(self, "_last_token_mtime", 0)
+            if mtime > last_mtime:
+                self._last_token_mtime = mtime
+                with open(self._temp_token_path, "r", encoding="utf-8") as f:
+                    new_token = f.read()
+                from app.admin.key_repository import get_key_repository
+                await get_key_repository().save("schwab", "token_json", new_token)
+                logger.info("Schwab token update detected and persisted to DB.")
+        except Exception as e:
+            logger.error(f"Error persisting Schwab token: {e}")
+
+    def _start_token_watcher(self) -> None:
+        """Start a background task to watch for token refreshes."""
+        if hasattr(self, "_token_watcher_task") and not self._token_watcher_task.done():
+            return
+
+        async def _watch():
+            while not self._paused and self._client is not None:
+                await asyncio.sleep(60)
+                await self._persist_token_if_changed()
+
+        self._token_watcher_task = asyncio.create_task(_watch())
+
     async def _get_client(self) -> Any:
         if self._paused:
             raise ProviderConnectionError(
@@ -280,6 +311,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                     "Failed to authenticate with Schwab. Re-authorize through the admin UI.",
                     details={"hint": f"Auth error: {type(exc).__name__}"},
                 ) from exc
+
+            # Persist immediately in case force_refresh updated the token
+            await self._persist_token_if_changed()
+            self._start_token_watcher()
 
         return self._client
 
@@ -912,6 +947,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
     async def close(self) -> None:
         """Gracefully close the underlying schwab-py HTTP session."""
+        if hasattr(self, "_token_watcher_task"):
+            self._token_watcher_task.cancel()
+            try:
+                await self._token_watcher_task
+            except asyncio.CancelledError:
+                pass
+
         async with self._get_client_lock():
             try:
                 if self._client is None:
