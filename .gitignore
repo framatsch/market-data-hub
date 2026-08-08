@@ -23,3 +23,4 @@ admin/node_modules/
 .engram/
 keys.db
 paseo.json
+tmp
