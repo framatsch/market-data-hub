@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for secure provider credentials storage via `keys.db` (including a generation script).
 - Remote MCP connection support (e.g., for Claude integration) and provider overrides.
 - **Regular Trading Hours (RTH):** Added `extended_hours` query parameter (default: `false`) for historical prices. Intraday intervals now automatically filter out pre/after-market data for IBKR, Polygon, and LSEG by default.
+- Auto-sync background token watcher for Schwab OAuth integration.
 
 ### Changed
 - **Security:** Moved all provider API keys and credentials (including Finnhub) to the secure `keys.db`, removing them from environment variables.
-- Consolidated provider admin UI and added favicons.
+- Consolidated provider admin UI, integrating Schwab OAuth settings directly into `routes_admin.py`.
+- Refactored Admin UI credential masking to use native browser password fields and cleartext backend transmission, removing complex "fetch-on-demand" logic.
 - Gated auto-reload functionality strictly behind `APP_ENV=dev` and `RELOAD=true`.
 - Refactored LSEG provider (test connections now validate session only).
 - Updated CI/CD pipeline to use `devel` branch triggers and Docker GHCR tags.
