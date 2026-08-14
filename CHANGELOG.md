@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-14
+
 ### Fixed
 - **API/MCP:** Fix service discovery on Kubernetes by adding `proxy_headers=True` to Uvicorn, ensuring `url_for` generates the correct external URL behind an Ingress.
 
