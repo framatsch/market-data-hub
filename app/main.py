@@ -292,4 +292,6 @@ if __name__ == "__main__":
         reload=reload_enabled,
         log_level=settings.LOG_LEVEL.lower(),
         log_config=get_uvicorn_log_config(settings.LOG_LEVEL),
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )
