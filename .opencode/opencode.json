@@ -1,10 +1,18 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "lsp": true,
   "permission": {
     "*": "allow",
     "external_directory": "deny"
   },
-  "plugin": [
-    ".opencode/plugins/graphify.js"
-  ]
+  "compaction": {
+    "auto": false,
+    "prune": false
+  },
+  "mcp": {
+    "serena": {
+      "type": "remote",
+      "url": "http://localhost:9121/mcp"
+    }
+  }
 }
