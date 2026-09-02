@@ -24,7 +24,7 @@ import {
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { fetcher } from '../lib/api';
-import type { Provider } from '../types';
+import type { Provider, CredentialMetadata } from '../types';
 import { ProviderDetailsPanel } from '../components/provider/ProviderDetailsPanel';
 import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
 import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
@@ -32,15 +32,7 @@ import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
 
 type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';
 
-interface CredentialMeta {
-  provider: string;
-  credential_name: string;
-  set: boolean;
-  value: string | null;
-  updated_at: string | null;
-}
-
-function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMeta[] | undefined) {
+function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMetadata[] | undefined) {
   if (activeFilters.has('all')) return providers;
 
   return providers.filter(provider => {
@@ -110,7 +102,7 @@ export default function ProvidersPage() {
     queryFn: () => fetcher('/api/admin/providers'),
   });
 
-  const credentialsQuery = useQuery<CredentialMeta[]>({
+  const credentialsQuery = useQuery<CredentialMetadata[]>({
     queryKey: ['credentials'],
     queryFn: () => fetcher('/api/admin/credentials'),
   });
