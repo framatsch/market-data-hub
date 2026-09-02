@@ -24,7 +24,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { fetcher } from '../lib/api';
-import type { Provider, SchwabAuthStatus } from '../types';
+import type { Provider, SchwabAuthStatus, CredentialMetadata } from '../types';
 import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
 import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
 import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
@@ -60,15 +60,7 @@ function capabilityLabel(capability: string) {
 
 type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';
 
-interface CredentialMeta {
-  provider: string;
-  credential_name: string;
-  set: boolean;
-  value: string | null;
-  updated_at: string | null;
-}
-
-function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMeta[] | undefined) {
+function filterProviders(providers: Provider[], activeFilters: Set<FilterType>, credentials: CredentialMetadata[] | undefined) {
   if (activeFilters.has('all')) return providers;
 
   return providers.filter(provider => {
@@ -371,7 +363,7 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
 
-  const credentialsQuery = useQuery<CredentialMeta[]>({
+  const credentialsQuery = useQuery<CredentialMetadata[]>({
     queryKey: ['credentials'],
     queryFn: () => fetcher('/api/admin/credentials'),
   });

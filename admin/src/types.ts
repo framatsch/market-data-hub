@@ -48,11 +48,24 @@ export interface ProviderConfig {
   connection_config?: Record<string, any>;
 }
 
+/**
+ * Shape returned by GET /api/admin/credentials (routes_admin.py::list_admin_credentials).
+ * Metadata only — the plaintext value is never included here. Use
+ * GET /api/admin/credentials/{provider}/{credential}/reveal to obtain it.
+ */
 export interface CredentialMetadata {
-  provider_name: string;
+  provider: string;
   credential_name: string;
   set: boolean;
-  updated_at?: string;
+  updated_at: string | null;
+}
+
+/** Shape returned by GET /api/admin/credentials/{provider}/{credential}/reveal. */
+export interface CredentialReveal {
+  provider: string;
+  credential_name: string;
+  value: string | null;
+  set: boolean;
 }
 
 export interface ConnectionTestResult {

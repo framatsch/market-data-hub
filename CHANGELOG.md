@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-09-02
+
+### Fixed
+- **Admin UI:** Configured provider credentials rendered as empty input fields instead of masked values. Two changes in 1.1.1 landed four hours apart and were never reconciled: `22aff53` made the frontend read a cleartext `value` field from `GET /api/admin/credentials`, then `2889502` hardened that endpoint back to metadata-only without touching any frontend file. The leftover `cred.value` was always `undefined` and silently collapsed to `''` via `|| ''`. Configured secrets now render as a mask, and the visibility toggle fetches plaintext on demand through the already-existing rate-limited, audit-logged `/api/admin/credentials/{provider}/{credential}/reveal` endpoint — which the frontend had never called. This supersedes the "cleartext backend transmission" approach described in the 1.1.1 notes below; the metadata-only backend posture is retained unchanged.
+
+### Changed
+- Consolidated four drifting copies of the credential TypeScript type into a single `CredentialMetadata` in `admin/src/types.ts`, corrected `provider_name` → `provider` to match the actual API response, and removed the phantom `value` field that TypeScript could not catch because `fetcher()` results are unvalidated type assertions. Added `CredentialReveal` for the reveal endpoint.
+
+## [1.1.1] - 2026-08-14
+
+### Fixed
+- **API/MCP:** Fix service discovery on Kubernetes by adding `proxy_headers=True` to Uvicorn, ensuring `url_for` generates the correct external URL behind an Ingress.
+
 ### Added
 - Admin Settings UI and Backend API (including provider test-connection endpoints and capabilities display).
 - News service integration.

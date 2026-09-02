@@ -15,14 +15,10 @@ import {
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { fetcher } from '../../lib/api';
+import type { CredentialMetadata, CredentialReveal } from '../../types';
 
-interface CredentialMeta {
-  provider: string;
-  credential_name: string;
-  set: boolean;
-  value: string | null;
-  updated_at: string | null;
-}
+/** Rendered in place of a configured-but-unrevealed secret. */
+const MASK = '\u2022'.repeat(12);
 
 export function ApiKeyAuthSection({
   providerName,
@@ -32,13 +28,16 @@ export function ApiKeyAuthSection({
   visibleCredentials?: string[];
 }) {
   const queryClient = useQueryClient();
-  const credentialsQuery = useQuery<CredentialMeta[]>({
+  const credentialsQuery = useQuery<CredentialMetadata[]>({
     queryKey: ['credentials'],
     queryFn: () => fetcher('/api/admin/credentials'),
   });
 
   const [formValues, setFormValues] = useState<Record<string, string>>({});
-  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
+  // Plaintext fetched on demand via the audit-logged /reveal endpoint.
+  // Never populated by the list endpoint, which returns metadata only.
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [revealing, setRevealing] = useState<Record<string, boolean>>({});
 
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -49,18 +48,75 @@ export function ApiKeyAuthSection({
     (c) => c.provider === providerName && (!visibleCredentials || visibleCredentials.includes(c.credential_name))
   ) || [];
 
-  const getFieldValue = (cred: CredentialMeta) => {
+  // Precedence: unsaved edit > revealed plaintext > mask (configured) > empty (not set).
+  const getFieldValue = (cred: CredentialMetadata) => {
     const editedValue = formValues[cred.credential_name];
     if (editedValue !== undefined) return editedValue;
-    return cred.value || '';
+    const revealedValue = revealed[cred.credential_name];
+    if (revealedValue !== undefined) return revealedValue;
+    return cred.set ? MASK : '';
   };
+
+  // The mask is a placeholder, not a real value — typing must replace it, not append.
+  const isMasked = (cred: CredentialMetadata) =>
+    formValues[cred.credential_name] === undefined &&
+    revealed[cred.credential_name] === undefined &&
+    cred.set;
 
   const handleInputChange = (name: string, value: string) => {
     setFormValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleToggleVisibility = (cred: CredentialMeta) => {
-    setShowPasswords((prev) => ({ ...prev, [cred.credential_name]: !prev[cred.credential_name] }));
+  const handleFocus = (cred: CredentialMetadata) => {
+    if (isMasked(cred)) {
+      setFormValues((prev) => ({ ...prev, [cred.credential_name]: '' }));
+    }
+  };
+
+  // Drop an empty edit on blur so the field falls back to the mask instead of
+  // looking like an unconfigured credential.
+  const handleBlur = (cred: CredentialMetadata) => {
+    if (formValues[cred.credential_name] === '') {
+      setFormValues((prev) => {
+        const next = { ...prev };
+        delete next[cred.credential_name];
+        return next;
+      });
+    }
+  };
+
+  const handleToggleVisibility = async (cred: CredentialMetadata) => {
+    const name = cred.credential_name;
+
+    // Already showing plaintext — hide it and drop the cache so the next
+    // reveal produces a fresh audit-log entry.
+    if (revealed[name] !== undefined) {
+      setRevealed((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      return;
+    }
+
+    if (revealing[name]) return;
+
+    setRevealing((prev) => ({ ...prev, [name]: true }));
+    try {
+      const res = await fetcher<CredentialReveal>(
+        `/api/admin/credentials/${cred.provider}/${name}/reveal`
+      );
+      if (res.value === null) {
+        setSnackbar({ open: true, message: `${name} is not configured`, severity: 'error' });
+        return;
+      }
+      setRevealed((prev) => ({ ...prev, [name]: res.value as string }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSnackbar({ open: true, message: `Failed to reveal ${name}: ${message}`, severity: 'error' });
+    } finally {
+      setRevealing((prev) => ({ ...prev, [name]: false }));
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -85,7 +141,7 @@ export function ApiKeyAuthSection({
         body: JSON.stringify(payload),
       });
       setFormValues({});
-      setShowPasswords({});
+      setRevealed({});
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
       setSnackbar({ open: true, message: 'Credentials saved', severity: 'success' });
     } catch (err: any) {
@@ -126,10 +182,13 @@ export function ApiKeyAuthSection({
                 <TextField
                   fullWidth
                   label={cred.credential_name}
-                  type={showPasswords[cred.credential_name] ? 'text' : 'password'}
+                  type={revealed[cred.credential_name] !== undefined ? 'text' : 'password'}
                   value={getFieldValue(cred)}
                   onChange={(e) => handleInputChange(cred.credential_name, e.target.value)}
+                  onFocus={() => handleFocus(cred)}
+                  onBlur={() => handleBlur(cred)}
                   size="small"
+                  autoComplete="new-password"
                   placeholder={cred.set ? 'Configured' : 'Not set'}
                   slotProps={{
                     input: {
@@ -139,8 +198,20 @@ export function ApiKeyAuthSection({
                             onClick={() => handleToggleVisibility(cred)}
                             edge="end"
                             size="small"
+                            disabled={!cred.set || revealing[cred.credential_name]}
+                            aria-label={
+                              revealed[cred.credential_name] !== undefined
+                                ? `Hide ${cred.credential_name}`
+                                : `Reveal ${cred.credential_name}`
+                            }
                           >
-                            {showPasswords[cred.credential_name] ? <VisibilityOff /> : <Visibility />}
+                            {revealing[cred.credential_name] ? (
+                              <CircularProgress size={18} />
+                            ) : revealed[cred.credential_name] !== undefined ? (
+                              <VisibilityOff />
+                            ) : (
+                              <Visibility />
+                            )}
                           </IconButton>
                         </InputAdornment>
                       ),
