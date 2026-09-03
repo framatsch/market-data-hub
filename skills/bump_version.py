@@ -118,9 +118,11 @@ def main() -> None:
     run_cmd(["git", "tag", "-a", f"v{new_version}", "-m", f"v{new_version}"])
 
     print(f"\n✅ Successfully bumped version to v{new_version} and created local tag.")
-    print("To push the changes and trigger the release CI pipeline, run:")
-    print("  git push origin main")
-    print(f"  git push origin v{new_version}")
+    print("\n--- Pushing to GitHub and Creating Release ---")
+    run_cmd(["git", "push", "origin", "main"])
+    run_cmd(["git", "push", "origin", f"v{new_version}"])
+    run_cmd(["gh", "release", "create", f"v{new_version}", "--title", f"v{new_version}", "--generate-notes"])
+    print(f"\n🎉 Release v{new_version} published! Discord notification should trigger shortly.")
 
 
 if __name__ == "__main__":
