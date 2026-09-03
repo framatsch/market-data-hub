@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.3] - 2026-09-03
 
+### Changed
+- **Config:** Implemented dynamic versioning for the UI and API. The frontend now reads its version directly from `package.json`, and the Python backend (FastAPI and MCP server) reads it directly from `pyproject.toml` via `tomllib`.
+- **Release:** Automated the `bump_version.py` skill to seamlessly handle `git push`, tag pushing, and `gh release create` to trigger Discord notifications automatically.
+
 ## [1.1.2] - 2026-09-02
 
 ### Fixed
