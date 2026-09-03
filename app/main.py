@@ -33,7 +33,7 @@ from app.api import (
     routes_prices,
     routes_ws,
 )
-from app.config import settings
+from app.config import APP_VERSION, settings
 from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
 from app.observability.middleware import ObservabilityMiddleware
@@ -108,7 +108,7 @@ ACTIVE PROVIDERS:
 app = FastAPI(
     title=settings.APP_NAME,
     description="Real-time market data aggregation from IBKR, LSEG, and Finnhub",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 

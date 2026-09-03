@@ -18,6 +18,7 @@ import {
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import GitHubIcon from '@mui/icons-material/GitHub';
+import packageJson from '../../package.json';
 import Sidebar from './Sidebar';
 
 const drawerWidth = 240;
@@ -169,7 +170,7 @@ export default function AdminLayout() {
               Market Data Hub Admin
             </Typography>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-              Version 1.0.0
+              Version {packageJson.version}
             </Typography>
             <Typography variant="body2" sx={{ mt: 2, mb: 3, px: 2 }}>
               FastAPI data service and administration panel for real-time and historical market data.

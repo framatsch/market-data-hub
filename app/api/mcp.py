@@ -36,6 +36,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app.config import APP_VERSION
 from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
 from app.services.options_service import OptionsService
@@ -229,7 +230,7 @@ async def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any] | Non
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "market-data-hub", "version": "1.0.0"},
+            "serverInfo": {"name": "market-data-hub", "version": APP_VERSION},
         }
 
     if method == "notifications/initialized":

@@ -54,6 +54,10 @@ def update_version(new_version: str) -> None:
     with open(pyproject_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
+    # Update frontend version
+    print("\n--- Updating Admin UI Version ---")
+    subprocess.run(["npm", "version", new_version, "--no-git-tag-version", "--allow-same-version"], cwd="admin", check=True)
+
 
 def update_changelog(new_version: str) -> None:
     changelog_path = Path("CHANGELOG.md")
@@ -108,7 +112,7 @@ def main() -> None:
 
     # 4. Commit and Tag
     print("\n--- Creating Git Commit and Tag ---")
-    run_cmd(["git", "add", "pyproject.toml", "CHANGELOG.md"])
+    run_cmd(["git", "add", "pyproject.toml", "CHANGELOG.md", "admin/package.json", "admin/package-lock.json"])
     commit_msg = f"⚙️ config: bump version to {new_version}"
     run_cmd(["git", "commit", "-m", commit_msg])
     run_cmd(["git", "tag", "-a", f"v{new_version}", "-m", f"v{new_version}"])
