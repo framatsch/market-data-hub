@@ -1,4 +1,9 @@
-## ADDED Requirements
+# api-key-auth-ui Specification
+
+## Purpose
+Define how API-key based provider credentials (Finnhub, Polygon, LSEG, Schwab app credentials) are listed, edited, and shown with their configuration status in the provider Connection / Auth tab of the Admin UI.
+
+## Requirements
 
 ### Requirement: API Key List in Provider Connection / Auth Tab
 The `ApiKeyAuthSection` component SHALL render a vertically-stacked list of credential fields for the given provider. This component SHALL be used for finnhub, polygon, lseg, and Schwab. It SHALL NOT be used for IBKR (which uses `IbkrConnectionSection`).

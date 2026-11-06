@@ -1,4 +1,9 @@
-## ADDED Requirements
+# provider-details-ui Specification
+
+## Purpose
+Define the unified provider details panel in the Admin UI, including its tabs, provider-type specific Connection / Auth content, reduced navigation, and URL-driven auto-expansion.
+
+## Requirements
 
 ### Requirement: Unified Provider Details Panel
 The system SHALL render a single `ProviderDetailsPanel` component for each provider in the Provider Management view. The panel SHALL contain two tabs: "Configuration" and "Connection / Auth". The same panel structure SHALL be used for all providers.

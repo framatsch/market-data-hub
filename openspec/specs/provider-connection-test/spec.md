@@ -1,4 +1,9 @@
-## ADDED Requirements
+# provider-connection-test Specification
+
+## Purpose
+Define the standardized connection test that every provider implements, the admin endpoint that exposes it, and the UI controls, timeout, and logging behavior around it.
+
+## Requirements
 
 ### Requirement: Provider base classes SHALL include test_connection method
 Each provider base class (`BasePriceProvider`, `BaseCompanyProvider`, `BaseOptionsProvider`, `BaseNewsProvider`) SHALL define an abstract `test_connection()` method that returns a standardized connection test result.

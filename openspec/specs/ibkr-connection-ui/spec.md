@@ -1,4 +1,9 @@
-## ADDED Requirements
+# ibkr-connection-ui Specification
+
+## Purpose
+Define the IBKR-specific Connection / Auth section of the Admin UI, which edits all IBKR gateway connection fields through a dedicated form and backend update model instead of a generic JSON connection config.
+
+## Requirements
 
 ### Requirement: IBKR Connection Section Covers All 6 Fields
 The `IbkrConnectionSection` component SHALL render form inputs for **all 6 fields** from `CONNECTION_CONFIG_ALLOWLIST["ibkr"]`: `host` (text), `port` (number), `client_id` (number), `account_id` (text), `env` (select: `live` | `paper`), `market_data_type` (select: `1=Live` | `2=Frozen` | `3=Delayed` | `4=Delayed Frozen`). This component is used exclusively for the IBKR provider. IBKR has no API keys in `CREDENTIAL_ALLOWLIST`.

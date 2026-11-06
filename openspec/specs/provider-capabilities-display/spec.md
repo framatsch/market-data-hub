@@ -1,4 +1,9 @@
-## ADDED Requirements
+# provider-capabilities-display Specification
+
+## Purpose
+Define how the Admin UI Provider Management page shows which service types (prices, options, companies, news, ...) each provider supports.
+
+## Requirements
 
 ### Requirement: Provider capabilities displayed in overview
 Each provider entry in the Provider Management page SHALL display the service types it supports.

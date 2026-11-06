@@ -1,4 +1,9 @@
-## ADDED Requirements
+# provider-filter-chips Specification
+
+## Purpose
+Define the client-side status filter chips on the Admin UI Providers page that let admins narrow the provider list by activation, health, and configuration state.
+
+## Requirements
 
 ### Requirement: Provider Status Filter Chips
 The `ProvidersPage` SHALL display a row of filter chips above the provider list. The available filter options SHALL be: All, Active, Inactive, Healthy, Not Configured. Multiple chips MAY be selectable simultaneously (additive OR filter: a provider matches if it satisfies ANY selected filter). "All" deselects all other chips.

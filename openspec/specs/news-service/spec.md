@@ -1,4 +1,9 @@
-## ADDED Requirements
+# news-service Specification
+
+## Purpose
+Define the `NewsService` layer that wraps news providers behind the `ProviderRegistry` and is injected into API routes, mirroring the service pattern used for prices, options, and company data.
+
+## Requirements
 
 ### Requirement: NewsService wrapper
 The backend SHALL provide an `app/services/news_service.py` that exposes a `NewsService` class matching the interface of `BaseNewsProvider`.

@@ -23,6 +23,15 @@ The endpoint SHALL require admin authorization, and SHALL use the global `schwab
 ### Requirement: OAuth Mode and Redirect URI Consistency
 The system SHALL support two OAuth completion modes selected by a setting (or determined dynamically based on the environment): `paste` (the user pastes the redirect URL) and `callback` (Schwab redirects the browser to a server endpoint). At authorization time the system SHALL validate that the mode and the configured redirect URI are consistent.
 
+#### Scenario: Mode and redirect URI are consistent
+- **WHEN** an admin requests an authorization URL and the selected OAuth mode matches the configured redirect URI
+- **THEN** the system SHALL return an authorization URL that uses exactly that redirect URI
+
+#### Scenario: Mode and redirect URI are inconsistent
+- **WHEN** an admin requests an authorization URL and the selected OAuth mode does not match the configured redirect URI
+- **THEN** the system SHALL reject the request with a configuration error
+- **THEN** the system SHALL NOT generate a PKCE verifier, `state`, or authorization URL
+
 ### Requirement: Complete Schwab Connection by Automatic Callback
 When configured for `callback`, the system SHALL expose an unauthenticated `GET` callback endpoint that Schwab redirects to with `code` and `state`. The endpoint SHALL validate the `state`, exchange the `code` for tokens using the provider's app credentials and the same `redirect_uri`, store the tokens as encrypted JSON, and redirect the browser back to the Admin UI with a success or error indication.
 

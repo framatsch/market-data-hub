@@ -1,4 +1,9 @@
-## ADDED Requirements
+# schwab-oauth-auto-flow Specification
+
+## Purpose
+Define the automatic Schwab OAuth flow in which the backend generates the authorization URL, receives the browser redirect on a callback endpoint, stores the token, and the Admin UI polls for and displays the resulting status.
+
+## Requirements
 
 ### Requirement: Schwab Authorization URL Generation via get_auth_context
 The backend SHALL use `schwab.auth.get_auth_context(api_key, callback_url=settings.SCHWAB_CALLBACK_URL)` to generate the Schwab authorization URL. The resulting `AuthContext` object contains a random `state` value and the `authorization_url`. The backend SHALL store the `(auth_context, timestamp)` tuple in a short-lived in-memory dict keyed by `state` (TTL: 10 minutes). The endpoint returns `{"auth_url": auth_context.authorization_url}`.

@@ -1,4 +1,9 @@
-## ADDED Requirements
+# system-defaults Specification
+
+## Purpose
+Define database-backed system defaults (such as the default provider per data category) that admins manage at runtime via the Admin API and UI, replacing the former environment-variable defaults.
+
+## Requirements
 
 ### Requirement: System Settings Repository
 The backend SHALL maintain a `system_settings` key-value table in the SQLite database to store runtime defaults such as `default_price_provider`.
@@ -38,9 +43,3 @@ The Admin UI SHALL include a System Defaults panel that allows selecting the def
 #### Scenario: Admin updates defaults
 - **WHEN** an admin changes the default price provider from IBKR to LSEG and saves
 - **THEN** the frontend calls `PUT /api/admin/settings/defaults`, which triggers a backend config reload, making LSEG the new active default for price endpoints.
-
-## REMOVED Requirements
-
-### Requirement: Environment Variable Defaults
-**Reason**: Replaced by dynamic, database-backed system settings manageable via the Admin UI.
-**Migration**: Remove `DEFAULT_PRICE_PROVIDER`, `DEFAULT_COMPANY_PROVIDER`, `DEFAULT_OPTIONS_PROVIDER`, and `DEFAULT_NEWS_PROVIDER` from `app/config.py` (and `.env.example`/`README.md`), and remove all legacy fallback logic relying on them from `ProviderRegistry`.

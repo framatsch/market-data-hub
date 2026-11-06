@@ -1,21 +1,9 @@
-## REMOVED Requirements
+# configurable-providers Specification
 
-### Requirement: Webhook / Alert Configuration
-**Reason**: Alert configuration via webhook is removed. Schwab token expiry monitoring is delegated to log-based infrastructure monitoring (Grafana/structured logging). There is no replacement UI for webhook configuration.
+## Purpose
+Define how provider management is organized in the Admin UI: all provider-related configuration (runtime config, API keys, OAuth) is reached from the single `/admin/providers` page. Former standalone Credentials, Schwab Auth, and webhook/alert configuration pages were removed; Schwab token expiry is monitored via structured logs instead.
 
-**Migration**: Users who configured a webhook URL should set up Grafana alerting rules based on the structured log output from the application. Log entries for Schwab token expiry are emitted at WARN level with field `event: schwab_token_expiry` and `days_remaining: N`.
-
-### Requirement: Standalone Credentials Page
-**Reason**: API key management is integrated into each Provider's Details panel (Authentication tab). A dedicated Credentials page is no longer needed.
-
-**Migration**: Navigate to Providers → expand a provider → Authentication tab to manage API keys.
-
-### Requirement: Standalone Schwab Auth Page
-**Reason**: Schwab OAuth re-authorization is integrated into the Schwab provider's Authentication tab in the Provider Details panel. A dedicated Schwab Auth page is no longer needed.
-
-**Migration**: Navigate to Providers → expand the Schwab provider → Authentication tab → click "Re-authorize".
-
-## MODIFIED Requirements
+## Requirements
 
 ### Requirement: Provider Management Navigation
 The provider management section SHALL be accessible exclusively at `/admin/providers`. The navigation SHALL NOT include separate entries for Credentials, Schwab Auth, or Alerts. All provider-related configuration (runtime config, API keys, OAuth) SHALL be accessible from the expanded provider accordion at `/admin/providers`.
