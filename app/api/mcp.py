@@ -30,7 +30,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -42,7 +42,8 @@ from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
-from app.utils.errors import AppError
+from app.services.volatility_service import VolatilityService
+from app.utils.errors import AppError, DataValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -305,23 +306,40 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
     interval = args.get("interval", "1d")
     sec_type = args.get("sec_type", "stock")
     provider = args.get("provider")
-    end = datetime.now()
-    start = end - timedelta(days=30)
-    if "start_date" in args:
-        start = datetime.fromisoformat(args["start_date"])
-    if "end_date" in args:
-        end = datetime.fromisoformat(args["end_date"])
+    end = (
+        datetime.fromisoformat(args["end_date"])
+        if "end_date" in args
+        else datetime.now(UTC)
+    )
+    start = (
+        datetime.fromisoformat(args["start_date"])
+        if "start_date" in args
+        else end - timedelta(days=30)
+    )
+
     async def load() -> Any:
         bars = await _price_service().get_historical_prices(
-            symbol, interval, start, end, provider_name=provider, sec_type=sec_type,
+            symbol,
+            interval,
+            start,
+            end,
+            provider_name=provider,
+            sec_type=sec_type,
         )
         return _cache_data([b.model_dump() for b in bars])
 
     bars = await cached_call(
-        "prices:history", symbol,
-        {"interval": interval, "sec_type": sec_type, "provider": provider,
-         "start": args.get("start_date"), "end": args.get("end_date")},
-        load, refresh=args.get("refresh", False),
+        "prices:history",
+        symbol,
+        {
+            "interval": interval,
+            "sec_type": sec_type,
+            "provider": provider,
+            "start": args.get("start_date"),
+            "end": args.get("end_date"),
+        },
+        load,
+        refresh=args.get("refresh", False),
     )
     if not bars:
         return _text_content(f"No historical data found for {symbol} ({sec_type})")
@@ -333,6 +351,7 @@ async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
     provider = args.get("provider")
+
     async def load() -> Any:
         chain = await _options_service().get_option_chain(
             symbol, expiry, provider_name=provider
@@ -340,8 +359,11 @@ async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
         return _cache_data(chain.model_dump())
 
     chain = await cached_call(
-        "options:chain", symbol, {"expiry": expiry_str, "provider": provider},
-        load, refresh=args.get("refresh", False),
+        "options:chain",
+        symbol,
+        {"expiry": expiry_str, "provider": provider},
+        load,
+        refresh=args.get("refresh", False),
     )
     return _text_content(chain)
 
@@ -359,6 +381,7 @@ async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
 async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     provider = args.get("provider")
+
     async def load() -> Any:
         profile = await _company_service().get_company_profile(
             symbol, provider_name=provider
@@ -366,8 +389,11 @@ async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
         return _cache_data(profile.model_dump())
 
     profile = await cached_call(
-        "companies:profile", symbol, {"provider": provider},
-        load, refresh=args.get("refresh", False),
+        "companies:profile",
+        symbol,
+        {"provider": provider},
+        load,
+        refresh=args.get("refresh", False),
     )
     return _text_content(profile)
 
@@ -375,13 +401,19 @@ async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
 async def _tool_search_companies(args: dict[str, Any]) -> dict[str, Any]:
     query = args["query"]
     provider = args.get("provider")
+
     async def load() -> Any:
-        results = await _company_service().search_companies(query, provider_name=provider)
+        results = await _company_service().search_companies(
+            query, provider_name=provider
+        )
         return _cache_data([r.model_dump() for r in results])
 
     results = await cached_call(
-        "companies:search", "", {"q": query, "provider": provider},
-        load, refresh=args.get("refresh", False),
+        "companies:search",
+        "",
+        {"q": query, "provider": provider},
+        load,
+        refresh=args.get("refresh", False),
     )
     return _text_content(results)
 
@@ -396,29 +428,42 @@ async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
         to_date = date.fromisoformat(args["to_date"])
     limit = int(args.get("limit", 20))
     provider_name = args.get("provider")
+
     async def load() -> Any:
         provider = get_registry().get_news_provider(provider_name)
-        articles = await provider.get_company_news(symbol, from_date, to_date, limit=limit)
+        articles = await provider.get_company_news(
+            symbol, from_date, to_date, limit=limit
+        )
         return _cache_data([a.model_dump() for a in articles])
 
     articles = await cached_call(
-        "companies:news", symbol,
-        {"from_date": args.get("from_date"), "to_date": args.get("to_date"),
-         "limit": limit, "provider": provider_name},
-        load, refresh=args.get("refresh", False),
+        "companies:news",
+        symbol,
+        {
+            "from_date": args.get("from_date"),
+            "to_date": args.get("to_date"),
+            "limit": limit,
+            "provider": provider_name,
+        },
+        load,
+        refresh=args.get("refresh", False),
     )
     return _text_content(articles)
 
 
 async def _tool_get_market_status(args: dict[str, Any]) -> dict[str, Any]:
     provider = args.get("provider")
+
     async def load() -> Any:
         status = await _price_service().get_market_status(provider_name=provider)
         return _cache_data(status.model_dump())
 
     status = await cached_call(
-        "market-status", "", {"provider": provider},
-        load, refresh=args.get("refresh", False),
+        "market-status",
+        "",
+        {"provider": provider},
+        load,
+        refresh=args.get("refresh", False),
     )
     return _text_content(status)
 
@@ -426,6 +471,112 @@ async def _tool_get_market_status(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tool registry (MCP schema descriptors)
 # ---------------------------------------------------------------------------
+
+
+def _volatility_service() -> VolatilityService:
+    return VolatilityService(get_registry())
+
+
+async def _tool_get_implied_volatility(args: dict[str, Any]) -> dict[str, Any]:
+    symbol = args["symbol"].upper()
+
+    async def load() -> Any:
+        snapshot = await _volatility_service().get_implied_volatility(
+            symbol,
+            sec_type=args.get("sec_type", "stock"),
+            ric=args.get("ric"),
+            provider_name=(args.get("provider") or "").lower() or None,
+        )
+        return snapshot.model_dump(mode="json")
+
+    snapshot = await cached_call(
+        "volatility:snapshot",
+        symbol,
+        {
+            "sec_type": args.get("sec_type"),
+            "ric": args.get("ric"),
+            "provider": args.get("provider"),
+        },
+        load,
+        refresh=args.get("refresh", False),
+    )
+    return _text_content(snapshot)
+
+
+async def _tool_get_implied_volatility_history(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        end = (
+            date.fromisoformat(args["end_date"])
+            if args.get("end_date")
+            else date.today()
+        )
+        start = (
+            date.fromisoformat(args["start_date"])
+            if args.get("start_date")
+            else end - timedelta(days=365)
+        )
+    except ValueError as exc:
+        raise DataValidationError("IV history dates must use YYYY-MM-DD") from exc
+    symbol = args["symbol"].upper()
+
+    async def load() -> Any:
+        history = await _volatility_service().get_implied_volatility_history(
+            symbol,
+            start,
+            end,
+            tenor_days=args.get("tenor_days", 30),
+            sec_type=args.get("sec_type", "stock"),
+            ric=args.get("ric"),
+            provider_name=(args.get("provider") or "").lower() or None,
+        )
+        return history.model_dump(mode="json")
+
+    history = await cached_call(
+        "volatility:history",
+        symbol,
+        {
+            "start": args.get("start_date"),
+            "end": args.get("end_date"),
+            "tenor_days": args.get("tenor_days"),
+            "sec_type": args.get("sec_type"),
+            "ric": args.get("ric"),
+            "provider": args.get("provider"),
+        },
+        load,
+        refresh=args.get("refresh", False),
+    )
+    return _text_content(history)
+
+
+async def _tool_get_implied_volatility_stats(args: dict[str, Any]) -> dict[str, Any]:
+    symbol = args["symbol"].upper()
+
+    async def load() -> Any:
+        stats = await _volatility_service().get_implied_volatility_stats(
+            symbol,
+            window=args.get("window", 252),
+            tenor_days=args.get("tenor_days", 30),
+            sec_type=args.get("sec_type", "stock"),
+            ric=args.get("ric"),
+            provider_name=(args.get("provider") or "").lower() or None,
+        )
+        return stats.model_dump(mode="json")
+
+    stats = await cached_call(
+        "volatility:stats",
+        symbol,
+        {
+            "window": args.get("window"),
+            "tenor_days": args.get("tenor_days"),
+            "sec_type": args.get("sec_type"),
+            "ric": args.get("ric"),
+            "provider": args.get("provider"),
+        },
+        load,
+        refresh=args.get("refresh", False),
+    )
+    return _text_content(stats)
+
 
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
@@ -455,7 +606,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "symbol": {"type": "string"},
                 "interval": {
                     "type": "string",
@@ -486,7 +641,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol", "expiry"],
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "symbol": {"type": "string"},
                 "expiry": {
                     "type": "string",
@@ -526,7 +685,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "symbol": {"type": "string"},
                 "provider": {
                     "type": "string",
@@ -542,7 +705,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["query"],
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "query": {"type": "string", "description": "Search term, e.g. Apple"},
                 "provider": {
                     "type": "string",
@@ -558,7 +725,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "symbol": {"type": "string"},
                 "from_date": {
                     "type": "string",
@@ -576,7 +747,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 },
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "News provider override (finnhub, ibkr, mock)",
                 },
             },
         },
@@ -587,7 +758,11 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
+                "refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fetch live data and overwrite the cache.",
+                },
                 "provider": {
                     "type": "string",
                     "description": "Data provider (e.g., polygon, ibkr)",
@@ -596,6 +771,125 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         },
     },
 ]
+
+TOOL_REGISTRY.extend(
+    [
+        {
+            "name": "get_implied_volatility",
+            "description": "Underlying ATM implied volatility in four-place annualized decimal fractions; LSEG daily/hourly 30/60/90-day indices or IBKR live/delayed 30-day model. .U means OPRA, not futures.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["symbol"],
+                "properties": {
+                    "refresh": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Fetch live data and overwrite the cache.",
+                    },
+                    "symbol": {"type": "string"},
+                    "sec_type": {
+                        "type": "string",
+                        "enum": ["stock", "etf", "index", "future"],
+                        "default": "stock",
+                    },
+                    "ric": {
+                        "type": "string",
+                        "description": "LSEG-only explicit instrument override; bypasses market validation.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Volatility provider override (lseg or ibkr).",
+                    },
+                },
+            },
+        },
+        {
+            "name": "get_implied_volatility_history",
+            "description": "Daily underlying IV history in decimal fractions, ascending by date. Default 365 calendar days. IBKR only supports stock/ETF/index at tenor 30; LSEG also supports futures and tenors 60/90.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["symbol"],
+                "properties": {
+                    "refresh": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Fetch live data and overwrite the cache.",
+                    },
+                    "symbol": {"type": "string"},
+                    "start_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Start date (default end minus 365 days).",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "End date (default today).",
+                    },
+                    "tenor_days": {
+                        "type": "integer",
+                        "enum": [30, 60, 90],
+                        "default": 30,
+                    },
+                    "sec_type": {
+                        "type": "string",
+                        "enum": ["stock", "etf", "index", "future"],
+                        "default": "stock",
+                    },
+                    "ric": {
+                        "type": "string",
+                        "description": "LSEG-only explicit instrument override.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Volatility provider override (lseg or ibkr).",
+                    },
+                },
+            },
+        },
+        {
+            "name": "get_implied_volatility_stats",
+            "description": "IV Rank/Percentile on a 0–100 scale over the last window daily IV points (default 252). IVR is sensitive to outlier days; IVP is robust. Current/min/max IV are four-place decimal fractions. No outlier filtering.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["symbol"],
+                "properties": {
+                    "refresh": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Fetch live data and overwrite the cache.",
+                    },
+                    "symbol": {"type": "string"},
+                    "window": {
+                        "type": "integer",
+                        "minimum": 20,
+                        "maximum": 756,
+                        "default": 252,
+                    },
+                    "tenor_days": {
+                        "type": "integer",
+                        "enum": [30, 60, 90],
+                        "default": 30,
+                    },
+                    "sec_type": {
+                        "type": "string",
+                        "enum": ["stock", "etf", "index", "future"],
+                        "default": "stock",
+                    },
+                    "ric": {
+                        "type": "string",
+                        "description": "LSEG-only explicit instrument override.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Volatility provider override (lseg or ibkr).",
+                    },
+                },
+            },
+        },
+    ]
+)
+
 
 TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
     "get_last_price": _tool_get_last_price,
@@ -606,4 +900,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] 
     "search_companies": _tool_search_companies,
     "get_company_news": _tool_get_company_news,
     "get_market_status": _tool_get_market_status,
+    "get_implied_volatility": _tool_get_implied_volatility,
+    "get_implied_volatility_history": _tool_get_implied_volatility_history,
+    "get_implied_volatility_stats": _tool_get_implied_volatility_stats,
 }

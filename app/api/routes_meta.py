@@ -83,7 +83,8 @@ async def list_providers() -> Any:
     - price: "ibkr", "lseg", "polygon"
     - company: "finnhub", "lseg", "ibkr", "polygon"
     - options: "ibkr", "lseg", "polygon"
-    - news: "finnhub", "lseg", "ibkr", "mock"
+    - news: "finnhub", "ibkr", "mock"
+    - volatility: "lseg", "ibkr"
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     Note: Mock provider provides test data for development and testing.
@@ -97,12 +98,14 @@ async def list_providers() -> Any:
                 "company": reg.default_company_provider,
                 "options": reg.default_options_provider,
                 "news": reg.default_news_provider,
+                "volatility": reg.default_volatility_provider,
             },
             "available": {
                 "price": ["ibkr", "lseg", "polygon", "prixe"],
                 "company": ["finnhub", "lseg", "ibkr", "polygon"],
                 "options": ["ibkr", "lseg", "polygon"],
-                "news": ["finnhub", "lseg", "ibkr", "mock"],
+                "news": ["finnhub", "ibkr", "mock"],
+                "volatility": ["lseg", "ibkr"],
             },
         }
     )

@@ -43,6 +43,14 @@ async def test_settings_repository_set_updates_existing_value(tmp_path) -> None:
     assert await repository.get("default_options_provider") == "schwab"
 
 
+async def test_settings_repository_accepts_volatility_default(tmp_path) -> None:
+    repository = SettingsRepository(str(tmp_path / "keys.db"))
+    await repository.set("default_volatility_provider", "lseg")
+    assert await repository.get("default_volatility_provider") == "lseg"
+    await repository.set("default_volatility_provider", None)
+    assert await repository.get("default_volatility_provider") is None
+
+
 async def test_settings_repository_rejects_unknown_key(tmp_path) -> None:
     repository = SettingsRepository(str(tmp_path / "keys.db"))
 

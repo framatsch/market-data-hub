@@ -14,14 +14,15 @@ poetry.lock
 
 # graphify analysis artifacts
 .graphify_*
-graphify-out/3.11.9
+graphify-out/
 admin/dist/
 admin/node_modules/
 
 # Generated files (never commit)
 .coverage
 .engram/
-keys.db
+keys.*
 paseo.json
 tmp
 .serena
+.gstack/

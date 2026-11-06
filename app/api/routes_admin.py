@@ -29,6 +29,7 @@ from app.providers.base import (
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
+    BaseVolatilityProvider,
 )
 from app.providers.registry import registry
 from app.utils.errors import AppError
@@ -77,8 +78,8 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
 }
 
 PROVIDER_CAPABILITIES: dict[str, list[str]] = {
-    "ibkr": ["prices", "options", "companies"],
-    "lseg": ["prices", "companies"],
+    "ibkr": ["prices", "options", "companies", "volatility"],
+    "lseg": ["prices", "companies", "volatility"],
     "schwab": ["prices", "options"],
     "finnhub": ["news"],
     "polygon": ["prices", "companies"],
@@ -110,6 +111,7 @@ class SystemDefaultsUpdate(BaseModel):
     default_company_provider: str | None = None
     default_options_provider: str | None = None
     default_news_provider: str | None = None
+    default_volatility_provider: str | None = None
 
 
 class CacheClearRequest(BaseModel):
@@ -272,7 +274,6 @@ def _enforce_reveal_rate_limit(user: str) -> None:
     _credential_reveal_calls[user] = calls
 
 
-
 @router.get("/keys")
 async def list_admin_keys(_principal: PrincipalDep) -> list[dict[str, Any]]:
     metadata = await get_key_repository().list_credentials()
@@ -370,7 +371,24 @@ def _provider_capabilities(name: str, provider: object | None) -> list[str]:
         capabilities.append("companies")
     if isinstance(provider, BaseNewsProvider):
         capabilities.append("news")
+    if isinstance(provider, BaseVolatilityProvider):
+        capabilities.append("volatility")
     return capabilities
+
+
+def _provider_volatility_support(name: str) -> dict[str, list[Any]] | None:
+    provider = registry.get_provider_instance(name)
+    if provider is None:
+        provider = registry.provider_classes.get(name)
+        if provider is None or not issubclass(provider, BaseVolatilityProvider):
+            return None
+    elif not isinstance(provider, BaseVolatilityProvider):
+        return None
+    return {
+        "volatility_sec_types": sorted(provider.volatility_sec_types),
+        "volatility_history_sec_types": sorted(provider.volatility_history_sec_types),
+        "volatility_tenors": sorted(provider.volatility_tenors),
+    }
 
 
 def _provider_status(name: str, config: ProviderRuntimeConfig) -> dict[str, Any]:
@@ -415,6 +433,7 @@ def _system_defaults() -> dict[str, str]:
         "default_company_provider": registry.default_company_provider or "",
         "default_options_provider": registry.default_options_provider or "",
         "default_news_provider": registry.default_news_provider or "",
+        "default_volatility_provider": registry.default_volatility_provider or "",
     }
 
 
@@ -454,8 +473,11 @@ async def clear_admin_cache(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     audit_log.info(
-        "cache_cleared", user=principal.user, scope=payload.scope,
-        provider=payload.provider, deleted=deleted,
+        "cache_cleared",
+        user=principal.user,
+        scope=payload.scope,
+        provider=payload.provider,
+        deleted=deleted,
     )
     return {"deleted": deleted, "scope": payload.scope, "provider": payload.provider}
 
@@ -483,6 +505,7 @@ async def get_admin_settings_capabilities(
         "options": [],
         "companies": [],
         "news": [],
+        "volatility": [],
     }
     for config in await get_provider_config_repository().list_all():
         if not config.enabled:
@@ -499,6 +522,7 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
     return [
         {
             **_provider_status(name, configs[name]),
+            "volatility_support": _provider_volatility_support(name),
             "config": configs[name].model_dump(),
             "config_summary": {
                 "timeout_seconds": configs[name].timeout_seconds,
@@ -721,7 +745,9 @@ async def _get_schwab_callback_url() -> str:
     except RuntimeError:
         logger.debug("Admin runtime not initialized while reading Schwab callback URL")
     except ValueError:
-        logger.warning("Schwab provider config row missing; using fallback callback URL")
+        logger.warning(
+            "Schwab provider config row missing; using fallback callback URL"
+        )
     except Exception:
         logger.warning(
             "Unexpected error while resolving Schwab callback URL",
@@ -787,7 +813,6 @@ async def save_schwab_token_manually(
     _schwab_callback_error.pop(_SCHWAB_CALLBACK_ERROR_KEY, None)
     expires_at = (_utcnow() + timedelta(days=_SCHWAB_TOKEN_LIFETIME_DAYS)).isoformat()
     return {"status": "ok", "token_expires_at": expires_at}
-
 
 
 @router.get("/schwab/auth/url")

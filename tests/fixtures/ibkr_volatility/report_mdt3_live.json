@@ -1,0 +1,186 @@
+{
+  "generated_at": "2026-11-06T18:04:16",
+  "port": 4002,
+  "market_data_type": 3,
+  "live": {
+    "AAPL": {
+      "category": "stock",
+      "conId": 265598,
+      "implied_volatility": 0.2519055923990361,
+      "hist_volatility": 0.28958753485100147,
+      "last": 343.95,
+      "close": 344.17
+    },
+    "SPY": {
+      "category": "etf",
+      "conId": 756733,
+      "implied_volatility": 0.18260152175545163,
+      "hist_volatility": 0.12307347203731599,
+      "last": 739.75,
+      "close": 733.0
+    },
+    "SPX": {
+      "category": "index",
+      "conId": 416904,
+      "implied_volatility": 0.17799138453494812,
+      "hist_volatility": 0.11981284812156,
+      "last": 7420.43,
+      "close": 7353.73
+    },
+    "VIX": {
+      "category": "index",
+      "conId": 13455763,
+      "implied_volatility": 1.0527045058376665,
+      "hist_volatility": 1.4574131680004543,
+      "last": 23.89,
+      "close": 28.18
+    },
+    "ES 20261218": {
+      "category": "future",
+      "conId": 515416632,
+      "implied_volatility": 0.18063135296862257,
+      "hist_volatility": 0.17162039769069365,
+      "last": 7452.75,
+      "close": 7383.0
+    },
+    "CL 20261120": {
+      "category": "future",
+      "conId": 296574787,
+      "implied_volatility": 0.5408530839071901,
+      "hist_volatility": 0.4392182515473352,
+      "last": 90.16,
+      "close": 90.52
+    },
+    "GC 20261125": {
+      "category": "future",
+      "conId": 760200541,
+      "implied_volatility": null,
+      "hist_volatility": 0.2266670700947379,
+      "last": 4064.0,
+      "close": 4102.5
+    }
+  },
+  "historical": {},
+  "errors": [
+    {
+      "reqId": -1,
+      "code": 2104,
+      "msg": "Market data farm connection is OK:usfarm.nj",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2104,
+      "msg": "Market data farm connection is OK:usfuture",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2104,
+      "msg": "Market data farm connection is OK:usfarm",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2106,
+      "msg": "HMDS data farm connection is OK:ushmds",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2158,
+      "msg": "Sec-def data farm connection is OK:secdefil",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2108,
+      "msg": "Market data farm connection is inactive but should be available upon demand.usfarm.nj",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2108,
+      "msg": "Market data farm connection is inactive but should be available upon demand.usfarm.nj",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2108,
+      "msg": "Market data farm connection is inactive but should be available upon demand.usfuture",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2108,
+      "msg": "Market data farm connection is inactive but should be available upon demand.usfuture",
+      "contract": null
+    },
+    {
+      "reqId": 21,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "AAPL"
+    },
+    {
+      "reqId": 22,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "SPY"
+    },
+    {
+      "reqId": -1,
+      "code": 2119,
+      "msg": "Market data farm is connecting:usfuture",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2119,
+      "msg": "Market data farm is connecting:usfarm.nj",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2104,
+      "msg": "Market data farm connection is OK:usfarm.nj",
+      "contract": null
+    },
+    {
+      "reqId": -1,
+      "code": 2104,
+      "msg": "Market data farm connection is OK:usfuture",
+      "contract": null
+    },
+    {
+      "reqId": 23,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "SPX"
+    },
+    {
+      "reqId": 25,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "ESZ6"
+    },
+    {
+      "reqId": 24,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "VIX"
+    },
+    {
+      "reqId": 26,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "CLZ6"
+    },
+    {
+      "reqId": 27,
+      "code": 10167,
+      "msg": "Requested market data is not subscribed. Displaying delayed market data.",
+      "contract": "GCX6"
+    }
+  ]
+}

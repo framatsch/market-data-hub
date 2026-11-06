@@ -55,17 +55,15 @@ Prixe is a lightweight REST provider for latest stock prices via `POST /api/last
 
 ## 3. LSEG (Refinitiv) Setup
 
-LSEG (formerly Refinitiv) is used for detailed company fundamentals, global prices, and news.
+LSEG (formerly Refinitiv) provides global prices and underlying implied volatility.
+The hub does not expose LSEG news; use Finnhub or IBKR for news instead.
 
 **Steps:**
 1.  You need an active **LSEG Workspace** or **Data Platform** account.
 2.  Create an **App Key** in the LSEG Developer Portal.
-3.  Add your credentials to your `.env` file:
-    ```env
-    LSEG_APP_KEY=your_app_key
-    LSEG_USERNAME=your_username
-    LSEG_PASSWORD=your_password
-    ```
+3. Store `app_key`, `username` and `password` under provider `lseg` through the
+   Admin UI/API. Credentials are encrypted in `keys.db`, not provider-specific
+   environment variables.
 
 **Advanced Configuration:**
 - **Rate Limiting**: Controlled via `LSEG_RATE_LIMIT_PER_SEC` (default: 10).
@@ -74,8 +72,8 @@ LSEG (formerly Refinitiv) is used for detailed company fundamentals, global pric
 
 **Supported Features:**
 - Global Stock Prices (Historical Summaries)
-- In-depth Company Fundamentals (SIC codes, employee counts, etc.)
-- Global News Feed
+- Underlying implied-volatility snapshots and daily history (entitlement-dependent)
+- Company profile/search interfaces currently return placeholders, not live fundamentals
 
 ## 4. Interactive Brokers (IBKR) Setup
 

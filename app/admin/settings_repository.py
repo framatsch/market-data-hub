@@ -9,6 +9,7 @@ SETTINGS_ALLOWLIST = frozenset(
         "default_company_provider",
         "default_options_provider",
         "default_news_provider",
+        "default_volatility_provider",
         "cache_ttl_option_chain_seconds",
         "cache_ttl_historical_closed_seconds",
         "cache_ttl_historical_open_bar_seconds",
@@ -17,6 +18,7 @@ SETTINGS_ALLOWLIST = frozenset(
         "cache_ttl_company_search_seconds",
         "cache_ttl_company_news_seconds",
         "cache_ttl_market_status_seconds",
+        "cache_ttl_volatility_seconds",
         "cache_extend_when_market_closed",
     }
 )

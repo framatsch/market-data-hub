@@ -19,6 +19,7 @@
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 
@@ -137,9 +138,6 @@ def setup_logging() -> None:
 
     # Suppress ib_async.wrapper ERROR logs for subscription errors (10089/10091)
     logging.getLogger("ib_async.wrapper").setLevel(logging.CRITICAL)
-
-
-from typing import Any
 
 
 def get_uvicorn_log_config(log_level: str = "info") -> dict[str, Any]:

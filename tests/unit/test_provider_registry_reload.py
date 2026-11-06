@@ -150,6 +150,7 @@ async def test_registry_reload_seeds_default_settings_as_none(tmp_path) -> None:
     assert await settings_repo.get("default_company_provider") is None
     assert await settings_repo.get("default_options_provider") is None
     assert await settings_repo.get("default_news_provider") is None
+    assert await settings_repo.get("default_volatility_provider") is None
 
 
 async def test_registry_reload_seed_is_idempotent_for_existing_defaults(tmp_path) -> None:

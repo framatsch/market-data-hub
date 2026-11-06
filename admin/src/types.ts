@@ -4,6 +4,11 @@ export interface Provider {
   status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled' | 'unavailable';
   error?: string | null;
   capabilities?: string[];
+  volatility_support?: {
+    volatility_sec_types: string[];
+    volatility_history_sec_types: string[];
+    volatility_tenors: number[];
+  } | null;
   config_summary?: {
     timeout_seconds: number;
     retry_count: number;
@@ -80,6 +85,7 @@ export interface SystemDefaults {
   default_company_provider?: string;
   default_options_provider?: string;
   default_news_provider?: string;
+  default_volatility_provider?: string;
 }
 
 export interface CachePolicy {
@@ -91,6 +97,7 @@ export interface CachePolicy {
   company_search_seconds: number;
   company_news_seconds: number;
   market_status_seconds: number;
+  volatility_seconds: number;
   extend_when_market_closed: boolean;
 }
 
@@ -104,7 +111,7 @@ export interface CacheStatus {
   key_counts: Record<Exclude<CacheScope, 'all'>, number> | null;
 }
 
-export type CacheScope = 'all' | 'options_chain' | 'historical_prices' | 'company_profile' | 'company_search' | 'company_news' | 'market_status';
+export type CacheScope = 'all' | 'options_chain' | 'historical_prices' | 'company_profile' | 'company_search' | 'company_news' | 'market_status' | 'volatility';
 
 export interface CacheClearResult {
   deleted: number;

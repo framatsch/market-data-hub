@@ -4,8 +4,11 @@
 
 The Company News API fetches company news articles from multiple data providers:
 - Mock Provider (✅ Works immediately - no setup)
-- LSEG (Refinitiv) (requires permission scope)
+- Finnhub (requires an API key stored through the Admin UI/API)
 - IBKR (Interactive Brokers) (requires TWS/Gateway connection)
+
+LSEG news support has been retired. LSEG remains available for its other data
+capabilities, but is not a selectable news provider.
 
 ## Quick Start (Using Mock Provider)
 
@@ -48,7 +51,7 @@ GET /companies/{symbol}/news
 
 | Parameter    | Type     | Default | Range | Description |
 |--------------|----------|---------|-------|-------------|
-| provider     | string   | mock    | mock, lseg, ibkr | Data provider |
+| provider     | string   | Admin default | finnhub, ibkr, mock | Data provider; 503 if no default is configured |
 | days         | integer  | 30      | 1-365 | Last N days of news |
 | from_date    | string   | -       | YYYY-MM-DD | Start date (overrides days) |
 | to_date      | string   | today   | YYYY-MM-DD | End date |
@@ -178,23 +181,24 @@ curl -s http://localhost:8000/companies/AAPL/news?provider=mock&format=csv | hea
 
 ## Provider Setup (Optional)
 
-### LSEG (Refinitiv) Setup
+### Finnhub Setup
 
-Current Status: ⚠️ Permission Required
+Store the Finnhub `api_key` through the Admin UI/API and enable provider `finnhub`.
+Choose it as the default news provider in Admin Settings or request it explicitly:
 
-To use the LSEG provider:
-
-1. Contact LSEG Support
-2. Request scope: `trapi.data.news.read`
-3. Provide LSEG credentials:
-   - `LSEG_APP_KEY` - Application API key
-   - `LSEG_USERNAME` - Platform username
-   - `LSEG_PASSWORD` - Platform password
-
-4. Test once approved:
 ```bash
-curl "http://localhost:8000/companies/AAPL/news?provider=lseg"
+curl "http://localhost:8000/companies/AAPL/news?provider=finnhub"
 ```
+
+### Migrating away from LSEG news
+
+Fresh `provider=lseg` news requests return HTTP 400 / `INVALID_PROVIDER` without
+contacting the LSEG SDK. Change any stored LSEG news default to Finnhub, IBKR or
+mock; an unsupported default is treated as unconfigured, not silently redirected.
+If Redis contains old LSEG news responses, clear only the `company_news` scope
+with `provider=lseg` through the confirmed Admin cache-clear API. This covers
+both HTTP and MCP and preserves other cached data. Without an explicit clear,
+old entries retain their remaining TTL.
 
 ### IBKR (Interactive Brokers) Setup
 
@@ -287,7 +291,7 @@ GET /companies/{symbol}/news
            ↓
     Provider Registry
     ├── Mock (Always works)
-    ├── LSEG (requires auth)
+    ├── Finnhub (requires API key)
     └── IBKR (requires connection)
            ↓
    Provider Implementation
@@ -308,12 +312,12 @@ app/
 ├── providers/
 │   ├── base.py                  # BaseNewsProvider abstract class
 │   ├── mock_news.py             # MockNewsProvider (test data)
-│   ├── lseg.py                  # LSEGProvider.get_company_news()
+│   ├── finnhub.py               # FinnhubProvider.get_company_news()
 │   ├── ibkr.py                  # IBKRProvider.get_company_news()
 │   └── registry.py              # Provider registration
 ├── services/
-│   └── company_service.py       # News service layer (orchestration)
-└── dependencies.py              # Dependency injection (get_news_provider)
+│   └── news_service.py          # News service layer (orchestration)
+└── dependencies.py              # Dependency injection (get_news_service)
 
 scripts/
 └── test_news_api.sh            # Automated test suite (10 tests)
@@ -321,15 +325,10 @@ scripts/
 
 ## Troubleshooting
 
-### Issue: "Connection refused" when using LSEG
+### Issue: `INVALID_PROVIDER` for LSEG news
 
-Cause: LSEG session not initialized
-Solution: Use mock provider instead, or contact LSEG for permission
-
-### Issue: "Insufficient scope: trapi.data.news.read"
-
-Cause: LSEG account lacks permission
-Solution: Contact LSEG support to request scope
+Cause: LSEG news support was removed from this hub.
+Solution: Use Finnhub, IBKR or mock and update the default news provider in Admin Settings.
 
 ### Issue: IBKR provider returns no data
 

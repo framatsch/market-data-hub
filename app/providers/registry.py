@@ -32,6 +32,7 @@ from app.providers.base import (
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
+    BaseVolatilityProvider,
 )
 from app.providers.finnhub import FinnhubProvider
 from app.providers.ibkr import IBKRProvider
@@ -49,6 +50,7 @@ DEFAULT_PROVIDER_FALLBACKS = {
     "default_company_provider": None,
     "default_options_provider": None,
     "default_news_provider": None,
+    "default_volatility_provider": None,
 }
 
 
@@ -73,6 +75,7 @@ class ProviderRegistry:
         self.default_company_provider: str | None = None
         self.default_options_provider: str | None = None
         self.default_news_provider: str | None = None
+        self.default_volatility_provider: str | None = None
         self._initialize_providers()
 
     def _get_reload_lock(self) -> asyncio.Lock:
@@ -118,6 +121,11 @@ class ProviderRegistry:
         )
         self.default_news_provider = self._resolve_default(
             values["default_news_provider"], "default_news_provider", BaseNewsProvider
+        )
+        self.default_volatility_provider = self._resolve_default(
+            values["default_volatility_provider"],
+            "default_volatility_provider",
+            BaseVolatilityProvider,
         )
 
     def _initialize_providers(self) -> None:
@@ -191,6 +199,7 @@ class ProviderRegistry:
                     "default_company_provider",
                     "default_options_provider",
                     "default_news_provider",
+                    "default_volatility_provider",
                 )
                 for key in default_setting_keys:
                     if key not in system_settings:
@@ -372,6 +381,25 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
+    def get_volatility_provider(
+        self, name: str | None = None
+    ) -> BaseVolatilityProvider:
+        if name is None and self.default_volatility_provider is None:
+            raise AppError(
+                "No volatility provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_volatility_provider
+        if provider_name is None:
+            raise AppError(
+                "No volatility provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = self._providers.get(provider_name)
+        if not provider or not isinstance(provider, BaseVolatilityProvider):
+            raise InvalidProviderError(provider_name)
+        return provider
+
     def get_news_provider(self, name: str | None = None) -> BaseNewsProvider:
         if name is None and self.default_news_provider is None:
             raise AppError(
@@ -453,6 +481,27 @@ class ProviderRegistry:
             self._release_provider(provider)
 
     @asynccontextmanager
+    async def use_volatility_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BaseVolatilityProvider]:
+        if name is None and self.default_volatility_provider is None:
+            raise AppError(
+                "No volatility provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider_name = name or self.default_volatility_provider
+        if provider_name is None:
+            raise AppError(
+                "No volatility provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BaseVolatilityProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
+
+    @asynccontextmanager
     async def use_news_provider(
         self, name: str | None = None
     ) -> AsyncIterator[BaseNewsProvider]:
@@ -492,7 +541,7 @@ def get_provider(provider_type: str, name: str | None = None) -> Any:
     Get a provider instance by type and name.
 
     Args:
-        provider_type: Type of provider ("price", "company", "options", "news")
+        provider_type: Type of provider ("price", "company", "options", "news", "volatility")
         name: Provider name (e.g., "lseg", "ibkr")
 
     Returns:
@@ -511,5 +560,7 @@ def get_provider(provider_type: str, name: str | None = None) -> Any:
         return reg.get_options_provider(name)
     elif provider_type == "news":
         return reg.get_news_provider(name)
+    elif provider_type == "volatility":
+        return reg.get_volatility_provider(name)
     else:
         raise InvalidProviderError(f"Unknown provider type: {provider_type}")

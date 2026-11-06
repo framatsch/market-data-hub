@@ -31,6 +31,12 @@ def policy(monkeypatch):
     "route,params,ttl",
     [
         ("options:chain", {}, 900),
+        ("volatility:snapshot", {}, 900),
+        ("volatility:stats", {}, 900),
+        ("volatility:history", {}, 900),
+        ("volatility:history", {"end": "2026-11-02"}, 604800),
+        ("volatility:history", {"end": "2026-11-03"}, 900),
+        ("volatility:history", {"end": "invalid"}, 900),
         ("prices:history", {}, 300),
         ("prices:history", {"interval": "5m"}, 300),
         ("prices:history", {"interval": "1m"}, 60),
@@ -140,6 +146,40 @@ async def test_policy_env_stored_refresh_and_partial_update(
         assert await repository.get("cache_ttl_historical_intraday_seconds") == "0"
     finally:
         set_admin_runtime()
+
+
+@pytest.mark.parametrize("route", ["volatility:snapshot", "volatility:history", "volatility:stats"])
+@pytest.mark.parametrize("now", [datetime(2026, 11, 4, 16, 35, tzinfo=ET), datetime(2026, 11, 7, 10, tzinfo=ET)])
+def test_volatility_never_extends_after_close(policy, route, now):
+    assert policy.resolve(route, {}, now) == 900
+    policy.values.volatility_seconds = 0
+    assert policy.resolve(route, {}, now) == 0
+    if route == "volatility:history":
+        assert policy.resolve(route, {"end": "2025-12-31"}, now) == 604800
+
+
+async def test_volatility_policy_env_and_runtime_override(policy, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "CACHE_TTL_VOLATILITY_SECONDS", 3600)
+    repository = SettingsRepository(str(tmp_path / "keys.db"))
+    set_admin_runtime(settings_repository=repository)
+    try:
+        await policy.refresh(force=True)
+        assert policy.values.volatility_seconds == 3600
+        updated = await policy.update(response_cache.CachePolicyUpdate(volatility_seconds=0))
+        assert updated.volatility_seconds == 0
+        assert await repository.get("cache_ttl_volatility_seconds") == "0"
+    finally:
+        set_admin_runtime()
+
+
+@pytest.mark.parametrize("route", ["volatility:snapshot", "volatility:history", "volatility:stats"])
+async def test_volatility_implicit_provider_key(policy, monkeypatch, route):
+    monkeypatch.setattr(response_cache.registry, "default_volatility_provider", "lseg")
+    request = Request({
+        "type": "http", "route": SimpleNamespace(path="/unused", dependant=SimpleNamespace(query_params=[])),
+        "path_params": {"symbol": "aapl"}, "query_string": b"",
+    })
+    assert await response_cache.mdh_key_builder(None, f"mdh:{route}", request=request) == f"mdh:{route}:AAPL:provider=lseg"
 
 
 @pytest.mark.parametrize(

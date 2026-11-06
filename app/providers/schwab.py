@@ -27,13 +27,14 @@ Authentication model:
 
 import asyncio
 import logging
+import math
 import os
 import re
 import tempfile
 import time
 from collections import deque
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
@@ -65,6 +66,18 @@ _HTTP_RATE_LIMITED = 429
 _HTTP_UNAUTHORIZED = 401
 _HTTP_FORBIDDEN = 403
 _OCC_OPTION_SYMBOL_RE = re.compile(r"^([A-Z]+)\s+(\d{6})([CP])(\d{8})$")
+
+
+def _option_iv_fraction(value: Any) -> float | None:
+    """Schwab option IV is percent; retain contract precision when converting."""
+    try:
+        number = Decimal(str(value))
+        if not number.is_finite() or number < 0:
+            return None
+        fraction = float(number / 100)
+        return fraction if math.isfinite(fraction) else None
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        return None
 
 
 class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
@@ -148,7 +161,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             if url and isinstance(url, str) and url.strip():
                 return str(url.strip())
         except RuntimeError:
-            logger.debug("Admin runtime not initialized while resolving Schwab callback URL")
+            logger.debug(
+                "Admin runtime not initialized while resolving Schwab callback URL"
+            )
         except Exception:
             logger.warning(
                 "Unexpected error while resolving Schwab callback URL",
@@ -528,9 +543,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                             open_interest=int(contract["openInterest"])
                             if contract.get("openInterest") is not None
                             else None,
-                            implied_volatility=contract.get(
-                                "volatility"
-                            ),  # Schwab uses "volatility" for IV.
+                            implied_volatility=_option_iv_fraction(
+                                contract.get("volatility")
+                            ),
                             delta=contract.get("delta"),
                             gamma=contract.get("gamma"),
                             theta=contract.get("theta"),
@@ -970,7 +985,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             open_interest=int(quote["openInterest"])
             if quote.get("openInterest") is not None
             else None,
-            implied_volatility=quote.get("volatility"),
+            implied_volatility=_option_iv_fraction(quote.get("volatility")),
             delta=delta,
             gamma=gamma,
             theta=theta,

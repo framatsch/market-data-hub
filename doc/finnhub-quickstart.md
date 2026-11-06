@@ -142,7 +142,8 @@ A: Algorithmus für Rate Limiting - verteilt 60 Requests gleichmäßig über 1 M
 A: Free Tier ist kostenlos. Premium für mehr Requests.
 
 **F: Kann ich LSEG weiterhin verwenden?**
-A: Ja - `provider=lseg`. Aber Sie haben kein Permission für News.
+A: Nicht für News: LSEG-News wurde aus dem Hub entfernt. Für News Finnhub,
+IBKR oder mock auswählen; die übrigen LSEG-Schnittstellen bleiben erhalten.
 
 **F: Wo sind die Kategorien definiert?**
 A: In `app/providers/finnhub.py` - Methode `_detect_category()`

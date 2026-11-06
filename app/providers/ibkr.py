@@ -17,12 +17,12 @@
 import asyncio
 import math
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Any, Literal, cast
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ib_async import IB, Contract, Future, Index, Option, Stock, Ticker
+from ib_async import IB, Contract, ContractDetails, Future, Index, Option, Stock, Ticker
 from ib_async.objects import BarData, HistoricalNews
 
 from app.config import settings
@@ -30,23 +30,57 @@ from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsArticle
 from app.models.options import OptionChain, OptionQuote
 from app.models.price import PriceBar, PriceQuote
+from app.models.volatility import (
+    ImpliedVolatilityTenor,
+    VolatilityHistory,
+    VolatilityPoint,
+    VolatilitySecType,
+    VolatilitySnapshot,
+    VolatilityTenorDays,
+    quantize_iv,
+    uniform_tenors,
+)
 from app.providers.base import (
     BaseCompanyProvider,
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
+    BaseVolatilityProvider,
 )
-from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
+from app.utils.errors import (
+    AppError,
+    CapabilityNotSupportedError,
+    DataNotFoundError,
+    DataValidationError,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderTimeoutError,
+)
 from app.utils.logging import logger
 
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
 
+_FUTURES_EXCHANGES = {
+    **dict.fromkeys(("ES", "NQ", "RTY"), "CME"),
+    **dict.fromkeys(("YM", "ZC", "ZW", "ZS", "ZN", "ZB"), "CBOT"),
+    **dict.fromkeys(("CL", "NG", "RB", "HO"), "NYMEX"),
+    **dict.fromkeys(("GC", "SI", "HG"), "COMEX"),
+}
+
 
 class IBKRProvider(
-    BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider, BaseNewsProvider
+    BasePriceProvider,
+    BaseOptionsProvider,
+    BaseCompanyProvider,
+    BaseNewsProvider,
+    BaseVolatilityProvider,
 ):
     """Implementation for IBKR provider using ib_async."""
+
+    volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
+    volatility_history_sec_types = frozenset({"stock", "etf", "index"})
+    volatility_tenors = frozenset({30})
 
     def __init__(self) -> None:
         self.ib = IB()
@@ -64,6 +98,7 @@ class IBKRProvider(
 
         # Track subscription errors
         self._subscription_errors: list[dict[str, Any]] = []
+        self._volatility_request_ids: set[int] = set()
 
         # Track explicitly requested market data type (None = using default)
         self._requested_market_data_type: int | None = None
@@ -325,6 +360,8 @@ class IBKRProvider(
         - For Level 1 (Live): Set flag to raise exception later
         - For Level 2/3 (Frozen/Delayed): Gracefully degrade to available data
         """
+        if reqId in self._volatility_request_ids:
+            return
         if errorCode in (10089, 10091):
             # Check if Level 1 is being used (explicitly requested or default)
             effective_type = self._get_effective_market_data_type()
@@ -338,6 +375,7 @@ class IBKRProvider(
                 # Store details for later exception
                 self._subscription_errors.append(
                     {
+                        "request_id": reqId,
                         "error_code": errorCode,
                         "error_string": errorString,
                         "contract": str(contract),
@@ -802,6 +840,372 @@ class IBKRProvider(
         finally:
             await self._disconnect()
 
+    def _validate_volatility_request(
+        self,
+        sec_type: VolatilitySecType,
+        ric: str | None,
+        *,
+        history: bool = False,
+        tenor_days: VolatilityTenorDays = 30,
+    ) -> None:
+        if ric is not None:
+            raise DataValidationError("The ric override is only supported by LSEG")
+        if sec_type not in self.volatility_sec_types:
+            raise DataValidationError(f"Invalid volatility security type: {sec_type}")
+        if history:
+            if tenor_days not in (30, 60, 90):
+                raise DataValidationError("IV tenor must be 30, 60 or 90 days")
+            if sec_type not in self.volatility_history_sec_types:
+                raise CapabilityNotSupportedError(
+                    "ibkr",
+                    "history",
+                    sec_type=sec_type,
+                    tenor_days=tenor_days,
+                    supported=sorted(self.volatility_history_sec_types),
+                )
+            if tenor_days not in self.volatility_tenors:
+                raise CapabilityNotSupportedError(
+                    "ibkr",
+                    "history",
+                    sec_type=sec_type,
+                    tenor_days=tenor_days,
+                    supported=sorted(self.volatility_tenors),
+                )
+
+    async def _volatility_contract(
+        self, symbol: str, sec_type: VolatilitySecType
+    ) -> tuple[Contract, ContractDetails | None]:
+        root = symbol.upper().lstrip("^.")
+        if sec_type != "future":
+            contract = (
+                Index(root, self._get_index_exchange(root))
+                if sec_type == "index"
+                else Stock(root, "SMART", "USD")
+            )
+            qualified = await self.ib.qualifyContractsAsync(contract)
+            qualified_contract = qualified[0] if qualified else None
+            if not isinstance(qualified_contract, Contract):
+                raise DataNotFoundError("Contract", root)
+            details = await self.ib.reqContractDetailsAsync(qualified_contract)
+            return qualified_contract, details[0] if details else None
+
+        exchange = _FUTURES_EXCHANGES.get(root)
+        details = await self.ib.reqContractDetailsAsync(
+            Future(root, exchange=exchange or "")
+        )
+        contracts = [
+            (detail.contract, detail)
+            for detail in details
+            if detail.contract is not None and detail.contract.secType == "FUT"
+        ]
+        if exchange is None:
+            exchanges = sorted(
+                {
+                    future_contract.exchange
+                    for future_contract, _ in contracts
+                    if future_contract.exchange
+                }
+            )
+            if len(exchanges) != 1:
+                raise DataValidationError(
+                    "Unknown futures root must resolve to exactly one exchange",
+                    details={"symbol": root, "exchanges": exchanges},
+                )
+        cutoff = date.today() + timedelta(days=7)
+        candidates = []
+        for future_contract, detail in contracts:
+            expiry = future_contract.lastTradeDateOrContractMonth.split(" ")[0]
+            if len(expiry) != 8:
+                expiry = getattr(detail, "realExpirationDate", "")
+            try:
+                last_trade = datetime.strptime(expiry, "%Y%m%d").date()
+            except ValueError:
+                continue
+            if last_trade >= cutoff:
+                candidates.append((last_trade, future_contract, detail))
+        if not candidates:
+            raise DataNotFoundError(
+                "ImpliedVolatility", root, details={"reason": "no_iv_data"}
+            )
+        _, selected_contract, selected = min(candidates, key=lambda item: item[0])
+        return selected_contract, selected
+
+    @staticmethod
+    def _volatility_error(exc: Exception, instrument: str, reason: str) -> AppError:
+        if isinstance(exc, AppError):
+            return exc
+        message = str(exc).lower()
+        details = {"instrument": instrument}
+        if isinstance(exc, TimeoutError) or "timeout" in message:
+            return ProviderTimeoutError("ibkr", details=details)
+        if any(
+            token in message
+            for token in (
+                "354",
+                "10089",
+                "not subscribed",
+                "no permission",
+                "not entitled",
+                "no market data permissions",
+            )
+        ):
+            return ProviderError(
+                "IBKR implied volatility is not entitled",
+                code="PROVIDER_NOT_AVAILABLE",
+                details={**details, "reason": "not_entitled"},
+            )
+        if "hmds query returned no data" in message or "no data" in message:
+            return DataNotFoundError(
+                "ImpliedVolatility", instrument, details={"reason": reason}
+            )
+        if isinstance(exc, (ConnectionError, OSError)) or "connection" in message:
+            return ProviderConnectionError(
+                "IBKR implied volatility connection failed", details=details
+            )
+        return ProviderError(
+            "Failed to retrieve IBKR implied volatility",
+            details={**details, "error": str(exc)},
+        )
+
+    def _release_volatility_request(self, request_id: int | None) -> None:
+        if request_id is None:
+            return
+        self._volatility_request_ids.discard(request_id)
+        remaining = [
+            error
+            for error in self._subscription_errors
+            if error.get("request_id") != request_id
+        ]
+        if len(remaining) != len(self._subscription_errors):
+            self._subscription_errors = remaining
+            self._level1_subscription_error = any(
+                error.get("error_code") in (10089, 10091) for error in remaining
+            )
+
+    async def _request_implied_volatility(
+        self, contract: Contract
+    ) -> tuple[Decimal, Ticker]:
+        errors: list[str] = []
+        request_id: int | None = None
+
+        def on_error(
+            req_id: int, code: int, message: str, error_contract: Contract | None
+        ) -> None:
+            if code not in (354, 10089):
+                return
+            if request_id is not None:
+                if req_id != request_id:
+                    return
+            elif error_contract is None or error_contract.conId != contract.conId:
+                return
+            errors.append(message)
+
+        self.ib.errorEvent += on_error
+        try:
+            ticker = self.ib.reqMktData(contract, "106", False, False)
+            request_id = self.ib.wrapper.ticker2ReqId.get("mktData", {}).get(ticker)
+            if request_id is not None:
+                self._volatility_request_ids.add(request_id)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + settings.IBKR_IV_TIMEOUT_SECONDS
+            while True:
+                if errors:
+                    raise ProviderError(
+                        "IBKR implied volatility is not entitled",
+                        code="PROVIDER_NOT_AVAILABLE",
+                        details={
+                            "reason": "not_entitled",
+                            "instrument": contract.localSymbol or contract.symbol,
+                        },
+                    )
+                iv = quantize_iv(ticker.impliedVolatility)
+                if iv is not None and iv > 0:
+                    return iv, ticker
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise DataNotFoundError(
+                        "ImpliedVolatility",
+                        contract.localSymbol or contract.symbol,
+                        details={"reason": "no_iv_data"},
+                    )
+                await asyncio.sleep(min(0.1, remaining))
+        finally:
+            try:
+                self.ib.cancelMktData(contract)
+            finally:
+                self.ib.errorEvent -= on_error
+                self._release_volatility_request(request_id)
+
+    async def get_implied_volatility(
+        self,
+        symbol: str,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilitySnapshot:
+        """Fetch IBKR's combined 30-day IV model using a streaming tick 106."""
+        self._validate_volatility_request(sec_type, ric)
+        instrument = symbol.upper()
+        used_delayed_fallback = False
+        try:
+            await self._ensure_connection()
+            contract, details = await self._volatility_contract(symbol, sec_type)
+            instrument = contract.localSymbol or contract.symbol
+            await self._set_market_data_type(self.market_data_type)
+            try:
+                iv, ticker = await self._request_implied_volatility(contract)
+            except Exception as exc:
+                error = self._volatility_error(exc, instrument, "no_iv_data")
+                if (
+                    self.market_data_type != 1
+                    or not self.fallback_on_subscription_error
+                    or error.details.get("reason") != "not_entitled"
+                ):
+                    if error is exc:
+                        raise
+                    raise error from exc
+                used_delayed_fallback = True
+                await self._set_market_data_type(3)
+                iv, ticker = await self._request_implied_volatility(contract)
+
+            as_of = None
+            if ticker.time is not None:
+                timezone_name = getattr(details, "timeZoneId", "") or "America/New_York"
+                exchange_timezone: tzinfo
+                try:
+                    exchange_timezone = ZoneInfo(timezone_name)
+                except ZoneInfoNotFoundError:
+                    exchange_timezone = UTC
+                timestamp = ticker.time
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=UTC)
+                as_of = timestamp.astimezone(exchange_timezone).date()
+            return VolatilitySnapshot(
+                symbol=symbol.upper(),
+                sec_type=sec_type,
+                method="provider_model_30d",
+                source_instrument=instrument,
+                underlying=contract.symbol,
+                underlying_name=getattr(details, "longName", None) or None,
+                market=contract.primaryExchange or contract.exchange or None,
+                as_of=as_of,
+                implied=uniform_tenors(
+                    {
+                        30: ImpliedVolatilityTenor(tenor_days=30, iv=iv),
+                    }
+                ),
+                provider="ibkr",
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise self._volatility_error(exc, instrument, "no_iv_data") from exc
+        finally:
+            if used_delayed_fallback:
+                await self._set_market_data_type(self.market_data_type)
+            await self._disconnect()
+
+    async def get_implied_volatility_history(
+        self,
+        symbol: str,
+        start: date,
+        end: date,
+        tenor_days: VolatilityTenorDays = 30,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilityHistory:
+        """Fetch daily stock/ETF/index IV; futures history is deliberately rejected."""
+        self._validate_volatility_request(
+            sec_type, ric, history=True, tenor_days=tenor_days
+        )
+        if start > end:
+            raise DataValidationError("IV history start must not be after end")
+        instrument = symbol.upper()
+        errors: dict[int, str] = {}
+        request_id: int | None = None
+
+        def on_error(
+            req_id: int, code: int, message: str, contract: Contract | None
+        ) -> None:
+            if code in (354, 10089) or any(
+                token in message.lower()
+                for token in (
+                    "no permission",
+                    "not entitled",
+                    "no market data permissions",
+                    "hmds query returned no data",
+                )
+            ):
+                errors[req_id] = f"{code}: {message}"
+
+        try:
+            await self._ensure_connection()
+            contract, _ = await self._volatility_contract(symbol, sec_type)
+            instrument = contract.localSymbol or contract.symbol
+            days = (end - start).days + 1
+            duration = f"{days} D" if days <= 365 else f"{math.ceil(days / 365)} Y"
+            end_time = (
+                ""
+                if end >= date.today()
+                else datetime.combine(
+                    end,
+                    datetime.max.time().replace(microsecond=0),
+                    ZoneInfo("America/New_York"),
+                )
+            )
+            self.ib.errorEvent += on_error
+            try:
+                # The SDK's own timer swallows timeouts as an empty list; classify ours.
+                bars = await asyncio.wait_for(
+                    self.ib.reqHistoricalDataAsync(
+                        contract,
+                        endDateTime=end_time,
+                        durationStr=duration,
+                        barSizeSetting="1 day",
+                        whatToShow="OPTION_IMPLIED_VOLATILITY",
+                        useRTH=True,
+                        formatDate=1,
+                        timeout=0,
+                    ),
+                    timeout=getattr(self, "timeout_seconds", 60),
+                )
+                request_id = getattr(bars, "reqId", None)
+            finally:
+                self.ib.errorEvent -= on_error
+            message = errors.get(request_id) if request_id is not None else None
+            if message:
+                raise self._volatility_error(
+                    RuntimeError(message), instrument, "no_iv_history"
+                )
+            points = []
+            for bar in bars:
+                point_date = bar.date
+                if isinstance(point_date, datetime):
+                    point_date = point_date.date()
+                elif isinstance(point_date, str):
+                    point_date = date.fromisoformat(point_date)
+                iv = quantize_iv(bar.close)
+                if iv is not None and iv > 0 and start <= point_date <= end:
+                    points.append(VolatilityPoint(date=point_date, iv=iv))
+            if not points:
+                raise DataNotFoundError(
+                    "ImpliedVolatility", instrument, details={"reason": "no_iv_history"}
+                )
+            return VolatilityHistory(
+                symbol=symbol.upper(),
+                sec_type=sec_type,
+                source_instrument=instrument,
+                tenor_days=tenor_days,
+                points=points,
+                provider="ibkr",
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise self._volatility_error(exc, instrument, "no_iv_history") from exc
+        finally:
+            self._release_volatility_request(request_id)
+            await self._disconnect()
+
     async def get_option_chain(
         self,
         symbol: str,
@@ -1122,7 +1526,7 @@ class IBKRProvider(
         # Mapping of common index symbols to their exchanges
         index_exchanges = {
             "SPX": "CBOE",  # S&P 500
-            "RUT": "CBOE",  # Russell 2000
+            "RUT": "RUSSELL",  # Russell 2000
             "VIX": "CBOE",  # Volatility Index
             "NDX": "NASDAQ",  # NASDAQ-100
             "DJX": "CBOE",  # Dow Jones

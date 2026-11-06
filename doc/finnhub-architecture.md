@@ -296,6 +296,9 @@ FinnhubProvider.get_company_news()
 
 ## Provider Registry: Before & After
 
+The first example is historical. LSEG news is no longer part of the hub; current
+news providers are Finnhub, IBKR and mock, with the default chosen in Admin Settings.
+
 ### Before (LSEG only for news)
 ```python
 # app/providers/registry.py
@@ -314,7 +317,7 @@ def _initialize_providers(self):
     self._providers["ibkr"] = IBKRProvider()
     self._providers["finnhub"] = FinnhubProvider()  ← NEW!
     self._providers["mock"] = MockProvider()
-    # News now from Finnhub (default), LSEG, IBKR, or Mock
+    # News from Finnhub, IBKR, or Mock; configure the default in Admin Settings
 ```
 
 ---

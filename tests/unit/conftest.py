@@ -1,10 +1,21 @@
 import fnmatch
-from unittest.mock import AsyncMock
+from datetime import date, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi_cache import FastAPICache
 
 from app import cache as response_cache
+from app.models.volatility import (
+    ImpliedVolatilityTenor,
+    VolatilityHistory,
+    VolatilityPoint,
+    VolatilitySnapshot,
+)
+from app.providers.base import BaseVolatilityProvider
+from app.providers.registry import ProviderRegistry
+from app.services.volatility_service import VolatilityService
 
 
 class FakeRedis:
@@ -96,3 +107,35 @@ def cache_redis(monkeypatch):
     )
     yield redis
     response_cache._disable_cache()
+
+
+@pytest.fixture
+def volatility_env(monkeypatch):
+    monkeypatch.setattr(ProviderRegistry, "_initialize_providers", lambda self: None)
+    registry = ProviderRegistry()
+    providers = {}
+    for name in ("lseg", "ibkr"):
+        provider = Mock(spec=BaseVolatilityProvider)
+        provider.name = name
+        provider.volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
+        provider.volatility_history_sec_types = (
+            provider.volatility_sec_types if name == "lseg" else frozenset({"stock", "etf", "index"})
+        )
+        provider.volatility_tenors = frozenset({30, 60, 90} if name == "lseg" else {30})
+        instrument = "AAPLATMIV.U" if name == "lseg" else "AAPL"
+        snapshot = VolatilitySnapshot(
+            symbol="AAPL", sec_type="stock", method="provider_atm_index" if name == "lseg" else "provider_model_30d",
+            source_instrument=instrument, underlying="AAPL", underlying_name="APPLE INC",
+            market="OPRA" if name == "lseg" else "NASDAQ", as_of=date.today(),
+            implied=[ImpliedVolatilityTenor(tenor_days=30, iv="0.26765")], provider=name,
+        )
+        history = VolatilityHistory(
+            symbol="AAPL", sec_type="stock", source_instrument=instrument, tenor_days=30, provider=name,
+            points=[VolatilityPoint(date=date.today() - timedelta(days=25 - index), iv="0.2") for index in range(25)],
+        )
+        provider.get_implied_volatility = AsyncMock(return_value=snapshot)
+        provider.get_implied_volatility_history = AsyncMock(return_value=history)
+        providers[name] = provider
+    registry._providers = {**providers, "schwab": object()}
+    registry.default_volatility_provider = "lseg"
+    return SimpleNamespace(registry=registry, service=VolatilityService(registry), **providers)

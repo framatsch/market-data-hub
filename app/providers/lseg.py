@@ -22,16 +22,30 @@ from collections import deque
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar, cast
 
 import pandas as pd
 
 from app.config import settings
 from app.models.company import CompanyProfile, CompanySummary
-from app.models.news import NewsArticle
 from app.models.price import PriceBar, PriceQuote
-from app.providers.base import BaseCompanyProvider, BaseNewsProvider, BasePriceProvider
+from app.models.volatility import (
+    ImpliedVolatilityTenor,
+    VolatilityHistory,
+    VolatilityPoint,
+    VolatilitySecType,
+    VolatilitySnapshot,
+    VolatilityTenorDays,
+    combine_iv,
+    quantize_iv,
+    uniform_tenors,
+)
+from app.providers.base import (
+    BaseCompanyProvider,
+    BasePriceProvider,
+    BaseVolatilityProvider,
+)
 from app.providers.credentials import get_provider_credential_sync
 from app.utils.errors import (
     DataNotFoundError,
@@ -54,6 +68,33 @@ except ImportError:
     logger.warning("refinitiv.data not available - LSEG provider will not work")
 
 T = TypeVar("T")
+IV_FIDS = [f"{tenor}D_A_IM_{side}" for tenor in (30, 60, 90) for side in ("C", "P")]
+META_FIDS = ["TRADE_DATE", "DSPLY_NAME", "UNDERLYING", "INST_DESC", "GN_TXT16_5"]
+
+
+def _volatility_instrument(
+    symbol: str, sec_type: VolatilitySecType, ric: str | None = None
+) -> str:
+    """Resolve constant-maturity ATMIV records without an instrument search."""
+    if sec_type not in {"stock", "etf", "index", "future"}:
+        raise DataValidationError(f"Invalid volatility security type: {sec_type}")
+    if ric is not None:
+        return ric
+    root = symbol.upper().lstrip("^.")
+    return f"{root}ATMIV" if sec_type == "future" else f"{root}ATMIV.U"
+
+
+def _percent_iv(value: Any) -> Decimal | None:
+    try:
+        return quantize_iv(Decimal(str(value)) / 100)
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _volatility_text(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return str(value).strip() or None
 
 
 def _patch_refinitiv_httpx_proxy_handling() -> None:
@@ -97,12 +138,16 @@ def _patch_refinitiv_httpx_proxy_handling() -> None:
     logger.info("Applied refinitiv-data proxy compatibility patch for httpx>=0.26")
 
 
-class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
-    """Refinitiv (LSEG) provider for stock prices, company data, and news.
+class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvider):
+    """Refinitiv (LSEG) prices, company data and underlying ATM IV.
 
     ⚠️  Options NOT supported - use IBKR provider instead.
     LSEG subscription lacks 'trapi.data.pricing.read' scope required for real-time Greeks.
     """
+
+    volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
+    volatility_history_sec_types = volatility_sec_types
+    volatility_tenors = frozenset({30, 60, 90})
 
     def __init__(self) -> None:
         if not REFINITIV_AVAILABLE:
@@ -572,6 +617,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
             "no such",
             "unknown",
             "invalid ric",
+            "usernotpermission",
+            "user has no permission",
+            "user does not have permission",
+            "insufficient scope",
         ]
         if any(keyword in error_str for keyword in non_retryable_keywords):
             return False
@@ -697,6 +746,215 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
         self._cache_quote(symbol, quote)
 
         return quote
+
+    def _fetch_volatility_data(
+        self, fetch: Callable[[], pd.DataFrame], instrument: str, reason: str
+    ) -> pd.DataFrame:
+        """Use existing retries and classify entitlement errors before no-data errors."""
+        try:
+            return self._retry_with_backoff(fetch)
+        except Exception as exc:
+            message = str(exc).lower()
+            if any(
+                token in message
+                for token in (
+                    "usernotpermission",
+                    "user has no permission",
+                    "user does not have permission",
+                    "insufficient scope",
+                )
+            ):
+                raise ProviderError(
+                    "LSEG implied volatility is not entitled",
+                    code="PROVIDER_NOT_AVAILABLE",
+                    details={"reason": "not_entitled", "instrument": instrument},
+                ) from exc
+            if isinstance(exc, (DataNotFoundError, DataValidationError, ProviderError)):
+                raise
+            if any(
+                token in message for token in ("no data", "not found", "invalid ric")
+            ):
+                raise DataNotFoundError(
+                    "ImpliedVolatility", instrument, details={"reason": reason}
+                ) from exc
+            raise ProviderError(
+                "Failed to retrieve LSEG implied volatility",
+                details={"instrument": instrument, "error": str(exc)},
+            ) from exc
+
+    @staticmethod
+    def _validate_volatility_market(
+        row: pd.Series, sec_type: VolatilitySecType, ric: str | None
+    ) -> None:
+        if ric is not None:
+            return
+        expected = ["COMFUT", "CMEG"] if sec_type == "future" else ["OPRA"]
+        market = _volatility_text(row.get("GN_TXT16_5"))
+        market = market.upper() if market else None
+        if market not in expected:
+            raise DataValidationError(
+                "LSEG volatility instrument market does not match the security type",
+                details={
+                    "expected_market": expected,
+                    "market": market,
+                    "underlying_name": _volatility_text(row.get("INST_DESC")),
+                },
+            )
+
+    async def get_implied_volatility(
+        self,
+        symbol: str,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilitySnapshot:
+        """Fetch daily/hourly constant-maturity ATM IV, not per-option Greeks."""
+        return await asyncio.to_thread(
+            self._get_implied_volatility_sync, symbol, sec_type, ric
+        )
+
+    def _get_implied_volatility_sync(
+        self, symbol: str, sec_type: VolatilitySecType, ric: str | None
+    ) -> VolatilitySnapshot:
+        instrument = _volatility_instrument(symbol, sec_type, ric)
+
+        def fetch() -> pd.DataFrame:
+            self._get_session()
+            self._throttle()
+            return rd.get_data(instrument, IV_FIDS + META_FIDS)
+
+        frame = self._fetch_volatility_data(fetch, instrument, "no_iv_data")
+        tenors: dict[int, ImpliedVolatilityTenor] = {}
+        if frame is not None and not frame.empty:
+            row = frame.iloc[0]
+            for days in (30, 60, 90):
+                call = _percent_iv(row.get(f"{days}D_A_IM_C"))
+                put = _percent_iv(row.get(f"{days}D_A_IM_P"))
+                tenors[days] = ImpliedVolatilityTenor(
+                    tenor_days=days, iv_call=call, iv_put=put, iv=combine_iv(call, put)
+                )
+        if not any(tenor.iv is not None for tenor in tenors.values()):
+            raise DataNotFoundError(
+                "ImpliedVolatility", instrument, details={"reason": "no_iv_data"}
+            )
+        self._validate_volatility_market(row, sec_type, ric)
+        trade_date = pd.to_datetime(row.get("TRADE_DATE"), errors="coerce")
+        market = _volatility_text(row.get("GN_TXT16_5"))
+        return VolatilitySnapshot(
+            symbol=symbol.upper(),
+            sec_type=sec_type,
+            method="provider_atm_index",
+            source_instrument=instrument,
+            underlying=_volatility_text(row.get("UNDERLYING")),
+            underlying_name=_volatility_text(row.get("INST_DESC")),
+            market=market.upper() if market else None,
+            as_of=trade_date.date() if pd.notna(trade_date) else None,
+            implied=uniform_tenors(tenors),
+            provider="lseg",
+        )
+
+    async def get_implied_volatility_history(
+        self,
+        symbol: str,
+        start: date,
+        end: date,
+        tenor_days: VolatilityTenorDays = 30,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilityHistory:
+        """Fetch ascending daily ATM IV points; no provider-level cache."""
+        return await asyncio.to_thread(
+            self._get_implied_volatility_history_sync,
+            symbol,
+            start,
+            end,
+            tenor_days,
+            sec_type,
+            ric,
+        )
+
+    def _get_implied_volatility_history_sync(
+        self,
+        symbol: str,
+        start: date,
+        end: date,
+        tenor_days: VolatilityTenorDays,
+        sec_type: VolatilitySecType,
+        ric: str | None,
+    ) -> VolatilityHistory:
+        if start > end or tenor_days not in self.volatility_tenors:
+            raise DataValidationError("Invalid IV date range or tenor (30, 60, 90)")
+        instrument = _volatility_instrument(symbol, sec_type, ric)
+
+        # Validate history identity too, without requiring a current IV snapshot.
+        if ric is None:
+
+            def fetch_metadata() -> pd.DataFrame:
+                self._get_session()
+                self._throttle()
+                return rd.get_data(instrument, META_FIDS)
+
+            metadata = self._fetch_volatility_data(
+                fetch_metadata, instrument, "no_iv_history"
+            )
+            if (
+                metadata is None
+                or metadata.empty
+                or _volatility_text(metadata.iloc[0].get("GN_TXT16_5")) is None
+            ):
+                raise DataNotFoundError(
+                    "ImpliedVolatility", instrument, details={"reason": "no_iv_history"}
+                )
+            self._validate_volatility_market(metadata.iloc[0], sec_type, ric)
+
+        fields = [f"{tenor_days}D_A_IM_C", f"{tenor_days}D_A_IM_P"]
+
+        def fetch_history() -> pd.DataFrame:
+            self._get_session()
+            self._throttle()
+            # LSEG's daily lower bound is exclusive; filter back to [start, end] below.
+            query_start = start - timedelta(days=1) if start > date.min else start
+            return (
+                historical_pricing.summaries.Definition(
+                    universe=instrument,
+                    interval=historical_pricing.Intervals.DAILY,
+                    start=query_start.isoformat(),
+                    end=end.isoformat(),
+                    fields=fields,
+                )
+                .get_data()
+                .data.df
+            )
+
+        frame = self._fetch_volatility_data(fetch_history, instrument, "no_iv_history")
+        points = []
+        if frame is not None:
+            for index, row in frame.iterrows():
+                call = _percent_iv(row.get(fields[0]))
+                put = _percent_iv(row.get(fields[1]))
+                iv = combine_iv(call, put)
+                point_date = pd.to_datetime(index, errors="coerce")
+                if (
+                    iv is not None
+                    and pd.notna(point_date)
+                    and start <= point_date.date() <= end
+                ):
+                    points.append(
+                        VolatilityPoint(
+                            date=point_date.date(), iv_call=call, iv_put=put, iv=iv
+                        )
+                    )
+        if not points:
+            raise DataNotFoundError(
+                "ImpliedVolatility", instrument, details={"reason": "no_iv_history"}
+            )
+        return VolatilityHistory(
+            symbol=symbol.upper(),
+            sec_type=sec_type,
+            source_instrument=instrument,
+            tenor_days=tenor_days,
+            points=points,
+            provider="lseg",
+        )
 
     async def get_historical_prices(
         self,
@@ -967,117 +1225,3 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseNewsProvider):
                 provider="lseg",
             ),
         ]
-
-    # ========================================================================
-    # News Provider Methods (BaseNewsProvider)
-    # ========================================================================
-
-    async def get_company_news(
-        self,
-        symbol: str,
-        from_date: date,
-        to_date: date,
-        limit: int = 20,
-        offset: int = 0,
-        language: str = "en",
-        category: str | None = None,
-    ) -> list[NewsArticle]:
-        """Get news articles for a company from LSEG."""
-        return await asyncio.to_thread(
-            self._get_company_news_sync,
-            symbol,
-            from_date,
-            to_date,
-            limit,
-            offset,
-            language,
-            category,
-        )
-
-    def _get_company_news_sync(
-        self,
-        symbol: str,
-        from_date: date,
-        to_date: date,
-        limit: int = 20,
-        offset: int = 0,
-        language: str = "en",
-        category: str | None = None,
-    ) -> list[NewsArticle]:
-        _ = language
-        try:
-            # 1. Convert ticker to RIC
-            ric = self._ticker_to_ric(symbol)
-            if not ric:
-                raise DataNotFoundError("Ticker", symbol)
-
-            # 2. Fetch news headlines using Refinitiv Data Library
-            # Use rd.news.get_headlines() with RIC query
-            df = rd.news.get_headlines(
-                query=f"R:{ric}",
-                count=limit + offset,
-                start=f"{from_date.isoformat()}T00:00:00",
-                end=f"{to_date.isoformat()}T23:59:59",
-            )
-
-            # 3. Check response validity
-            if df is None or df.empty:
-                return []
-
-            # 4. Apply offset and limit
-            if offset > 0:
-                df = df.iloc[offset:]
-            df = df.head(limit)
-
-            # 5. Parse articles from DataFrame
-            articles = []
-            for _, row in df.iterrows():
-                # Extract basic fields
-                article_id = f"lseg:{row.get('storyId', '')}"
-                title = row.get("headline", "No title")
-                published_at = pd.to_datetime(row.get("versionCreated"))
-                source = row.get("sourceCode", "LSEG")
-                url = row.get("storyUrl", "")
-
-                # 6. Map LSEG subjects to categories
-                subjects = row.get("subjects", [])
-                category_map = {
-                    "EARN": "earnings",
-                    "M&A": "merger",
-                    "PROD": "product",
-                    "REG": "legal",
-                }
-                article_category = None
-                if isinstance(subjects, list):
-                    for subj in subjects:
-                        if subj in category_map:
-                            article_category = category_map[subj]
-                            break
-
-                # 7. Apply category filter
-                if category and article_category != category:
-                    continue
-
-                # 8. Create article object (full_text is optional for LSEG)
-                articles.append(
-                    NewsArticle(
-                        article_id=article_id,
-                        title=title,
-                        summary=row.get("firstParagraph", title),
-                        published_at=published_at,
-                        source=source,
-                        url=url,
-                        full_text=None,  # Full text requires separate API call
-                        category=article_category,
-                        image=None,
-                        sentiment=None,
-                    )
-                )
-
-            return articles
-
-        except DataNotFoundError:
-            raise
-        except Exception as e:
-            logger.error(f"LSEG news error for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch news from LSEG: {e!s}")

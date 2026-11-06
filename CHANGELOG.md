@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
 ### Added
 
+- Underlying implied-volatility snapshots and daily history from LSEG and IBKR,
+  plus provider-independent IV Rank/Percentile through three REST endpoints and
+  three MCP tools. All underlying IV uses four-place decimal fractions; provider
+  support metadata and a DB-backed default expose supported markets and tenors.
+  New settings: `IBKR_IV_TIMEOUT_SECONDS` (default `10`, IV tick wait) and
+  `CACHE_TTL_VOLATILITY_SECONDS` (default `900`, Redis cache for IV
+  snapshots/stats/open history, no market-closed extension).
 - Shared, fail-open Redis response caching for option chains and historical prices,
   including JSON/CSV HIT/MISS headers, ETag revalidation, and client bypass headers.
 - Extended caching to company profiles, search, news (JSON/CSV), market status,
@@ -22,11 +31,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `schwab_cli.py`: CLI to download Schwab accounts, positions and transactions
   into the wrapped JSON format used by the Trade Sensei importer (with unit tests).
 
+### Changed
+
+- Removed unsupported LSEG news integration from provider capabilities, the
+  public provider catalog and REST/MCP guidance. Use Finnhub, IBKR or mock for
+  news; an obsolete LSEG news default is treated as unconfigured. Clear old
+  `company_news` cache entries for `provider=lseg` when upgrading with Redis.
+- Schwab option-chain and option-quote `implied_volatility` now uses a decimal
+  fraction (`0.22345` = 22.345%), consistent with IBKR, Polygon and underlying
+  IV values. Multiply by 100 for percentage display. Missing/NaN values and
+  negative sentinels such as `-999` now return `null`.
+
 ### Fixed
 
+- Normalized historical REST/MCP request date ranges to UTC before provider
+  calls, fixing IBKR's naive/aware datetime subtraction error when `end` is
+  omitted or timezone forms are mixed. Both channels use UTC-aware current-time
+  defaults and derive a missing start from the effective end minus 30 days.
 - Admin UI TypeScript and React Hooks lint failures: typed API results and errors,
   derived form defaults that preserve local edits, valid sidebar route matching,
   and OAuth polling timer cleanup.
+- Resolved the `E402` lint error in `app/logging_config.py` (misplaced
+  `typing` import), so `ruff check app/` passes cleanly.
+
+### Documentation
+
+- Updated README, provider/Finnhub/news guides and Copilot instructions for the
+  LSEG news removal, underlying IV and response-cache changes; synced and
+  archived the OpenSpec changes (`underlying-implied-volatility`,
+  `extend-response-cache-coverage`).
 
 ## [1.1.3] - 2026-09-03
 

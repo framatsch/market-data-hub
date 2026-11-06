@@ -59,7 +59,7 @@ async def get_company_news(
     symbol: str,
     service: NewsServiceDep,
     provider: str | None = Query(
-        None, description="Data provider (finnhub, lseg, ibkr, mock)"
+        None, description="News provider (finnhub, ibkr, mock)"
     ),
     days: int | None = Query(None, description="Last N days (overrides from/to dates)"),
     from_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),

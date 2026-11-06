@@ -1,5 +1,6 @@
 import pytest
 
+from app import config
 from app.config import Settings
 
 
@@ -51,3 +52,15 @@ def test_dev_allows_admin_auth_disabled() -> None:
 
     assert settings.APP_ENV == "dev"
     assert settings.ADMIN_AUTH_ENABLED is False
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [("1.2.3", "1.2.3"), (123, "0.0.0"), (None, "0.0.0")],
+)
+def test_app_version_requires_string(monkeypatch, version, expected):
+    monkeypatch.setattr(
+        config.tomllib, "load", lambda file: {"project": {"version": version}}
+    )
+
+    assert config._get_app_version() == expected

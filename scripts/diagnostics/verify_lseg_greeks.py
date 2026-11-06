@@ -344,7 +344,7 @@ def generate_summary(search_results, pricing_results):
         print("     → Action: REMOVE LSEGProvider options support")
         print("     → Reason: Black-Scholes fallback too inaccurate (30-50% error)")
         print("     → Strategy: Use IBKR exclusively for options")
-        print("     → Use LSEG: Only for stock prices, company data, news")
+        print("     → Use LSEG: Stock prices, company data, underlying IV (not news)")
 
     print("\n" + "="*80)
 

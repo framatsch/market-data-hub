@@ -24,6 +24,12 @@ from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsArticle
 from app.models.options import OptionChain, OptionQuote
 from app.models.price import PriceBar, PriceQuote
+from app.models.volatility import (
+    VolatilityHistory,
+    VolatilitySecType,
+    VolatilitySnapshot,
+    VolatilityTenorDays,
+)
 
 
 class BasePriceProvider(ABC):
@@ -153,6 +159,45 @@ class BaseNewsProvider(ABC):
             DataNotFoundError: If symbol not found
             ProviderError: If news retrieval fails
         """
+
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test provider connectivity and return status_code/success/message/details."""
+
+
+class BaseVolatilityProvider(ABC):
+    """Underlying implied volatility, separate from per-contract options data."""
+
+    name = "none"
+    volatility_sec_types: frozenset[str] = frozenset()
+    volatility_history_sec_types: frozenset[str] = frozenset()
+    volatility_tenors: frozenset[int] = frozenset()
+
+    def configure(self, config: Any) -> None:
+        """Apply runtime configuration from the admin repository."""
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
+
+    @abstractmethod
+    async def get_implied_volatility(
+        self,
+        symbol: str,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilitySnapshot:
+        """Fetch an underlying IV snapshot, in decimal fractions."""
+
+    @abstractmethod
+    async def get_implied_volatility_history(
+        self,
+        symbol: str,
+        start: date,
+        end: date,
+        tenor_days: VolatilityTenorDays = 30,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
+    ) -> VolatilityHistory:
+        """Fetch daily underlying IV points, in decimal fractions."""
 
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:

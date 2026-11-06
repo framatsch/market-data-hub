@@ -14,13 +14,18 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 
 from app.models.common import MarketStatus
 from app.models.price import PriceBar, PriceQuote
 from app.providers.registry import ProviderRegistry, get_registry
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Interpret legacy naive request dates as UTC; preserve aware instants."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 class PriceService:
@@ -48,6 +53,7 @@ class PriceService:
         provider_name: str | None = None,
         sec_type: str = "STK",
     ) -> list[PriceBar]:
+        start, end = _as_utc(start), _as_utc(end)
         async with self.registry.use_price_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             return await provider.get_historical_prices(

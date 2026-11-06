@@ -1,0 +1,14 @@
+[
+  {
+    "instrument": "AAPLATMIV.U",
+    "message": "Error code -1 | Insufficient scope for key=/data/datagrid/beta1/, method=POST failed.\n Required scope: {'trapi.data.get.data.read'}\n Missing scopes: {'trapi.data.get.data.read'}"
+  },
+  {
+    "instrument": ".VIX",
+    "message": "Error code 1 | No data to return, please check errors: ERROR: No successful response.\n(TSCC.QS.UserNotPermission.92000, User has no permission)"
+  },
+  {
+    "instrument": ".VXN",
+    "message": "Error code 1 | No data to return, please check errors: ERROR: No successful response.\n(TS.Interday.UserNotPermission.70112, User does not have permission for this universe)"
+  }
+]

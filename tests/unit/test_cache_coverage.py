@@ -10,13 +10,19 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app import cache as response_cache
-from app.api import mcp, routes_companies, routes_meta, routes_prices
-from app.dependencies import get_company_service, get_news_service, get_price_service
+from app.api import mcp, routes_companies, routes_meta, routes_prices, routes_volatility
+from app.dependencies import (
+    get_company_service,
+    get_news_service,
+    get_price_service,
+    get_volatility_service,
+)
 from app.market_hours import ET
 from app.models.common import MarketStatus
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsArticle
 from app.models.options import OptionChain
+from app.utils.errors import AppError
 
 NOW = datetime(2026, 11, 4, 11, tzinfo=ET)
 ROUTES = {
@@ -236,3 +242,88 @@ async def test_never_cached_mcp(cache_redis, services, name, method, index):
     assert not cache_redis.entries
     schema = next(tool for tool in mcp.TOOL_REGISTRY if tool["name"] == name)
     assert "refresh" not in schema["inputSchema"]["properties"]
+
+
+@pytest.fixture
+def volatility_cache_client(cache_redis, volatility_env, monkeypatch):
+    from app.main import app_error_handler
+
+    monkeypatch.setattr(response_cache, "registry", volatility_env.registry)
+    monkeypatch.setattr(mcp, "_volatility_service", lambda: volatility_env.service)
+    app = FastAPI()
+    app.add_middleware(response_cache.CacheControlMiddleware)
+    app.add_exception_handler(AppError, app_error_handler)
+    app.include_router(routes_volatility.router)
+    app.dependency_overrides[get_volatility_service] = lambda: volatility_env.service
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("suffix,method", [("", "get_implied_volatility"), ("/history", "get_implied_volatility_history"), ("/stats", "get_implied_volatility_history")])
+@pytest.mark.parametrize("format", ["json", "csv"])
+def test_volatility_http_cache(volatility_cache_client, cache_redis, volatility_env, suffix, method, format):
+    url = f"/volatility/AAPL{suffix}?format={format}"
+    first, second = volatility_cache_client.get(url), volatility_cache_client.get(url)
+    assert first.status_code == second.status_code == 200
+    assert first.content == second.content
+    assert first.headers["x-fastapi-cache"] == "MISS" and second.headers["x-fastapi-cache"] == "HIT"
+    assert first.headers["cache-control"] == "max-age=900"
+    assert getattr(volatility_env.lseg, method).await_count == 1
+    assert set(cache_redis.ttls.values()) == {900}
+
+
+def test_volatility_cache_keys_isolate_ric_window_and_provider(volatility_cache_client, cache_redis, volatility_env):
+    assert volatility_cache_client.get("/volatility/AAPL").headers["x-fastapi-cache"] == "MISS"
+    assert volatility_cache_client.get("/volatility/AAPL?provider=lseg").headers["x-fastapi-cache"] == "HIT"
+    assert volatility_cache_client.get("/volatility/AAPL?ric=AAPLATMIV.U").headers["x-fastapi-cache"] == "MISS"
+    volatility_env.registry.default_volatility_provider = "ibkr"
+    assert volatility_cache_client.get("/volatility/AAPL").headers["x-fastapi-cache"] == "MISS"
+    for window in (20, 252):
+        assert volatility_cache_client.get(f"/volatility/AAPL/stats?window={window}").status_code == 200
+    assert len(cache_redis.entries) == 5
+    assert "mdh:volatility:snapshot:AAPL:provider=lseg" in cache_redis.entries
+
+
+def test_volatility_zero_policy_keeps_closed_history_cache(volatility_cache_client, cache_redis, volatility_env):
+    response_cache.policy.values.volatility_seconds = 0
+    for suffix in ("", "/history", "/stats"):
+        for _ in range(2):
+            result = volatility_cache_client.get(f"/volatility/AAPL{suffix}")
+            assert result.status_code == 200 and result.headers["cache-control"] == "no-store"
+    assert not cache_redis.entries
+    url = "/volatility/AAPL/history?end=2025-12-31"
+    assert volatility_cache_client.get(url).headers["x-fastapi-cache"] == "MISS"
+    assert volatility_cache_client.get(url).headers["x-fastapi-cache"] == "HIT"
+    assert set(cache_redis.ttls.values()) == {604800}
+
+
+def test_volatility_capability_errors_not_cached(volatility_cache_client, cache_redis, volatility_env):
+    for _ in range(2):
+        assert volatility_cache_client.get("/volatility/ES/history?provider=ibkr&sec_type=future").status_code == 501
+        assert volatility_cache_client.get("/volatility/AAPL/stats?provider=ibkr&tenor_days=60").status_code == 501
+    volatility_env.ibkr.get_implied_volatility_history.assert_not_awaited()
+    assert not cache_redis.entries
+
+
+@pytest.mark.parametrize("name,method,route", [
+    ("get_implied_volatility", "get_implied_volatility", "volatility:snapshot"),
+    ("get_implied_volatility_history", "get_implied_volatility_history", "volatility:history"),
+    ("get_implied_volatility_stats", "get_implied_volatility_history", "volatility:stats"),
+])
+async def test_volatility_mcp_cache_refresh(volatility_cache_client, cache_redis, volatility_env, name, method, route):
+    args = {"symbol": "aapl"}
+    handler = mcp.TOOL_HANDLERS[name]
+    first = await handler(args)
+    assert await handler(args) == first
+    assert getattr(volatility_env.lseg, method).await_count == 1
+    assert f"mdh:{route}:AAPL:channel=mcp&provider=lseg" in cache_redis.entries
+    await handler({**args, "refresh": True})
+    assert getattr(volatility_env.lseg, method).await_count == 2
+    schema = next(tool for tool in mcp.TOOL_REGISTRY if tool["name"] == name)
+    assert schema["inputSchema"]["properties"]["refresh"]["type"] == "boolean"
+
+
+def test_volatility_http_bypass(volatility_cache_client, volatility_env):
+    volatility_cache_client.get("/volatility/AAPL")
+    response = volatility_cache_client.get("/volatility/AAPL", headers={"Cache-Control": "no-cache"})
+    assert response.headers["x-fastapi-cache"] == "MISS"
+    assert volatility_env.lseg.get_implied_volatility.await_count == 2

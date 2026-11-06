@@ -42,7 +42,7 @@ def test_status_states(client, cache_redis, monkeypatch):
     assert body["state"] == "connected"
     assert body["key_counts"] == {
         "options_chain": 1, "historical_prices": 1, "company_profile": 0,
-        "company_search": 0, "company_news": 0, "market_status": 0,
+        "company_search": 0, "company_news": 0, "market_status": 0, "volatility": 0,
     }
     assert body["memory"]["used_memory"] == 1024
     assert body["market"]["state"] in {"session", "settle_grace", "settled"}
@@ -168,6 +168,7 @@ async def test_clear_batches_and_no_library_keys(cache_redis):
     ("company_search", "companies:search"),
     ("company_news", "companies:news"),
     ("market_status", "market-status"),
+    ("volatility", "volatility:snapshot"),
 ])
 def test_new_scopes_count_and_clear_http_mcp(client, cache_redis, scope, route):
     entries = {
@@ -186,11 +187,22 @@ def test_new_scopes_count_and_clear_http_mcp(client, cache_redis, scope, route):
     assert "mdh:options:chain:AAPL:provider=finnhub" in cache_redis.entries
 
 
-@pytest.mark.parametrize("field", ["company_profile_seconds", "company_search_seconds", "company_news_seconds", "market_status_seconds"])
+@pytest.mark.parametrize("field", ["company_profile_seconds", "company_search_seconds", "company_news_seconds", "market_status_seconds", "volatility_seconds"])
 def test_new_policy_update_and_validation(client, field):
     result = client.put("/api/admin/cache/policy", json={field: 123})
     assert result.status_code == 200 and result.json()[field] == 123
-    assert len(result.json()) == 9
+    assert len(result.json()) == 10
     for invalid in (-1, 2592001, 1.5, True, None):
         assert client.put("/api/admin/cache/policy", json={field: invalid}).status_code == 422
         assert client.get("/api/admin/cache").json()["policy"][field] == 123
+
+
+def test_volatility_scope_covers_all_operations(client, cache_redis):
+    for operation in ("snapshot", "history", "stats"):
+        cache_redis.entries[f"mdh:volatility:{operation}:AAPL:provider=lseg"] = b"http"
+        cache_redis.entries[f"mdh:volatility:{operation}:AAPL:channel=mcp&provider=lseg"] = b"mcp"
+    cache_redis.entries["mdh:volatility:snapshot:AAPL:provider=ibkr"] = b"other provider"
+    assert client.get("/api/admin/cache").json()["key_counts"]["volatility"] == 7
+    response = client.post("/api/admin/cache/clear", json={"confirm": True, "scope": "volatility", "provider": "LSEG"})
+    assert response.status_code == 200 and response.json()["deleted"] == 6
+    assert cache_redis.entries == {"mdh:volatility:snapshot:AAPL:provider=ibkr": b"other provider"}

@@ -449,6 +449,70 @@ def _extract_price(self, response, ticker: str) -> Optional[Decimal]:
       price = response.data.df['CLOSE'].iloc[0]
   ```
 
+#### Underlying implied volatility (LSEG and IBKR)
+
+- `BaseVolatilityProvider` is independent of option-chain capability. `PriceQuote`
+  and `/prices/*` do not gain IV fields. Defaults are DB-backed via
+  `default_volatility_provider` (fresh installations: `None`), not an env default.
+- `app/models/volatility.py`: underlying IV is `Decimal` fractions, four places,
+  `ROUND_HALF_UP` (`0.2676` = 26.76%). `uniform_tenors` always exposes 30/60/90;
+  unsupported tenors are null. Call/put mean uses `combine_iv`; combined IBKR IV
+  has null call/put. Existing option-contract IV is fractional too; Schwab divides
+  percent by 100, drops negative sentinels/NaN, and retains contract precision.
+- Verified support sets and methods:
+  - LSEG snapshot/history/stats: stock, etf, index, future; 30/60/90 days;
+    `method="provider_atm_index"`.
+  - IBKR snapshot: stock, etf, index, future; history/stats: stock, etf, index;
+    tenor 30 only; `method="provider_model_30d"`. Futures history is unusable and
+    deliberately rejected. Polygon underlying IV is not supported (our option
+    snapshot plan is not entitled); Schwab has only per-contract IV.
+- LSEG IV snapshot **must** use `rd.get_data(ric, IV_FIDS + META_FIDS)` streaming
+  FIDs (`30D/60D/90D_A_IM_C/P`). REST pricing snapshots and `TR.*` datagrid fields
+  are not entitled. Daily history uses `historical_pricing.summaries` with explicit
+  tenor fields and a Date index. Reuse session/throttle/retry and `asyncio.to_thread`.
+  Its daily lower bound is exclusive: the IV adapter requests the previous calendar
+  day and then filters to the caller's inclusive `[start, end]`. Keep this buffer
+  so same-day requests and replayed stats windows do not lose their first point.
+  Do not add a second provider cache. IV is mostly end-of-day, hourly for indices;
+  use `TRADE_DATE` as `as_of`, not the request timestamp.
+- LSEG resolution is pure string building: stock/etf/index → `{SYM}ATMIV.U`,
+  future → `{ROOT}ATMIV`; uppercase and strip leading `^`/`.`. `.U` means OPRA:
+  `ESATMIV.U` is Eversource and `CLATMIV.U` is Colgate. Validate `GN_TXT16_5`
+  (`OPRA` vs `COMFUT`/`CMEG`) for snapshot **and history**; return `UNDERLYING`,
+  `INST_DESC` and stripped market metadata. Explicit `ric` is verbatim and skips
+  market validation (Eurex: GDAXATMIV.EX, STXEATMIV.EX, SAPGATMIV.EX).
+- Verified LSEG futures roots: ES/NQ/YM/C/W/TY; no energy/metals futures IV.
+  IBKR tick 106 covers CL/NG snapshots; ETF proxies USO/UNG/GLD/SLV can supply
+  history, but their IV is not the future's IV. LSEG ES/NQ ATMIV can be below
+  cash-index IV: prefer `sec_type=index` (SPX/NDX) for equity-index exposure.
+- IBKR uses streaming `reqMktData(contract, "106", False, False)`, never the
+  snapshot helper (generic ticks + snapshot is error 321). Always cancel, use
+  `IBKR_IV_TIMEOUT_SECONDS` (default 10), and retry live subscription refusal with
+  delayed data when configured. Futures use the nearest last trade ≥ today+7d.
+  Index exchanges: RUT=RUSSELL, NDX=NASDAQ, SPX/VIX=CBOE. Reject `ric` with 422.
+  `reqHistoricalDataAsync` uses daily `OPTION_IMPLIED_VOLATILITY`, RTH only;
+  its own timer swallows timeouts, so the IV path uses an outer timeout.
+- Error ordering matters: LSEG `UserNotPermission` messages also contain
+  "No data to return". Detect entitlement first → 503 `not_entitled`; empty IV →
+  404 `no_iv_data`/`no_iv_history`; market/input mismatch → 422; support-set
+  rejection by `VolatilityService` before any upstream call → 501
+  `CAPABILITY_NOT_SUPPORTED`. Admin `volatility_support` exposes the three sets.
+- REST: `/volatility/{symbol}`, `/history`, `/stats`, JSON envelopes or flattened
+  CSV. History defaults to end−365 calendar days, tenor 30. Stats uses the last
+  `window` usable daily points (20–756, default 252) from one provider; current,
+  min/max include the last point. IVR=(current−min)/(max−min)×100 (null if flat);
+  IVP counts strictly lower prior points, excluding current. Both are 0–100 with
+  2 dp. Fewer than 20 points → 404 `insufficient_history`. IVR is outlier-sensitive,
+  IVP more resistant; v1 does not filter outliers. MCP tools have the same names
+  as provider methods plus `get_implied_volatility_stats`, with history
+  `start_date`/`end_date` and optional `refresh`.
+- Shared Redis keys: `volatility:snapshot|history|stats`; TTL
+  `volatility_seconds`/`CACHE_TTL_VOLATILITY_SECONDS` defaults to 900. Closed
+  history (explicit end before yesterday 00:00 ET) uses the daily closed-range
+  TTL; date-only IV ends are midnight ET. **Never** apply market-closed extension:
+  daily IV is published after close. TTL 0 affects snapshot/stats/open history,
+  not closed history. HTTP `Cache-Control: no-cache` or MCP `refresh: true` refreshes.
+
 ### Pydantic Models
 - **Location:** `app/models/` directory
 - **Base patterns:** Inherit from `BaseModel`

@@ -31,6 +31,7 @@ from app.api import (
     routes_meta,
     routes_options,
     routes_prices,
+    routes_volatility,
     routes_ws,
 )
 from app.cache import CacheControlMiddleware, setup_cache, shutdown_cache
@@ -146,6 +147,7 @@ app.include_router(routes_meta.router)
 app.include_router(routes_prices.router)
 app.include_router(routes_companies.router)
 app.include_router(routes_options.router)
+app.include_router(routes_volatility.router)
 app.include_router(routes_ws.router)
 app.include_router(routes_admin.router)
 
@@ -239,6 +241,10 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
         status_code = 404
     elif exc.code == "INVALID_PROVIDER":
         status_code = 400
+    elif exc.code == "DATA_VALIDATION_ERROR":
+        status_code = 422
+    elif exc.code == "CAPABILITY_NOT_SUPPORTED":
+        status_code = 501
     elif exc.code in (
         "PROVIDER_NOT_AVAILABLE",
         "PROVIDER_TIMEOUT",

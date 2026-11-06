@@ -24,7 +24,8 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 - Prices: latest quotes and historical bars
 - Options: chains and quotes with Greeks (IBKR only)
 - Companies: profiles, basic search (LSEG)
-- News: institutional-grade headlines (LSEG) and alternative news (Finnhub)
+- News: Finnhub and IBKR; a mock provider is available for development
+- [Underlying implied volatility](#underlying-implied-volatility): snapshots, daily history and IV Rank/Percentile (LSEG and IBKR)
 
 **Providers & Data Types**
 - IBKR: real-time equities and options; supports `market_data_type` (1=Live/Level 2, 2=Frozen, 3=Delayed)
@@ -37,6 +38,9 @@ Market Data Hub (MDH) is a focused, production-ready aggregation service for mar
 - `market_data_type` defaults to 3 (Delayed) for IBKR, minimizing subscription requirements
 - If you request IBKR Level 1 (Live) without entitlements, the API returns HTTP 503 with a clear error code (`PROVIDER_NOT_AVAILABLE`)
 - LSEG returns the latest daily summary and logs an informational message when `market_data_type` is provided (and ignored)
+- Historical REST/MCP request dates are normalized to UTC: naive dates mean UTC,
+  an omitted end means the current UTC time, and an omitted start means 30 days
+  before the effective end. Provider candle timestamps are not rewritten.
 
 **How It Works**
 - API Layer (FastAPI) -> Service Layer -> Provider Layer (IBKR/LSEG/Polygon/Prixe/Finnhub)
@@ -125,7 +129,18 @@ See [Kubernetes Deployment](#kubernetes-deployment) section below.
 | **Historical OHLCV** | IBKR | LSEG, Polygon | Provider coverage depends on symbol and entitlement |
 | **Options** | **IBKR ONLY** | - | Other providers lack real-time options Greeks |
 | **Company Data** | LSEG | Finnhub | LSEG has comprehensive fundamentals |
-| **News** | LSEG | Finnhub | LSEG provides institutional-grade news |
+| **News** | Finnhub | IBKR | Configure a default in Admin Settings; mock data is available for development |
+| **Underlying IV / IV Rank / Percentile** | LSEG or IBKR | - | Provider-specific market/tenor coverage; see [volatility reference](#underlying-implied-volatility) |
+
+LSEG news is no longer exposed by this hub. An explicit `provider=lseg` news
+request is rejected as `INVALID_PROVIDER` before any LSEG SDK call. A previously
+stored LSEG news default is treated as unconfigured; choose Finnhub, IBKR or mock
+in Admin Settings. Other LSEG capabilities are unchanged.
+
+When upgrading a Redis-enabled deployment, clear any pre-existing LSEG news
+entries with the confirmed Admin cache-clear operation scoped to
+`company_news` and `provider=lseg` (covers HTTP and MCP), rather than flushing
+Redis or unrelated provider data. Existing cache entries otherwise retain their TTL.
 
 ### ⚠️ LSEG Options Limitation
 
@@ -186,6 +201,7 @@ These are operational defaults, not credentials:
 | `IBKR_MARKET_DATA_TYPE` | `3` | 1=Live, 2=Frozen, 3=Delayed, 4=Delayed Frozen |
 | `IBKR_CONNECT_ON_REQUEST` | `false` | Lazily connect to IBKR on demand |
 | `IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR` | `true` | Handle missing subscriptions gracefully |
+| `IBKR_IV_TIMEOUT_SECONDS` | `10` | Maximum wait for a streaming underlying-IV tick; must be positive |
 | `LSEG_BASE_URL` | `https://api.lseg.com/v1` | LSEG API base URL |
 | `LSEG_RATE_LIMIT_PER_SEC` | `10` | Max LSEG requests per second |
 | `LSEG_CACHE_TTL_SECONDS` | `5` | LSEG quote cache TTL; `0` disables cache |
@@ -217,11 +233,140 @@ Provider credential keys:
 | `prixe` | `api_key` |
 | `schwab` | `api_key`, `app_secret`, `token_json`, optional `alert_webhook_url` |
 
+## Underlying Implied Volatility
+
+Query the IV of a stock, ETF, index or future without downloading individual
+option contracts. This is separate from `/prices/*`: `PriceQuote` is unchanged.
+Enable LSEG or IBKR, then choose **Settings → Default Volatility Provider** in
+the Admin UI, or pass `provider=lseg|ibkr` on each request. There is no automatic
+cross-provider fallback. `/api/admin/providers` exposes each provider's snapshot
+security types, history security types and tenors as `volatility_support`.
+
+### Endpoint and unit reference
+
+| Endpoint | Result | Additional parameters |
+|---|---|---|
+| `GET /volatility/{symbol}` | Snapshot with `implied` tenors 30, 60 and 90 | Common parameters below |
+| `GET /volatility/{symbol}/history` | Ascending daily `points` | `start`, `end` (ISO dates); `tenor_days=30|60|90` |
+| `GET /volatility/{symbol}/stats` | IV Rank and IV Percentile | `window=20..756` daily points (default 252); `tenor_days=30|60|90` |
+
+Common parameters: `sec_type=stock|etf|index|future` (default `stock`), optional
+`provider`, LSEG-only `ric`, and `format=json|csv` (default `json`). History
+defaults to **end minus 365 calendar days through today**, with tenor 30.
+Both date boundaries are inclusive; `start=end` returns that day's point when
+available.
+JSON uses the normal `{ "data": ..., "meta": null }` envelope; CSV is an
+attachment with one row per tenor/history point, or one row of statistics.
+
+Underlying IV values (`iv_call`, `iv_put`, `iv`, and stats `current`/`min`/`max`)
+are **annualized decimal fractions, rounded half-up to four places**. JSON
+serializes them as strings: `"0.2676"` means **26.76%**. Multiply by 100 for
+display; use fractions directly in volatility/variance formulas. IV may exceed
+1 (100%). All three snapshot tenors are always present in order; unavailable
+tenors are null. `iv` is the mean of available call/put values, or a provider's
+combined value. IBKR supplies only combined 30-day `iv`, with null call/put.
+
+**Breaking change for Schwab option consumers:** per-contract
+`OptionQuote.implied_volatility` is now a fraction too (`22.345` upstream →
+`0.22345`), consistent with IBKR and Polygon. Per-contract precision is retained;
+the four-place rule above is for underlying IV. Missing/NaN values and negative
+Schwab sentinels such as `-999` return null.
+
+### Verified provider coverage
+
+| Provider | Snapshot security types | History / stats security types | Tenors | `method` |
+|---|---|---|---|---|
+| LSEG | stock, ETF, index, future | stock, ETF, index, future | 30, 60, 90 | `provider_atm_index` |
+| IBKR | stock, ETF, index, future | stock, ETF, index only | 30 | `provider_model_30d` |
+
+- **LSEG:** constant-maturity ATM indices via streaming FIDs, not REST pricing
+  snapshots or `TR.*` datagrid fields (those scopes are not entitled).
+  Stock/ETF/index records use `{SYMBOL}ATMIV.U`, where `.U` means **OPRA**.
+  Futures use `{ROOT}ATMIV` without `.U`; verified roots include ES, NQ, YM,
+  C (corn), W (wheat) and TY (10-year Treasury). Futures roots differ by provider:
+  IBKR uses ZC, ZW and ZN for those last three markets.
+- LSEG returns `underlying`, `underlying_name`, `market` and `as_of`. Values are
+  end-of-day for most stock/ETF records; index values can update roughly hourly.
+  Automatic RIC resolution requires `OPRA` for stock/ETF/index and
+  `COMFUT`/`CMEG` for futures. `ESATMIV.U` is **Eversource**, and `CLATMIV.U` is
+  **Colgate**, not futures. Set `sec_type` explicitly; a wrong market is rejected.
+  A supplied `ric` is queried verbatim and skips this market check, enabling
+  Eurex records such as `GDAXATMIV.EX`, `STXEATMIV.EX` and `SAPGATMIV.EX`.
+- **IBKR:** streaming generic tick 106 supplies a live/delayed 30-day model.
+  Live-subscription refusal retries once with delayed data when fallback is
+  enabled. Futures use the nearest contract with at least seven days to last
+  trade. The front-month `localSymbol` (e.g. `CLZ6`) is returned as
+  `source_instrument`. Daily history uses `OPTION_IMPLIED_VOLATILITY`; futures
+  history is rejected because the upstream series is unusable, not interpolated.
+  `ric` is rejected. RUT uses RUSSELL, NDX NASDAQ, and SPX/VIX CBOE.
+- **Gaps:** LSEG lacks energy/metals futures IV; IBKR covers CL/NG snapshots,
+  but not metals futures IV. Use ETF proxies **USO, UNG, GLD, SLV** for available
+  history, remembering that an ETF's IV is not the future's IV. LSEG ES/NQ ATMIV
+  can sit materially below cash-index IV; prefer `sec_type=index` with SPX/NDX
+  for equity-index exposure. Provider values/methods are not interchangeable.
+- **Polygon is not an underlying-IV provider:** our plan denies option snapshots
+  (403, verified 2026-11-06), and Polygon offers no underlying IV history.
+  Schwab exposes per-contract IV, not underlying IV.
+
+### How to fetch IV and its daily history
+
+With an enabled, credentialed provider (or a running IBKR Gateway/TWS), run:
+
+```bash
+curl 'http://localhost:9000/volatility/AAPL?provider=lseg'
+curl 'http://localhost:9000/volatility/SPY?sec_type=etf&provider=lseg'
+curl 'http://localhost:9000/volatility/SPX?sec_type=index&provider=lseg'
+curl 'http://localhost:9000/volatility/ES?sec_type=future&provider=lseg'
+curl 'http://localhost:9000/volatility/CL?sec_type=future&provider=ibkr'
+curl 'http://localhost:9000/volatility/DAX?sec_type=index&ric=GDAXATMIV.EX&provider=lseg'
+curl 'http://localhost:9000/volatility/AAPL/history?provider=lseg&tenor_days=30&format=csv'
+```
+
+Verify `provider`, `source_instrument`, `market`, `as_of` and the three tenors.
+HTTP 400 means the provider is not a volatility provider; 422 means invalid
+input/market or IBKR `ric`; 501 means an unsupported operation/tenor (e.g. IBKR
+futures history or 60-day history); 404 means no usable data; 503 means provider
+connectivity, timeout, configuration or entitlement failure. An unset default
+also returns 503 unless an explicit provider is supplied.
+
+### How to request IV Rank and IV Percentile
+
+```bash
+curl 'http://localhost:9000/volatility/AAPL/stats?provider=lseg&window=252'
+curl 'http://localhost:9000/volatility/SPX/stats?sec_type=index&provider=ibkr&format=csv'
+```
+
+Stats uses the last `window` usable daily points from **one provider**, including
+the latest available point as `current`. `window_points` reports the number
+actually available (at most `window`); fewer than 20 returns 404
+`insufficient_history`. `window_start`/`window_end` are the actual point dates.
+
+- **IV Rank (IVR)** = `(current − min) / (max − min) × 100`; null when the window
+  is flat. It is sensitive to a single outlier day because it uses min/max.
+- **IV Percentile (IVP)** = the share of **prior points strictly below current**
+  × 100, excluding current from the denominator. Ties are not counted as below.
+  It is more resistant to isolated outliers; a flat window has IVP 0.
+- Both ranks are **0–100 with two decimal places**, not fractional IV. There is
+  **no outlier filter** in this version. IBKR history can contain bad daily prints.
+
+MCP exposes `get_implied_volatility`, `get_implied_volatility_history` and
+`get_implied_volatility_stats` with the same units/support. All accept `symbol`,
+`sec_type`, `ric`, `provider` and `refresh`; history uses `start_date`/`end_date`
+instead of HTTP `start`/`end`; history/stats accept `tenor_days`, and stats accepts
+`window`. For example:
+
+```json
+{"name":"get_implied_volatility_stats","arguments":{"symbol":"SPY","sec_type":"etf","provider":"lseg","window":252,"refresh":true}}
+```
+
+See [Redis Response Cache](#redis-response-cache) for TTLs, refresh and clear scopes.
+
 ## Redis Response Cache
 
 `GET /options/{symbol}/chain`, `GET /prices/{symbol}/history`, company profiles,
-company search, company news (JSON/CSV) and `GET /market-status` cache responses
-in Redis, for every provider. Their six MCP counterparts use the same backend
+company search, company news (JSON/CSV), `GET /market-status` and all three
+`/volatility/*` endpoints cache responses in Redis, for every provider.
+Their nine MCP counterparts use the same backend
 and TTL policy with separate entries; `refresh: true` fetches live and overwrites
 the MCP entry. Redis is optional: outages serve live provider data, log one
 warning, and retry after a 30-second cooldown. Requests without application
@@ -252,6 +397,7 @@ the cache **or the existing keys database**.
 | `CACHE_TTL_COMPANY_SEARCH_SECONDS` | `3600` | Company search (1 hour) |
 | `CACHE_TTL_COMPANY_NEWS_SECONDS` | `600` | Company news (10 minutes) |
 | `CACHE_TTL_MARKET_STATUS_SECONDS` | `60` | Market status; capped at the next weekday 04:00/09:30/16:00/20:00 ET transition |
+| `CACHE_TTL_VOLATILITY_SECONDS` | `900` | IV snapshot, stats and open-range IV history; never extended overnight |
 | `CACHE_EXTEND_WHEN_MARKET_CLOSED` | `true` | Keep open ranges/chains until next US market open |
 | `REDIS_MAXMEMORY` | `256mb` | Compose Redis memory bound |
 
@@ -270,7 +416,16 @@ The TTL policy uses US equity sessions in `America/New_York`: Mon–Fri
 grace after close. Settled-market entries last until the next open, capped by
 the closed-range TTL. Holidays count as weekdays (extra refreshes, not extra
 staleness). The extension applies only to option chains and historical prices,
-never to company data or market status. **Disable the extension for non-US symbols.**
+never to company data, market status or implied volatility. **Disable the extension for non-US symbols.**
+
+Volatility snapshots and stats always use `volatility_seconds` (default 900 s).
+Volatility history uses the same closed daily-range cutoff (explicit `end`
+strictly before yesterday 00:00 ET) and `historical_closed_seconds` (7 days);
+otherwise it uses `volatility_seconds`. Date-only IV `end` values mean midnight
+ET. The market-closed extension does not apply: daily IV is published **after**
+the close, so extending a pre-update value until the next open would hide it.
+Setting `volatility_seconds=0` disables snapshot/stats/open-history caching,
+while closed history still uses its own TTL.
 
 An explicit historical `end` uses the closed-range TTL only if safely before
 the current period: intraday before today midnight ET, daily before yesterday
@@ -292,7 +447,11 @@ after such changes. Concurrent misses can still call the provider concurrently.
 Company route keys are `companies:profile`, `companies:search`, and
 `companies:news`; search and market-status keys have an empty symbol segment.
 Search queries are trimmed, whitespace-collapsed and lowercased in the key only.
-Default providers are resolved per capability (company, news, options or price).
+Volatility keys are `volatility:snapshot`, `volatility:history` and
+`volatility:stats`; `ric`, `tenor_days` and `window` isolate their entries.
+Default providers are resolved per capability (company, news, options, price or
+volatility via `default_volatility_provider`). The `volatility` clear scope and
+key count cover all three operations in both channels.
 MCP keys add `channel=mcp` and use HTTP parameter names (`start`, `end`, `q`, etc.);
 HTTP ignores undeclared parameters, including `channel`. Admin key counts and
 endpoint/provider clear scopes include both channels.
@@ -304,6 +463,7 @@ with the effective write TTL on MISS or remaining TTL on HIT. TTL 0 returns
 ```bash
 # Force a live fetch and refresh the cache entry:
 curl -H 'Cache-Control: no-cache' 'http://localhost:9000/options/SPX/chain?provider=schwab'
+curl -H 'Cache-Control: no-cache' 'http://localhost:9000/volatility/AAPL?provider=lseg'
 # Fetch live without reading or writing the cache:
 curl -H 'Cache-Control: no-store' 'http://localhost:9000/prices/AAPL/history?provider=schwab'
 # Admin API (requires an admin token when admin authentication is enabled):
@@ -542,7 +702,7 @@ When `MCP_ENABLED=true`, the MCP (Model Context Protocol) endpoints are availabl
 
 For Claude remote MCP, configure `http://localhost:8000/mcp` or the deployed equivalent. Legacy SSE clients can use `http://localhost:8000/mcp/sse`.
 
-Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`.
+Available MCP tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`, `get_market_status`, `get_implied_volatility`, `get_implied_volatility_history`, `get_implied_volatility_stats`. See the [volatility reference](#underlying-implied-volatility) for the new tools' units, inputs and provider limits.
 
 For more details on connecting clients and using the tools, see the [MCP Guide](doc/mcp-guide.md).
 

@@ -17,6 +17,7 @@ const ttlFields = [
   ['company_search_seconds', 'Company search'],
   ['company_news_seconds', 'Company news'],
   ['market_status_seconds', 'Market status'],
+  ['volatility_seconds', 'Implied volatility'],
 ] as const;
 
 const cacheScopes = [
@@ -26,6 +27,7 @@ const cacheScopes = [
   ['company_search', 'Company search'],
   ['company_news', 'Company news'],
   ['market_status', 'Market status'],
+  ['volatility', 'Implied volatility'],
 ] as const;
 
 function duration(seconds: number): string {
@@ -61,7 +63,7 @@ function PolicyForm({ initial, onSaved }: { initial: CachePolicy; onSaved: () =>
       </Box>
       <FormControlLabel sx={{ mt: 2 }} control={<Switch checked={extend} disabled={save.isPending} onChange={e => setExtend(e.target.checked)} />}
         label="Keep entries until next market open while the market is closed" />
-      <Typography variant="body2" color="text.secondary">The extension applies only to option chains and historical prices. US session model: 09:30–16:00 ET, with 30 min settle grace (extended hours: 04:00–20:00). Holidays count as weekdays. Disable the extension for non-US symbols. Market status TTL is capped at the next session transition.</Typography>
+      <Typography variant="body2" color="text.secondary">The extension applies only to option chains and historical prices, not implied volatility (daily IV is published after the close). US session model: 09:30–16:00 ET, with 30 min settle grace (extended hours: 04:00–20:00). Holidays count as weekdays. Disable the extension for non-US symbols. Market status TTL is capped at the next session transition.</Typography>
       <Alert severity="info" sx={{ my: 2 }}>Changes apply to new entries only. Existing entries keep their TTL; use Clear cache to apply a change immediately.</Alert>
       {save.error && <Alert severity="error" sx={{ mb: 2 }}>{save.error.message}</Alert>}
       <Button type="submit" variant="contained" disabled={invalid || save.isPending}>{save.isPending ? 'Saving…' : 'Save cache policy'}</Button>
@@ -90,7 +92,7 @@ export default function CacheCard() {
   const memory = data?.memory;
   const available = data?.state === 'connected';
   return (
-    <Paper sx={{ p: 3, mt: 3, maxWidth: 900 }}>
+    <Paper sx={{ p: 3, maxWidth: 900 }}>
       <Stack direction="row" sx={{ alignItems: 'center' }} spacing={2}>
         <Typography variant="h5">Response Cache</Typography>
         {data && <Chip label={data.state} color={available ? 'success' : 'default'} />}

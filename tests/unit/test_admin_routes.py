@@ -150,6 +150,7 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
     monkeypatch.setattr(registry, "default_company_provider", None)
     monkeypatch.setattr(registry, "default_options_provider", None)
     monkeypatch.setattr(registry, "default_news_provider", None)
+    monkeypatch.setattr(registry, "default_volatility_provider", None)
 
     response = client.get("/api/admin/settings/defaults")
 
@@ -159,6 +160,7 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
         "default_company_provider": "",
         "default_options_provider": "",
         "default_news_provider": "",
+        "default_volatility_provider": "",
     }
 
     async def fake_reload(config_repo, settings_repo):
@@ -191,7 +193,29 @@ def test_admin_settings_capabilities(client) -> None:
         "options": ["ibkr"],
         "companies": ["ibkr", "lseg"],
         "news": ["finnhub"],
+        "volatility": ["ibkr", "lseg"],
     }
+
+
+def test_admin_volatility_default_round_trip(client, monkeypatch) -> None:
+    from app.api.routes_admin import registry
+
+    monkeypatch.setattr(registry, "default_volatility_provider", None)
+
+    async def fake_reload(config_repo, settings_repo):
+        registry.default_volatility_provider = await settings_repo.get(
+            "default_volatility_provider"
+        )
+
+    monkeypatch.setattr(registry, "reload_from_config", fake_reload)
+    response = client.put(
+        "/api/admin/settings/defaults", json={"default_volatility_provider": "LSEG"}
+    )
+    assert response.status_code == 200
+    assert response.json()["default_volatility_provider"] == "lseg"
+    assert client.get("/api/admin/settings/defaults").json()[
+        "default_volatility_provider"
+    ] == "lseg"
 
 
 def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> None:

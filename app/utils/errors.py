@@ -68,6 +68,29 @@ class InvalidProviderError(AppError):
         )
 
 
+class CapabilityNotSupportedError(AppError):
+    def __init__(
+        self,
+        provider: str,
+        operation: str,
+        *,
+        sec_type: str,
+        supported: list[str] | list[int],
+        tenor_days: int | None = None,
+    ):
+        super().__init__(
+            f"Provider '{provider}' does not support the requested {operation}.",
+            "CAPABILITY_NOT_SUPPORTED",
+            {
+                "provider": provider,
+                "operation": operation,
+                "sec_type": sec_type,
+                "tenor_days": tenor_days,
+                "supported": supported,
+            },
+        )
+
+
 class DataNotFoundError(AppError):
     def __init__(
         self, entity: str, identifier: str, details: dict[str, Any] | None = None

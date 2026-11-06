@@ -24,6 +24,7 @@ from app.services.company_service import CompanyService
 from app.services.news_service import NewsService, news_service
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
+from app.services.volatility_service import VolatilityService
 
 
 @lru_cache
@@ -46,10 +47,16 @@ def get_news_service() -> NewsService:
     return news_service
 
 
+@lru_cache
+def get_volatility_service() -> VolatilityService:
+    return VolatilityService()
+
+
 PriceServiceDep = Annotated[PriceService, Depends(get_price_service)]
 CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 NewsServiceDep = Annotated[NewsService, Depends(get_news_service)]
+VolatilityServiceDep = Annotated[VolatilityService, Depends(get_volatility_service)]
 
 
 def get_provider(provider_type: str, name: str | None = None) -> Any:

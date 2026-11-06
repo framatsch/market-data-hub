@@ -19,6 +19,7 @@ import time
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -647,7 +648,57 @@ async def test_get_option_chain_uses_volatility_for_iv(provider: SchwabProvider,
 
     chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
 
-    assert chain.options[0].implied_volatility == 22.345
+    assert chain.options[0].implied_volatility == 0.22345
+
+
+@pytest.mark.parametrize("value", [None, float("nan"), float("inf"), -999, -1])
+async def test_option_chain_iv_sentinels(provider, option_chain_response, value):
+    option_chain_response["callExpDateMap"]["2024-04-05:7"]["185.0"][0]["volatility"] = value
+    client = Mock()
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
+    assert chain.options[0].implied_volatility is None
+
+
+@pytest.mark.parametrize("value,expected", [(22.345, 0.22345), (None, None), (float("nan"), None), (-999, None)])
+async def test_option_quote_iv_fraction_and_sentinels(provider, value, expected):
+    option_id = "AAPL  240405C00185000"
+    client = Mock()
+    client.get_quotes = AsyncMock(return_value=_Response(200, {
+        option_id: {"quote": {"lastPrice": 4.2, "delta": 0.56, "volatility": value}}
+    }))
+    provider._get_client = AsyncMock(return_value=client)
+    quote = await provider.get_option_quote("AAPL", option_id)
+    assert quote.implied_volatility == expected
+
+
+async def test_option_iv_fraction_consistent_across_providers(provider, option_chain_response):
+    from app.providers.ibkr import IBKRProvider
+    from app.providers.polygon import PolygonProvider
+
+    client = Mock()
+    client.get_option_chain = AsyncMock(return_value=_Response(200, option_chain_response))
+    provider._get_client = AsyncMock(return_value=client)
+    chain = await provider.get_option_chain("AAPL", date(2024, 4, 5), right="call")
+    schwab_iv = chain.options[0].implied_volatility
+    with patch("app.providers.ibkr.IB"):
+        ibkr_iv = IBKRProvider()._extract_greeks(SimpleNamespace(modelGreeks=SimpleNamespace(
+            impliedVol=0.223, delta=0.56, gamma=0.08, theta=-0.05, vega=0.11,
+        )))["implied_volatility"]
+    with patch("app.providers.polygon.httpx.AsyncClient") as mock_client:
+        polygon = PolygonProvider()
+        polygon.api_key = "test-only-key"
+        response = Mock()
+        response.json.return_value = {"results": {
+            "details": {"strike_price": 185, "expiration_date": "2024-04-05", "contract_type": "call"},
+            "implied_volatility": 0.223,
+        }}
+        mock_client.return_value.get = AsyncMock(return_value=response)
+        polygon_iv = (await polygon.get_option_quote("AAPL", "AAPL240405C00185000")).implied_volatility
+    for iv in (schwab_iv, ibkr_iv, polygon_iv):
+        assert 0 < iv < 5
+        assert float(iv) == pytest.approx(0.223)
 
 
 @pytest.mark.asyncio
@@ -708,6 +759,7 @@ async def test_get_option_quote_success(provider: SchwabProvider):
     assert quote.symbol == "AAPL  240405C00185000"
     assert quote.type == "call"
     assert quote.strike == Decimal("185.0")
+    assert quote.implied_volatility == 0.223
 
 
 @pytest.mark.asyncio

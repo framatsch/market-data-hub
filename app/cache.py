@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from functools import wraps
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, ParamSpec, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Request, Response
@@ -45,9 +45,17 @@ from app.market_hours import (
 from app.providers.registry import registry
 
 logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+R = TypeVar("R")
 CacheScope = Literal[
-    "all", "options_chain", "historical_prices", "company_profile",
-    "company_search", "company_news", "market_status",
+    "all",
+    "options_chain",
+    "historical_prices",
+    "company_profile",
+    "company_search",
+    "company_news",
+    "market_status",
+    "volatility",
 ]
 Ttl = Annotated[StrictInt, Field(ge=0, le=2592000)]
 _request: ContextVar[Request | None] = ContextVar("mdh_cache_request", default=None)
@@ -59,6 +67,7 @@ _PATTERNS = {
     "company_search": "mdh:companies:search:*",
     "company_news": "mdh:companies:news:*",
     "market_status": "mdh:market-status:*",
+    "volatility": "mdh:volatility:*",
 }
 
 
@@ -72,6 +81,7 @@ class CachePolicyValues(BaseModel):
     company_search_seconds: Ttl
     company_news_seconds: Ttl
     market_status_seconds: Ttl
+    volatility_seconds: Ttl
     extend_when_market_closed: StrictBool
 
 
@@ -85,6 +95,7 @@ class CachePolicyUpdate(BaseModel):
     company_search_seconds: Ttl | None = None
     company_news_seconds: Ttl | None = None
     market_status_seconds: Ttl | None = None
+    volatility_seconds: Ttl | None = None
     extend_when_market_closed: StrictBool | None = None
 
     @field_validator("*")
@@ -105,6 +116,7 @@ def policy_defaults() -> CachePolicyValues:
         company_search_seconds=settings.CACHE_TTL_COMPANY_SEARCH_SECONDS,
         company_news_seconds=settings.CACHE_TTL_COMPANY_NEWS_SECONDS,
         market_status_seconds=settings.CACHE_TTL_MARKET_STATUS_SECONDS,
+        volatility_seconds=settings.CACHE_TTL_VOLATILITY_SECONDS,
         extend_when_market_closed=settings.CACHE_EXTEND_WHEN_MARKET_CLOSED,
     )
 
@@ -171,6 +183,9 @@ class CachePolicy:
             "/companies/search": "companies:search",
             "/companies/{symbol}/news": "companies:news",
             "/market-status": "market-status",
+            "/volatility/{symbol}": "volatility:snapshot",
+            "/volatility/{symbol}/history": "volatility:history",
+            "/volatility/{symbol}/stats": "volatility:stats",
         }.get(route, route)
         company_ttls = {
             "companies:profile": values.company_profile_seconds,
@@ -182,6 +197,22 @@ class CachePolicy:
         if route == "market-status":
             until_transition = int((as_utc(next_transition(now)) - now).total_seconds())
             return min(values.market_status_seconds, until_transition)
+        if route in {"volatility:snapshot", "volatility:stats"}:
+            return values.volatility_seconds
+        if route == "volatility:history":
+            end = params.get("end")
+            if end:
+                try:
+                    ended = datetime.fromisoformat(end.replace("Z", "+00:00"))
+                    # This endpoint accepts dates: midnight is in ET, not UTC.
+                    if ended.tzinfo is None:
+                        ended = ended.replace(tzinfo=ET)
+                    cutoff = current_period_start("1d", now) - timedelta(days=1)
+                    if as_utc(ended) < as_utc(cutoff):
+                        return values.historical_closed_seconds
+                except ValueError:
+                    pass  # Endpoint validation still rejects malformed dates.
+            return values.volatility_seconds
         extended = params.get("extended_hours", "false").lower() in {
             "true",
             "1",
@@ -245,7 +276,8 @@ def _key_parts(key: str | bytes) -> tuple[str, dict[str, str]]:
 def _compose_key(route_key: str, symbol: str, params: dict[str, Any]) -> str:
     """Compose provider-isolated keys for HTTP and non-HTTP callers."""
     params = {
-        name: str(value) for name, value in params.items()
+        name: str(value)
+        for name, value in params.items()
         if value is not None and value != ""
     }
     for name in ("provider", "format", "sec_type"):
@@ -261,10 +293,15 @@ def _compose_key(route_key: str, symbol: str, params: dict[str, Any]) -> str:
             "companies:profile": registry.default_company_provider,
             "companies:search": registry.default_company_provider,
             "companies:news": registry.default_news_provider,
+            "volatility:snapshot": registry.default_volatility_provider,
+            "volatility:history": registry.default_volatility_provider,
+            "volatility:stats": registry.default_volatility_provider,
         }.get(route_key)
         if default:
             params["provider"] = default.lower()
-    return f"mdh:{route_key}:{symbol.upper()}:{urlencode(sorted(params.items())) or '-'}"
+    return (
+        f"mdh:{route_key}:{symbol.upper()}:{urlencode(sorted(params.items())) or '-'}"
+    )
 
 
 async def mdh_key_builder(
@@ -321,21 +358,26 @@ class MdhJsonCoder(JsonCoder):
         return decoded
 
 
-def cache(*, expire: int, key: str = "") -> Any:
+def cache(
+    *, expire: int, key: str = ""
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R | Response]]]:
     """Delegate to fastapi-cache2, preserving its headers on concrete CSV Responses."""
 
-    def decorate(func: Any) -> Any:
+    def decorate(
+        func: Callable[P, Awaitable[R]],
+    ) -> Callable[P, Awaitable[R | Response]]:
         cached = library_cache(expire=expire, namespace=key)(func)
 
         @wraps(cached)
-        async def adapted(*args: Any, **kwargs: Any) -> Any:
-            token = _request.set(kwargs.get("__fastapi_cache_request"))
+        async def adapted(*args: P.args, **kwargs: P.kwargs) -> R | Response:
+            request = kwargs.get("__fastapi_cache_request")
+            token = _request.set(request if isinstance(request, Request) else None)
             try:
                 result = await cached(*args, **kwargs)
                 injected = kwargs.get("__fastapi_cache_response")
                 if (
                     isinstance(result, Response)
-                    and injected is not None
+                    and isinstance(injected, Response)
                     and result is not injected
                 ):
                     for name in ("Cache-Control", "ETag", "X-FastAPI-Cache"):
@@ -370,12 +412,16 @@ async def cached_call(
             if value is not None:
                 return MdhJsonCoder.decode(value)
         except Exception as exc:
-            logger.warning("MCP cache read failed (%s); serving live data", type(exc).__name__)
+            logger.warning(
+                "MCP cache read failed (%s); serving live data", type(exc).__name__
+            )
     result = await loader()
     try:
         await backend.set(key, MdhJsonCoder.encode(result))
     except Exception as exc:
-        logger.warning("MCP cache write failed (%s); serving live data", type(exc).__name__)
+        logger.warning(
+            "MCP cache write failed (%s); serving live data", type(exc).__name__
+        )
     return result
 
 

@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -102,7 +102,7 @@ async def get_historical_prices(
     - format: "json" (default) or "csv"
     """
     if not end:
-        end = datetime.now()
+        end = datetime.now(UTC)
     if not start:
         start = end - timedelta(days=30)
 

@@ -18,7 +18,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,7 +26,8 @@ def _get_app_version() -> str:
     try:
         pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
         with open(pyproject_path, "rb") as f:
-            return tomllib.load(f)["project"]["version"]
+            version = tomllib.load(f)["project"]["version"]
+            return version if isinstance(version, str) else "0.0.0"
     except Exception:
         return "0.0.0"
 
@@ -66,12 +67,12 @@ class Settings(BaseSettings):
     IBKR_CONNECT_ON_REQUEST: bool = False
     # Handle subscription errors gracefully
     IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR: bool = True
+    IBKR_IV_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
 
     # LSEG Provider
-    # ⚠️  LSEG subscription does NOT include 'trapi.data.pricing.read' scope
-    # → Cannot provide real-time Greeks for options
-    # → Use LSEG only for: Stock prices, Company data, News
-    # → Use IBKR for: Options data and Greeks
+    # Streaming pricing FIDs and historical_pricing are entitled (incl. ATM IV).
+    # REST pricing snapshots ('trapi.data.pricing.read') and TR.* datagrid
+    # ('trapi.data.get.data.read') are not entitled. Use IBKR for option Greeks.
     # Credentials are loaded from keys.db (provider=lseg).
     LSEG_BASE_URL: str = "https://api.lseg.com/v1"
 
@@ -128,13 +129,22 @@ class Settings(BaseSettings):
     REDIS_TIMEOUT_SECONDS: float = 1.0  # connect + socket timeout per Redis call
     # Initial TTLs; overridable at runtime via Admin UI (system_settings). 0 = do not cache.
     CACHE_TTL_OPTION_CHAIN_SECONDS: int = 900  # during US session
-    CACHE_TTL_HISTORICAL_CLOSED_SECONDS: int = 604800  # range has only closed bars (7 d)
-    CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS: int = 300  # 1d/1w/1mo incl. forming bar, session; = intraday for consistency
-    CACHE_TTL_HISTORICAL_INTRADAY_SECONDS: int = 300  # 1m/5m/1h incl. forming bar, session; capped at bar length
+    CACHE_TTL_HISTORICAL_CLOSED_SECONDS: int = (
+        604800  # range has only closed bars (7 d)
+    )
+    CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS: int = (
+        300  # 1d/1w/1mo incl. forming bar, session; = intraday for consistency
+    )
+    CACHE_TTL_HISTORICAL_INTRADAY_SECONDS: int = (
+        300  # 1m/5m/1h incl. forming bar, session; capped at bar length
+    )
     CACHE_TTL_COMPANY_PROFILE_SECONDS: int = 86400
     CACHE_TTL_COMPANY_SEARCH_SECONDS: int = 3600
     CACHE_TTL_COMPANY_NEWS_SECONDS: int = 600
     CACHE_TTL_MARKET_STATUS_SECONDS: int = 60
+    CACHE_TTL_VOLATILITY_SECONDS: int = (
+        900  # no market-closed extension (IV publishes after close)
+    )
     # Outside the US session (after close + settle grace, weekends) keep entries until next open.
     CACHE_EXTEND_WHEN_MARKET_CLOSED: bool = True
 
