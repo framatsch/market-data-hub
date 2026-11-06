@@ -121,6 +121,23 @@ class Settings(BaseSettings):
         False  # Set to True to expose MCP endpoints at /mcp/sse and /mcp/messages
     )
 
+    # Response cache (Redis via fastapi-cache2). Fail-open: if Redis is unreachable,
+    # requests are served live from the provider.
+    CACHE_ENABLED: bool = True
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_TIMEOUT_SECONDS: float = 1.0  # connect + socket timeout per Redis call
+    # Initial TTLs; overridable at runtime via Admin UI (system_settings). 0 = do not cache.
+    CACHE_TTL_OPTION_CHAIN_SECONDS: int = 900  # during US session
+    CACHE_TTL_HISTORICAL_CLOSED_SECONDS: int = 604800  # range has only closed bars (7 d)
+    CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS: int = 300  # 1d/1w/1mo incl. forming bar, session; = intraday for consistency
+    CACHE_TTL_HISTORICAL_INTRADAY_SECONDS: int = 300  # 1m/5m/1h incl. forming bar, session; capped at bar length
+    CACHE_TTL_COMPANY_PROFILE_SECONDS: int = 86400
+    CACHE_TTL_COMPANY_SEARCH_SECONDS: int = 3600
+    CACHE_TTL_COMPANY_NEWS_SECONDS: int = 600
+    CACHE_TTL_MARKET_STATUS_SECONDS: int = 60
+    # Outside the US session (after close + settle grace, weekends) keep entries until next open.
+    CACHE_EXTEND_WHEN_MARKET_CLOSED: bool = True
+
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0
     PROVIDER_MAX_RETRIES: int = 3

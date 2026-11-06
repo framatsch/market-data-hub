@@ -2,6 +2,10 @@
  * Base API fetcher with Authorization header support
  */
 
+export function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function fetcher<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = sessionStorage.getItem('admin_token');
   

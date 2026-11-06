@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -95,7 +95,12 @@ export default function ProvidersPage() {
   });
 
   const [activeFilters, setActiveFilters] = useState<Set<FilterType>>(new Set(['all']));
-  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const expandParam = searchParams.get('expand');
+  const [expansion, setExpansion] = useState({ param: expandParam, provider: expandParam });
+  if (expansion.param !== expandParam) {
+    setExpansion({ param: expandParam, provider: expandParam || expansion.provider });
+  }
+  const expandedProvider = expansion.param === expandParam ? expansion.provider : expandParam || expansion.provider;
 
   const providersQuery = useQuery<Provider[]>({
     queryKey: ['providers'],
@@ -128,14 +133,6 @@ export default function ProvidersPage() {
     },
   });
 
-  // Auto-expand from ?expand= URL param
-  useEffect(() => {
-    const expandParam = searchParams.get('expand');
-    if (expandParam) {
-      setExpandedProvider(expandParam);
-    }
-  }, [searchParams]);
-
   const toggleFilter = (filter: FilterType) => {
     setActiveFilters(prev => {
       const next = new Set(prev);
@@ -152,14 +149,12 @@ export default function ProvidersPage() {
   };
 
   const handleRowClick = (providerName: string) => {
-    setExpandedProvider(prev => (prev === providerName ? null : providerName));
+    setExpansion({ param: expandParam, provider: expandedProvider === providerName ? null : providerName });
   };
 
   const filteredProviders = providersQuery.data
     ? filterProviders(providersQuery.data, activeFilters, credentialsQuery.data)
     : [];
-
-  const expandParam = searchParams.get('expand');
 
   return (
     <Box>

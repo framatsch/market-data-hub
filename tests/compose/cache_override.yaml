@@ -1,0 +1,18 @@
+# Run with the root docker-compose.yml and an isolated project name (see README).
+services:
+  market-data-hub:
+    image: mdh-cache-verification:local
+    env_file: !reset []
+    environment:
+      APP_ENV: test
+      RELOAD: "false"
+      APP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      ADMIN_AUTH_ENABLED: "false"
+      ENABLED_PROVIDERS: mock
+      MCP_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      CACHE_ENABLED: "true"
+      CACHE_EXTEND_WHEN_MARKET_CLOSED: "false"
+    volumes:
+      - ./tests/compose/cache_server.py:/app/verify.py:ro
+    command: [uv, run, python, /app/verify.py]

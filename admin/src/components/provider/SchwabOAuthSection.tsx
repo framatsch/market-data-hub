@@ -14,7 +14,7 @@ import {
   Divider,
   Tooltip,
 } from '@mui/material';
-import { fetcher } from '../../lib/api';
+import { fetcher, getErrorMessage } from '../../lib/api';
 import type { SchwabAuthStatus, SchwabConfigResponse } from '../../types';
 
 export function SchwabOAuthSection() {
@@ -32,7 +32,6 @@ export function SchwabOAuthSection() {
   const statusQuery = useQuery<SchwabAuthStatus>({
     queryKey: ['schwab', 'status'],
     queryFn: () => fetcher('/api/admin/schwab/auth/status'),
-    refetchInterval: isPolling ? 2000 : false,
   });
 
   const configQuery = useQuery<SchwabConfigResponse>({
@@ -41,36 +40,42 @@ export function SchwabOAuthSection() {
   });
 
   // --- Local editable config state ---
-  const [callbackUrl, setCallbackUrl] = useState('');
-  const [manualTokenMode, setManualTokenMode] = useState(false);
-  const [forceRefreshToken, setForceRefreshToken] = useState(true);
+  const [callbackUrlEdit, setCallbackUrl] = useState<string | undefined>();
+  const [manualTokenModeEdit, setManualTokenMode] = useState<boolean | undefined>();
+  const [forceRefreshTokenEdit, setForceRefreshToken] = useState<boolean | undefined>();
+  const callbackUrl = callbackUrlEdit ?? configQuery.data?.connection_config.callback_url ?? '';
+  const manualTokenMode = manualTokenModeEdit ?? configQuery.data?.connection_config.manual_token_mode ?? false;
+  const forceRefreshToken = forceRefreshTokenEdit ?? configQuery.data?.connection_config.force_refresh_token ?? true;
   const [manualTokenJson, setManualTokenJson] = useState('');
 
-  // Sync local state once config is loaded
-  useEffect(() => {
-    if (configQuery.data) {
-      const cc = configQuery.data.connection_config;
-      setCallbackUrl(cc.callback_url ?? '');
-      setManualTokenMode(cc.manual_token_mode ?? false);
-      setForceRefreshToken(cc.force_refresh_token ?? true);
-    }
-  }, [configQuery.data]);
-
-  // --- Polling side-effect ---
+  // Poll the external OAuth flow, with cleanup on completion, retry and unmount.
+  const { refetch: refetchStatus } = statusQuery;
   useEffect(() => {
     if (!isPolling) return;
-    if (statusQuery.data?.status === 'active') {
+    let cancelled = false;
+    const checkStatus = async () => {
+      const result = await refetchStatus();
+      if (cancelled) return;
+      if (result.data?.status === 'active') {
+        setIsPolling(false);
+        setSnackbar({ open: true, message: 'Schwab successfully authorized', severity: 'success' });
+      } else if (result.data?.status === 'callback_error') {
+        setIsPolling(false);
+        setSnackbar({ open: true, message: `Authorization failed: ${result.data.error}`, severity: 'error' });
+      }
+    };
+    void checkStatus();
+    const interval = window.setInterval(() => { void checkStatus(); }, 2000);
+    const timeout = window.setTimeout(() => {
       setIsPolling(false);
-      setSnackbar({ open: true, message: 'Schwab successfully authorized', severity: 'success' });
-    } else if (statusQuery.data?.status === 'callback_error') {
-      setIsPolling(false);
-      setSnackbar({
-        open: true,
-        message: `Authorization failed: ${statusQuery.data.error}`,
-        severity: 'error',
-      });
-    }
-  }, [isPolling, statusQuery.data]);
+      setPollTimeout(true);
+    }, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [isPolling, refetchStatus]);
 
   // --- Mutations ---
   const saveConfigMutation = useMutation({
@@ -88,7 +93,7 @@ export function SchwabOAuthSection() {
       qc.invalidateQueries({ queryKey: ['schwab', 'config'] });
       setSnackbar({ open: true, message: 'Configuration saved', severity: 'success' });
     },
-    onError: (err: any) =>
+    onError: (err) =>
       setSnackbar({ open: true, message: `Error: ${err.message}`, severity: 'error' }),
   });
 
@@ -115,7 +120,7 @@ export function SchwabOAuthSection() {
       setManualTokenJson('');
       setSnackbar({ open: true, message: 'Token saved — Schwab active', severity: 'success' });
     },
-    onError: (err: any) =>
+    onError: (err) =>
       setSnackbar({ open: true, message: `Token Error: ${err.message}`, severity: 'error' }),
   });
 
@@ -123,22 +128,13 @@ export function SchwabOAuthSection() {
   const handleReauthorize = async () => {
     try {
       setPollTimeout(false);
-      const res = (await fetcher('/api/admin/schwab/auth/url')) as any;
+      const res = await fetcher<{ auth_url: string }>('/api/admin/schwab/auth/url');
       if (res && typeof res === 'object' && 'auth_url' in res && typeof res.auth_url === 'string') {
         window.open(res.auth_url, '_blank');
         setIsPolling(true);
-        setTimeout(() => {
-          setIsPolling((current) => {
-            if (current) {
-              setPollTimeout(true);
-              return false;
-            }
-            return current;
-          });
-        }, 60000);
       }
-    } catch (err: any) {
-      setSnackbar({ open: true, message: `Auth URL Error: ${err.message}`, severity: 'error' });
+    } catch (err: unknown) {
+      setSnackbar({ open: true, message: `Auth URL Error: ${getErrorMessage(err)}`, severity: 'error' });
     }
   };
 

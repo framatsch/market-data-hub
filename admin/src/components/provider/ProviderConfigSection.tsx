@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -11,7 +11,7 @@ import {
   Switch,
   FormControlLabel,
 } from '@mui/material';
-import { fetcher } from '../../lib/api';
+import { fetcher, getErrorMessage } from '../../lib/api';
 import type { ProviderConfig } from '../../types';
 
 export function ProviderConfigSection({
@@ -31,21 +31,12 @@ export function ProviderConfigSection({
     queryFn: () => fetcher(`/api/admin/providers/${providerName}/config`),
   });
 
-  const [formData, setFormData] = useState<Partial<ProviderConfig>>({});
-  const [connectionConfigText, setConnectionConfigText] = useState('');
+  const [edits, setFormData] = useState<Partial<ProviderConfig>>({});
+  const formData = { ...configQuery.data, ...edits };
+  const [connectionConfigEdit, setConnectionConfigText] = useState<string | null>(null);
+  const connectionConfigText = connectionConfigEdit ?? (configQuery.data?.connection_config
+    ? JSON.stringify(configQuery.data.connection_config, null, 2) : '');
   const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    if (!configQuery.data) {
-      return;
-    }
-    setFormData(configQuery.data);
-    setConnectionConfigText(
-      configQuery.data.connection_config
-        ? JSON.stringify(configQuery.data.connection_config, null, 2)
-        : ''
-    );
-  }, [configQuery.data]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -92,8 +83,8 @@ export function ProviderConfigSection({
       onSuccess(`${providerName.toUpperCase()} config saved`);
       queryClient.invalidateQueries({ queryKey: ['providers'] });
       queryClient.invalidateQueries({ queryKey: ['providerConfig', providerName] });
-    } catch (err: any) {
-      onError(`Failed to save config: ${err.message}`);
+    } catch (err: unknown) {
+      onError(`Failed to save config: ${getErrorMessage(err)}`);
     } finally {
       setIsSaving(false);
     }

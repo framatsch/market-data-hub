@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shared, fail-open Redis response caching for option chains and historical prices,
+  including JSON/CSV HIT/MISS headers, ETag revalidation, and client bypass headers.
+- Extended caching to company profiles, search, news (JSON/CSV), market status,
+  and six MCP tools with forced refresh; added capability-aware keys, configurable
+  TTLs, market-status transition caps, and matching Admin UI counts/clear scopes.
+- Market- and bar-state-aware TTLs with runtime policy overrides, authenticated
+  admin status/policy/confirmed scoped clearing APIs, and a Response Cache card
+  on the Admin Settings page.
+- Compose Redis service with persistent RDB snapshots, bounded LRU memory and
+  internal-only networking; hermetic cache tests and isolated Compose verification.
+
+### Fixed
+
+- Admin UI TypeScript and React Hooks lint failures: typed API results and errors,
+  derived form defaults that preserve local edits, valid sidebar route matching,
+  and OAuth polling timer cleanup.
+
 ## [1.1.3] - 2026-09-03
 
 ### Changed

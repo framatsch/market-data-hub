@@ -14,8 +14,8 @@ import {
   IconButton,
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
-import { fetcher } from '../../lib/api';
-import type { CredentialMetadata, CredentialReveal } from '../../types';
+import { fetcher, getErrorMessage } from '../../lib/api';
+import type { ConnectionTestResult, CredentialMetadata, CredentialReveal } from '../../types';
 
 /** Rendered in place of a configured-but-unrevealed secret. */
 const MASK = '\u2022'.repeat(12);
@@ -41,7 +41,7 @@ export function ApiKeyAuthSection({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
+  const [testResult, setTestResult] = useState<Pick<ConnectionTestResult, 'success' | 'message'> & Partial<Pick<ConnectionTestResult, 'details'>> | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
   const providerCredentials = credentialsQuery.data?.filter(
@@ -125,7 +125,7 @@ export function ApiKeyAuthSection({
     setTestResult(null);
 
     const payload = Object.fromEntries(
-      Object.entries(formValues).filter(([_, v]) => v.trim() !== '')
+      Object.entries(formValues).filter(([, v]) => v.trim() !== '')
     );
 
     if (Object.keys(payload).length === 0) {
@@ -144,8 +144,8 @@ export function ApiKeyAuthSection({
       setRevealed({});
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
       setSnackbar({ open: true, message: 'Credentials saved', severity: 'success' });
-    } catch (err: any) {
-      setSnackbar({ open: true, message: `Failed to save credentials: ${err.message}`, severity: 'error' });
+    } catch (err: unknown) {
+      setSnackbar({ open: true, message: `Failed to save credentials: ${getErrorMessage(err)}`, severity: 'error' });
     } finally {
       setIsSaving(false);
     }
@@ -155,12 +155,12 @@ export function ApiKeyAuthSection({
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetcher(`/api/admin/test-connection/${providerName}`, {
+      const res = await fetcher<ConnectionTestResult>(`/api/admin/test-connection/${providerName}`, {
         method: 'POST',
       });
-      setTestResult(res as any);
-    } catch (err: any) {
-      setTestResult({ success: false, message: err.message });
+      setTestResult(res);
+    } catch (err: unknown) {
+      setTestResult({ success: false, message: getErrorMessage(err) });
     } finally {
       setIsTesting(false);
     }

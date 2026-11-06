@@ -14,7 +14,7 @@ export interface Provider {
     retry_count?: number;
     rate_limit_per_sec?: number;
   };
-  connection_config?: Record<string, any>;
+  connection_config?: Record<string, unknown>;
 }
 
 export interface SchwabAuthStatus {
@@ -45,7 +45,7 @@ export interface ProviderConfig {
   circuit_breaker_failure_threshold: number;
   circuit_breaker_reset_seconds: number;
   connection_config_json: string;
-  connection_config?: Record<string, any>;
+  connection_config?: Record<string, unknown>;
 }
 
 /**
@@ -80,4 +80,34 @@ export interface SystemDefaults {
   default_company_provider?: string;
   default_options_provider?: string;
   default_news_provider?: string;
+}
+
+export interface CachePolicy {
+  option_chain_seconds: number;
+  historical_closed_seconds: number;
+  historical_open_bar_seconds: number;
+  historical_intraday_seconds: number;
+  company_profile_seconds: number;
+  company_search_seconds: number;
+  company_news_seconds: number;
+  market_status_seconds: number;
+  extend_when_market_closed: boolean;
+}
+
+export interface CacheStatus {
+  state: 'disabled' | 'connected' | 'unavailable';
+  redis_url: string;
+  policy: CachePolicy;
+  defaults: CachePolicy;
+  market: { state: 'session' | 'settle_grace' | 'settled'; next_open: string };
+  memory: { used_memory: number; maxmemory: number } | null;
+  key_counts: Record<Exclude<CacheScope, 'all'>, number> | null;
+}
+
+export type CacheScope = 'all' | 'options_chain' | 'historical_prices' | 'company_profile' | 'company_search' | 'company_news' | 'market_status';
+
+export interface CacheClearResult {
+  deleted: number;
+  scope: CacheScope;
+  provider: string | null;
 }

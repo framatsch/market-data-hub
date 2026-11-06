@@ -10,8 +10,9 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
+from app import cache as response_cache
 from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderRuntimeConfig
 from app.admin.runtime import (
     get_key_repository,
@@ -19,8 +20,10 @@ from app.admin.runtime import (
     get_settings_repository,
 )
 from app.api.admin_auth import AdminPrincipal, admin_auth
+from app.cache import CachePolicyUpdate, CachePolicyValues, CacheScope
 from app.config import settings
 from app.models.connection import ConnectionTestResult
+from app.observability.audit import audit_log
 from app.providers.base import (
     BaseCompanyProvider,
     BaseNewsProvider,
@@ -107,6 +110,12 @@ class SystemDefaultsUpdate(BaseModel):
     default_company_provider: str | None = None
     default_options_provider: str | None = None
     default_news_provider: str | None = None
+
+
+class CacheClearRequest(BaseModel):
+    confirm: StrictBool = False
+    scope: CacheScope = "all"
+    provider: str | None = None
 
 
 class IbkrGatewayUpdate(BaseModel):
@@ -412,6 +421,43 @@ def _system_defaults() -> dict[str, str]:
 @router.get("/settings/defaults")
 async def get_admin_settings_defaults(_principal: PrincipalDep) -> dict[str, str]:
     return _system_defaults()
+
+
+@router.get("/cache")
+async def get_admin_cache(_principal: PrincipalDep) -> dict[str, Any]:
+    return await response_cache.cache_status()
+
+
+@router.put("/cache/policy", response_model=CachePolicyValues)
+async def update_admin_cache_policy(
+    payload: CachePolicyUpdate, principal: PrincipalDep
+) -> CachePolicyValues:
+    values = await response_cache.policy.update(payload)
+    audit_log.info(
+        "cache_policy_updated",
+        user=principal.user,
+        changes=payload.model_dump(exclude_unset=True),
+    )
+    return values
+
+
+@router.post("/cache/clear")
+async def clear_admin_cache(
+    payload: CacheClearRequest, principal: PrincipalDep
+) -> dict[str, Any]:
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=400, detail="Cache clearing requires confirm: true"
+        )
+    try:
+        deleted = await response_cache.clear_cache(payload.scope, payload.provider)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    audit_log.info(
+        "cache_cleared", user=principal.user, scope=payload.scope,
+        provider=payload.provider, deleted=deleted,
+    )
+    return {"deleted": deleted, "scope": payload.scope, "provider": payload.provider}
 
 
 @router.put("/settings/defaults")

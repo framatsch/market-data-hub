@@ -36,6 +36,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app.cache import cached_call
 from app.config import APP_VERSION
 from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
@@ -282,6 +283,11 @@ def _text_content(data: Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(data, default=str)}]}
 
 
+def _cache_data(data: Any) -> Any:
+    """Preserve the existing MCP string encoding for Decimal/date values on HIT."""
+    return json.loads(json.dumps(data, default=str))
+
+
 async def _tool_get_last_price(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     sec_type = args.get("sec_type", "stock")
@@ -305,17 +311,21 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
         start = datetime.fromisoformat(args["start_date"])
     if "end_date" in args:
         end = datetime.fromisoformat(args["end_date"])
-    bars = await _price_service().get_historical_prices(
-        symbol,
-        interval,
-        start,
-        end,
-        provider_name=provider,
-        sec_type=sec_type,
+    async def load() -> Any:
+        bars = await _price_service().get_historical_prices(
+            symbol, interval, start, end, provider_name=provider, sec_type=sec_type,
+        )
+        return _cache_data([b.model_dump() for b in bars])
+
+    bars = await cached_call(
+        "prices:history", symbol,
+        {"interval": interval, "sec_type": sec_type, "provider": provider,
+         "start": args.get("start_date"), "end": args.get("end_date")},
+        load, refresh=args.get("refresh", False),
     )
     if not bars:
         return _text_content(f"No historical data found for {symbol} ({sec_type})")
-    return _text_content([b.model_dump() for b in bars])
+    return _text_content(bars)
 
 
 async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
@@ -323,10 +333,17 @@ async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
     provider = args.get("provider")
-    chain = await _options_service().get_option_chain(
-        symbol, expiry, provider_name=provider
+    async def load() -> Any:
+        chain = await _options_service().get_option_chain(
+            symbol, expiry, provider_name=provider
+        )
+        return _cache_data(chain.model_dump())
+
+    chain = await cached_call(
+        "options:chain", symbol, {"expiry": expiry_str, "provider": provider},
+        load, refresh=args.get("refresh", False),
     )
-    return _text_content(chain.model_dump())
+    return _text_content(chain)
 
 
 async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
@@ -342,17 +359,31 @@ async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
 async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
     symbol = args["symbol"].upper()
     provider = args.get("provider")
-    profile = await _company_service().get_company_profile(
-        symbol, provider_name=provider
+    async def load() -> Any:
+        profile = await _company_service().get_company_profile(
+            symbol, provider_name=provider
+        )
+        return _cache_data(profile.model_dump())
+
+    profile = await cached_call(
+        "companies:profile", symbol, {"provider": provider},
+        load, refresh=args.get("refresh", False),
     )
-    return _text_content(profile.model_dump())
+    return _text_content(profile)
 
 
 async def _tool_search_companies(args: dict[str, Any]) -> dict[str, Any]:
     query = args["query"]
     provider = args.get("provider")
-    results = await _company_service().search_companies(query, provider_name=provider)
-    return _text_content([r.model_dump() for r in results])
+    async def load() -> Any:
+        results = await _company_service().search_companies(query, provider_name=provider)
+        return _cache_data([r.model_dump() for r in results])
+
+    results = await cached_call(
+        "companies:search", "", {"q": query, "provider": provider},
+        load, refresh=args.get("refresh", False),
+    )
+    return _text_content(results)
 
 
 async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
@@ -365,15 +396,31 @@ async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
         to_date = date.fromisoformat(args["to_date"])
     limit = int(args.get("limit", 20))
     provider_name = args.get("provider")
-    provider = get_registry().get_news_provider(provider_name)
-    articles = await provider.get_company_news(symbol, from_date, to_date, limit=limit)
-    return _text_content([a.model_dump() for a in articles])
+    async def load() -> Any:
+        provider = get_registry().get_news_provider(provider_name)
+        articles = await provider.get_company_news(symbol, from_date, to_date, limit=limit)
+        return _cache_data([a.model_dump() for a in articles])
+
+    articles = await cached_call(
+        "companies:news", symbol,
+        {"from_date": args.get("from_date"), "to_date": args.get("to_date"),
+         "limit": limit, "provider": provider_name},
+        load, refresh=args.get("refresh", False),
+    )
+    return _text_content(articles)
 
 
 async def _tool_get_market_status(args: dict[str, Any]) -> dict[str, Any]:
     provider = args.get("provider")
-    status = await _price_service().get_market_status(provider_name=provider)
-    return _text_content(status.model_dump())
+    async def load() -> Any:
+        status = await _price_service().get_market_status(provider_name=provider)
+        return _cache_data(status.model_dump())
+
+    status = await cached_call(
+        "market-status", "", {"provider": provider},
+        load, refresh=args.get("refresh", False),
+    )
+    return _text_content(status)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +455,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "symbol": {"type": "string"},
                 "interval": {
                     "type": "string",
@@ -438,6 +486,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol", "expiry"],
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "symbol": {"type": "string"},
                 "expiry": {
                     "type": "string",
@@ -477,6 +526,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "symbol": {"type": "string"},
                 "provider": {
                     "type": "string",
@@ -492,6 +542,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["query"],
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "query": {"type": "string", "description": "Search term, e.g. Apple"},
                 "provider": {
                     "type": "string",
@@ -507,6 +558,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol"],
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "symbol": {"type": "string"},
                 "from_date": {
                     "type": "string",
@@ -535,6 +587,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
+                "refresh": {"type": "boolean", "default": False, "description": "Fetch live data and overwrite the cache."},
                 "provider": {
                     "type": "string",
                     "description": "Data provider (e.g., polygon, ibkr)",

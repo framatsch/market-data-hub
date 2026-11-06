@@ -14,7 +14,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
 
   useEffect(() => {
     async function initiateAuth() {
-      if (!isLoading && isError && (error as any)?.message?.includes('401') || (!isLoading && !user && authEnabled)) {
+      if ((!isLoading && isError && error?.message.includes('401')) || (!isLoading && !user && authEnabled)) {
         setRedirecting(true);
         try {
           const verifier = generateCodeVerifier();

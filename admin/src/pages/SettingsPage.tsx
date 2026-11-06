@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box, 
@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import { fetcher } from '../lib/api';
 import type { SystemDefaults } from '../types';
+import CacheCard from '../components/CacheCard';
 
 interface SettingsProviderCapabilities {
   prices: string[];
@@ -29,12 +30,7 @@ export default function SettingsPage() {
   const [errorMsg, setErrorMsg] = useState('');
 
   // Local state for the form
-  const [defaults, setDefaults] = useState<SystemDefaults>({
-    default_price_provider: '',
-    default_options_provider: '',
-    default_company_provider: '',
-    default_news_provider: '',
-  });
+  const [edits, setDefaults] = useState<SystemDefaults | null>(null);
 
   const { data: currentDefaults, isLoading: isLoadingDefaults } = useQuery<SystemDefaults>({
     queryKey: ['systemDefaults'],
@@ -45,6 +41,13 @@ export default function SettingsPage() {
     queryKey: ['providerCapabilities'],
     queryFn: () => fetcher('/api/admin/settings/capabilities'),
   });
+
+  const defaults = edits ?? {
+    default_price_provider: currentDefaults?.default_price_provider || '',
+    default_options_provider: currentDefaults?.default_options_provider || '',
+    default_company_provider: currentDefaults?.default_company_provider || '',
+    default_news_provider: currentDefaults?.default_news_provider || '',
+  };
 
   const updateDefaultsMutation = useMutation({
     mutationFn: (newDefaults: SystemDefaults) => 
@@ -57,22 +60,10 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['systemDefaults'] });
       setSuccessMsg('Settings updated successfully.');
     },
-    onError: (err: any) => {
+    onError: (err) => {
       setErrorMsg(err.message || 'Failed to update settings.');
     }
   });
-
-  // Sync local state when defaults load
-  useEffect(() => {
-    if (currentDefaults) {
-      setDefaults({
-        default_price_provider: currentDefaults.default_price_provider || '',
-        default_options_provider: currentDefaults.default_options_provider || '',
-        default_company_provider: currentDefaults.default_company_provider || '',
-        default_news_provider: currentDefaults.default_news_provider || '',
-      });
-    }
-  }, [currentDefaults]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -178,6 +169,8 @@ export default function SettingsPage() {
           </Box>
         </form>
       </Paper>
+
+      <CacheCard />
 
       <Snackbar 
         open={!!successMsg} 

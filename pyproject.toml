@@ -21,6 +21,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "prometheus-client>=0.21.0",
     "structlog>=24.4.0",
+    "fastapi-cache2[redis]>=0.2.2",
 ]
 
 [project.optional-dependencies]

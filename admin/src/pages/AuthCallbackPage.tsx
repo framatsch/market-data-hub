@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Box, CircularProgress, Typography, Button, Alert } from '@mui/material';
-import { fetcher } from '../lib/api';
+import { fetcher, getErrorMessage } from '../lib/api';
 import { generateCodeVerifier, generateCodeChallenge } from '../lib/pkce';
 
 export default function AuthCallbackPage() {
@@ -43,9 +43,9 @@ export default function AuthCallbackPage() {
         sessionStorage.setItem('admin_token', access_token);
         sessionStorage.removeItem('pkce_verifier');
         navigate('/admin', { replace: true });
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('Token exchange failed:', e);
-        setError(e.message || 'Failed to exchange authorization code for token.');
+        setError(getErrorMessage(e) || 'Failed to exchange authorization code for token.');
         processedRef.current = false;
       }
     }
@@ -66,8 +66,8 @@ export default function AuthCallbackPage() {
       );
       
       window.location.href = auth_url;
-    } catch (e: any) {
-      setError(`Retry failed: ${e.message}`);
+    } catch (e: unknown) {
+      setError(`Retry failed: ${getErrorMessage(e)}`);
       setRetrying(false);
     }
   };

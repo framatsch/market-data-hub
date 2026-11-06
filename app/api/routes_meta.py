@@ -20,6 +20,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from starlette.responses import Response
 
+from app.cache import cache
+from app.config import settings
 from app.dependencies import PriceServiceDep
 from app.models.common import HealthResponse, MarketStatus, ResponseEnvelope
 from app.observability.metrics import metrics_response
@@ -61,6 +63,7 @@ async def get_metrics() -> Any:
 
 
 @router.get("/market-status", response_model=ResponseEnvelope[MarketStatus])
+@cache(expire=settings.CACHE_TTL_MARKET_STATUS_SECONDS, key="market-status")
 async def get_market_status(
     service: PriceServiceDep,
     provider: str | None = Query(

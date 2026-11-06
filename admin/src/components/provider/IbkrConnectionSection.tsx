@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -10,8 +10,8 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { fetcher } from '../../lib/api';
-import type { ProviderConfig } from '../../types';
+import { fetcher, getErrorMessage } from '../../lib/api';
+import type { ConnectionTestResult, ProviderConfig } from '../../types';
 
 interface IbkrConnectionConfig {
   host: string;
@@ -30,17 +30,12 @@ export function IbkrConnectionSection() {
     queryFn: () => fetcher('/api/admin/providers/ibkr/config'),
   });
 
-  const [formData, setFormData] = useState<Partial<IbkrConnectionConfig>>({});
+  const [edits, setFormData] = useState<Partial<IbkrConnectionConfig>>({});
+  const formData = { ...(configQuery.data?.connection_config as Partial<IbkrConnectionConfig>), ...edits };
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
+  const [testResult, setTestResult] = useState<Pick<ConnectionTestResult, 'success' | 'message'> & Partial<Pick<ConnectionTestResult, 'details'>> | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
-
-  useEffect(() => {
-    if (configQuery.data?.connection_config && Object.keys(formData).length === 0) {
-      setFormData(configQuery.data.connection_config as Partial<IbkrConnectionConfig>);
-    }
-  }, [configQuery.data, formData]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
@@ -64,8 +59,8 @@ export function IbkrConnectionSection() {
       setSnackbar({ open: true, message: 'IBKR gateway connection updated', severity: 'success' });
       queryClient.invalidateQueries({ queryKey: ['providerConfig', 'ibkr'] });
       queryClient.invalidateQueries({ queryKey: ['providers'] });
-    } catch (err: any) {
-      setSnackbar({ open: true, message: `Update failed: ${err.message}`, severity: 'error' });
+    } catch (err: unknown) {
+      setSnackbar({ open: true, message: `Update failed: ${getErrorMessage(err)}`, severity: 'error' });
     } finally {
       setIsSaving(false);
     }
@@ -75,12 +70,12 @@ export function IbkrConnectionSection() {
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetcher('/api/admin/test-connection/ibkr', {
+      const res = await fetcher<ConnectionTestResult>('/api/admin/test-connection/ibkr', {
         method: 'POST',
       });
-      setTestResult(res as { success: boolean; message: string; details?: any });
-    } catch (err: any) {
-      setTestResult({ success: false, message: err.message });
+      setTestResult(res);
+    } catch (err: unknown) {
+      setTestResult({ success: false, message: getErrorMessage(err) });
     } finally {
       setIsTesting(false);
     }

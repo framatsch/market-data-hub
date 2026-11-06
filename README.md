@@ -217,6 +217,136 @@ Provider credential keys:
 | `prixe` | `api_key` |
 | `schwab` | `api_key`, `app_secret`, `token_json`, optional `alert_webhook_url` |
 
+## Redis Response Cache
+
+`GET /options/{symbol}/chain`, `GET /prices/{symbol}/history`, company profiles,
+company search, company news (JSON/CSV) and `GET /market-status` cache responses
+in Redis, for every provider. Their six MCP counterparts use the same backend
+and TTL policy with separate entries; `refresh: true` fetches live and overwrites
+the MCP entry. Redis is optional: outages serve live provider data, log one
+warning, and retry after a 30-second cooldown. Requests without application
+startup, and deployments with `CACHE_ENABLED=false`, do not access Redis.
+
+Never cached: `/prices/{symbol}/last`, `/options/{symbol}/quote/{option_id}`,
+`/health`, `/metrics`, `/providers`, `/api/admin/*`, WebSockets, and the MCP tools
+`get_last_price` / `get_option_quote`.
+
+Docker Compose includes Redis 7 Alpine on the internal network only (no host
+port), with `redis-data:/data` persistence, RDB snapshots (`300 1`, `60 1000`),
+no AOF, and `allkeys-lru` eviction. MDH starts even if Redis is unhealthy.
+Graceful `docker compose down` preserves the volume and saves a snapshot;
+`docker compose up -d` restores unexpired entries. A crash can lose up to about
+five minutes of recent entries. Do not use `down -v` if you want to preserve
+the cache **or the existing keys database**.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CACHE_ENABLED` | `true` | Enable response caching |
+| `REDIS_URL` | `redis://localhost:6379/0` | Standalone Redis URL; Compose defaults to `redis://redis:6379/0` |
+| `REDIS_TIMEOUT_SECONDS` | `1.0` | Connect and socket timeout per Redis call |
+| `CACHE_TTL_OPTION_CHAIN_SECONDS` | `900` | Option-chain session TTL |
+| `CACHE_TTL_HISTORICAL_CLOSED_SECONDS` | `604800` | Closed historical ranges (7 days); cap for closed-market extension |
+| `CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS` | `300` | Forming daily/weekly/monthly bars |
+| `CACHE_TTL_HISTORICAL_INTRADAY_SECONDS` | `300` | Intraday bars; capped at bar length (`1m` → 60 s) |
+| `CACHE_TTL_COMPANY_PROFILE_SECONDS` | `86400` | Company profiles (24 hours) |
+| `CACHE_TTL_COMPANY_SEARCH_SECONDS` | `3600` | Company search (1 hour) |
+| `CACHE_TTL_COMPANY_NEWS_SECONDS` | `600` | Company news (10 minutes) |
+| `CACHE_TTL_MARKET_STATUS_SECONDS` | `60` | Market status; capped at the next weekday 04:00/09:30/16:00/20:00 ET transition |
+| `CACHE_EXTEND_WHEN_MARKET_CLOSED` | `true` | Keep open ranges/chains until next US market open |
+| `REDIS_MAXMEMORY` | `256mb` | Compose Redis memory bound |
+
+These TTLs are initial defaults. **Admin UI → Settings → Response Cache** shows
+connection state, redacted Redis URL, memory, key counts and market state. Its
+policy form saves overrides to `system_settings` in `keys.db` without restarting
+or requiring Redis. TTLs accept 0–2592000 seconds (30 days); 0 disables writes
+for that policy, including its closed-market extension. Other replicas sharing
+`keys.db` pick up changes within 30 seconds. Existing entries retain their TTL;
+use **Clear cache…** for immediate invalidation, optionally scoped to an endpoint
+and/or provider. Clearing requires acknowledgement because following requests
+hit broker APIs live and can trigger rate limits.
+
+The TTL policy uses US equity sessions in `America/New_York`: Mon–Fri
+09:30–16:00, or 04:00–20:00 for `extended_hours=true`, with 30 minutes of settle
+grace after close. Settled-market entries last until the next open, capped by
+the closed-range TTL. Holidays count as weekdays (extra refreshes, not extra
+staleness). The extension applies only to option chains and historical prices,
+never to company data or market status. **Disable the extension for non-US symbols.**
+
+An explicit historical `end` uses the closed-range TTL only if safely before
+the current period: intraday before today midnight ET, daily before yesterday
+midnight ET, weekly before this Monday minus one day, monthly before this
+month's first day minus one day. Naive `end` timestamps mean UTC. `1m` means
+minute; `1mo` means month. Ranges containing a forming bar use the short TTL,
+including during settle grace. Long-lived closed ranges can miss subsequent
+split/dividend adjustments; clear their cache after corporate actions.
+
+Keys are transparent: `mdh:{route_path}:{SYMBOL}:{sorted_urlencoded_query}`,
+e.g. `mdh:options:chain:SPX:provider=schwab`. Only declared non-empty query
+parameters contribute; symbol is uppercased, `provider`/`format`/`sec_type`
+lowercased. The effective provider (explicit or registry default) is part of
+the key, so changing a default provider cannot serve another provider's data.
+ISO datetime colons are URL-encoded. Entries are not automatically invalidated
+when provider configuration or response schemas change; clear affected entries
+after such changes. Concurrent misses can still call the provider concurrently.
+
+Company route keys are `companies:profile`, `companies:search`, and
+`companies:news`; search and market-status keys have an empty symbol segment.
+Search queries are trimmed, whitespace-collapsed and lowercased in the key only.
+Default providers are resolved per capability (company, news, options or price).
+MCP keys add `channel=mcp` and use HTTP parameter names (`start`, `end`, `q`, etc.);
+HTTP ignores undeclared parameters, including `channel`. Admin key counts and
+endpoint/provider clear scopes include both channels.
+
+Cached responses include `X-FastAPI-Cache: HIT|MISS`, `ETag`, and `Cache-Control`
+with the effective write TTL on MISS or remaining TTL on HIT. TTL 0 returns
+`Cache-Control: no-store`. `If-None-Match` supports 304 revalidation.
+
+```bash
+# Force a live fetch and refresh the cache entry:
+curl -H 'Cache-Control: no-cache' 'http://localhost:9000/options/SPX/chain?provider=schwab'
+# Fetch live without reading or writing the cache:
+curl -H 'Cache-Control: no-store' 'http://localhost:9000/prices/AAPL/history?provider=schwab'
+# Admin API (requires an admin token when admin authentication is enabled):
+curl -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:9000/api/admin/cache
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"historical_intraday_seconds":120}' http://localhost:9000/api/admin/cache/policy
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"confirm":true,"scope":"options_chain","provider":"schwab"}' \
+  http://localhost:9000/api/admin/cache/clear
+```
+
+Clearing uses non-blocking `SCAN` + batched `UNLINK`, never `KEYS` or `FLUSHDB`,
+and leaves foreign Redis keys untouched. Policy changes and clears are audited.
+
+### Isolated Compose verification (no broker access)
+
+The verification overlay replaces market services with deterministic fakes but
+uses the real application lifespan, routes and Redis. It disables admin auth,
+uses a public test encryption key, ignores `.env` credentials, and runs under a
+separate project name/port. **Never use this overlay in production.**
+
+```bash
+APP_PORT=19090 docker compose -p mdh-cache-verification -f docker-compose.yml \
+  -f tests/compose/cache_override.yaml up --build -d
+curl -i 'http://localhost:19090/options/AAPL/chain?provider=schwab' # MISS then HIT
+python tests/compose/cache_probe.py warm # JSON + CSV for both routes: MISS then HIT
+python tests/compose/cache_probe.py coverage # all six cached capabilities, HTTP + MCP
+APP_PORT=19090 docker compose -p mdh-cache-verification -f docker-compose.yml \
+  -f tests/compose/cache_override.yaml exec -T redis redis-cli --scan --pattern 'mdh:*'
+APP_PORT=19090 docker compose -p mdh-cache-verification -f docker-compose.yml \
+  -f tests/compose/cache_override.yaml stop redis
+curl -i 'http://localhost:19090/options/AAPL/chain?provider=schwab' # live HTTP 200
+python tests/compose/cache_probe.py outage # all four responses live; Redis unavailable
+# down (without -v) then up verifies unexpired entries still HIT.
+APP_PORT=19090 docker compose -p mdh-cache-verification -f docker-compose.yml \
+  -f tests/compose/cache_override.yaml down
+# Bring up the same isolated project, then verify restored entries:
+APP_PORT=19090 docker compose -p mdh-cache-verification -f docker-compose.yml \
+  -f tests/compose/cache_override.yaml up -d
+python tests/compose/cache_probe.py persisted
+# Stop the verification stack afterward with the same down command (without -v).
+```
+
 ## Observability
 
 MDH exposes Prometheus-compatible request metrics at `GET /metrics` and emits one structured JSON audit log line for each completed API request. Health, metrics, docs, OpenAPI, and admin endpoints are skipped for audit logs.

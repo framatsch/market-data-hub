@@ -18,8 +18,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
+from app.cache import cache
+from app.config import settings
 from app.dependencies import PriceServiceDep
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
@@ -76,6 +78,7 @@ async def get_last_price(
 
 
 @router.get("/{symbol}/history")
+@cache(expire=settings.CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS)
 async def get_historical_prices(
     symbol: str,
     service: PriceServiceDep,
@@ -112,8 +115,8 @@ async def get_historical_prices(
 
     if format.lower() == "csv":
         content_type, csv_data = to_csv(bars, f"{symbol}_history_{interval}.csv")
-        return StreamingResponse(
-            iter([csv_data]),
+        return Response(
+            content=csv_data,
             media_type=content_type,
             headers={
                 "Content-Disposition": f"attachment; filename={symbol}_history_{interval}.csv"

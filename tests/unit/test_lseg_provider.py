@@ -16,9 +16,9 @@
 
 """Unit tests for LSEG Provider with mocked API calls."""
 
+import threading
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-import threading
 from unittest.mock import Mock, patch
 
 import pytest

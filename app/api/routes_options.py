@@ -19,8 +19,10 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
+from app.cache import cache
+from app.config import settings
 from app.dependencies import OptionsServiceDep
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
@@ -29,6 +31,7 @@ router = APIRouter(prefix="/options", tags=["Options"])
 
 
 @router.get("/{symbol}/chain")
+@cache(expire=settings.CACHE_TTL_OPTION_CHAIN_SECONDS)
 async def get_option_chain(
     symbol: str,
     service: OptionsServiceDep,
@@ -82,8 +85,8 @@ async def get_option_chain(
         content_type, csv_data = to_csv(
             chain.model_dump(), f"{symbol}_options_chain_{expiry}.csv"
         )
-        return StreamingResponse(
-            iter([csv_data]),
+        return Response(
+            content=csv_data,
             media_type=content_type,
             headers={
                 "Content-Disposition": f"attachment; filename={symbol}_options_chain_{expiry}.csv"

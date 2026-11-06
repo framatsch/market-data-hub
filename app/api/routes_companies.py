@@ -14,13 +14,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import io
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Query, Response
 
+from app.cache import cache
+from app.config import settings
 from app.dependencies import CompanyServiceDep, NewsServiceDep
 from app.models.common import ResponseEnvelope
 from app.models.company import CompanyProfile, CompanySummary
@@ -31,6 +31,7 @@ router = APIRouter(prefix="/companies", tags=["Companies"])
 
 
 @router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
+@cache(expire=settings.CACHE_TTL_COMPANY_SEARCH_SECONDS, key="companies:search")
 async def search_companies(
     q: str, service: CompanyServiceDep, provider: str | None = None
 ) -> Any:
@@ -41,6 +42,7 @@ async def search_companies(
 
 
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
+@cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
     symbol: str, service: CompanyServiceDep, provider: str | None = None
 ) -> Any:
@@ -52,6 +54,7 @@ async def get_company_profile(
 
 
 @router.get("/{symbol}/news", response_model=NewsResponse)
+@cache(expire=settings.CACHE_TTL_COMPANY_NEWS_SECONDS, key="companies:news")
 async def get_company_news(
     symbol: str,
     service: NewsServiceDep,
@@ -126,8 +129,8 @@ async def get_company_news(
     # 5. CSV export if requested
     if format.lower() == "csv":
         content_type, csv_bytes = to_csv(articles, filename=f"{symbol}_news.csv")
-        return StreamingResponse(
-            io.BytesIO(csv_bytes),
+        return Response(
+            csv_bytes,
             media_type=content_type,
             headers={"Content-Disposition": f"attachment; filename={symbol}_news.csv"},
         )

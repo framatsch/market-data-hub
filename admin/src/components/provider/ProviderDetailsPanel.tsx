@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Box, Tabs, Tab, Typography, Chip, Stack, Switch, Tooltip } from '@mui/material';
 import { ProviderConfigSection } from './ProviderConfigSection';
 
@@ -47,14 +47,14 @@ export function ProviderDetailsPanel({
   onToggle?: (enabled: boolean) => void;
   defaultTab?: number;
 }) {
-  const [value, setValue] = useState(defaultTab);
-
-  useEffect(() => {
-    setValue(defaultTab);
-  }, [defaultTab]);
+  const [tab, setTab] = useState({ defaultTab, value: defaultTab });
+  if (tab.defaultTab !== defaultTab) {
+    setTab({ defaultTab, value: defaultTab });
+  }
+  const value = tab.defaultTab === defaultTab ? tab.value : defaultTab;
 
   const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setValue(newValue);
+    setTab({ defaultTab, value: newValue });
   };
 
   return (

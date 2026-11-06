@@ -1,4 +1,4 @@
-import { NavLink, useMatch } from 'react-router-dom';
+import { NavLink, matchPath, useLocation } from 'react-router-dom';
 import {
   List,
   ListItem,
@@ -15,15 +15,17 @@ const menuItems = [
 ];
 
 export default function Sidebar() {
+  const { pathname } = useLocation();
   return (
     <List>
       {menuItems.map((item) => {
-        const isSelected = !!useMatch(item.path);
+        const isSelected = !!matchPath({ path: item.path, end: true }, pathname);
         return (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
               component={NavLink}
               to={item.path}
+              end
               selected={isSelected}
               sx={{
                 '&.active': {

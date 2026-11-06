@@ -33,6 +33,7 @@ from app.api import (
     routes_prices,
     routes_ws,
 )
+from app.cache import CacheControlMiddleware, setup_cache, shutdown_cache
 from app.config import APP_VERSION, settings
 from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI) -> Any:
 
     initialize_admin_runtime()
     await registry.reload_from_config()
+    cache_state = await setup_cache()
 
     # --- STARTUP PROTOCOL OVERVIEW ---
     active_providers = list(registry._providers.keys())
@@ -79,6 +81,7 @@ async def lifespan(app: FastAPI) -> Any:
 {"-" * 60}
 Environment : {settings.APP_ENV}
 MCP Status  : {mcp_status}
+Cache Status: {cache_state}
 {"MCP Path    : /mcp/sse, /mcp/messages" if settings.MCP_ENABLED else ""}
 {"-" * 60}
 ACTIVE PROVIDERS:
@@ -99,10 +102,12 @@ ACTIVE PROVIDERS:
     print(banner, flush=True)
     logger.info("Startup protocol displayed.")
 
-    yield
-
-    logger.info(f"Shutting down {settings.APP_NAME}")
-    await registry.shutdown()
+    try:
+        yield
+    finally:
+        logger.info(f"Shutting down {settings.APP_NAME}")
+        await shutdown_cache()
+        await registry.shutdown()
 
 
 app = FastAPI(
@@ -134,6 +139,7 @@ app.add_middleware(
 
 # Starlette applies middleware in reverse registration order, so this runs after CORS.
 app.add_middleware(ObservabilityMiddleware)
+app.add_middleware(CacheControlMiddleware)
 
 # REST routers
 app.include_router(routes_meta.router)
