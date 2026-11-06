@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the Admin Settings page.
 - Compose Redis service with persistent RDB snapshots, bounded LRU memory and
   internal-only networking; hermetic cache tests and isolated Compose verification.
+- `schwab_cli.py`: CLI to download Schwab accounts, positions and transactions
+  into the wrapped JSON format used by the Trade Sensei importer (with unit tests).
 
 ### Fixed
 
