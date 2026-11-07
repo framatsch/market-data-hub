@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-07
+
+### Added
+
+- Production `docker-compose.release.yml` (plus `env.example` and `README.md`) is
+  attached to every GitHub release, pinned to the matching image tag; releases
+  list their `ghcr.io/framatsch/market-data-hub` image.
+
+### Changed
+
+- Repository and GHCR images moved to the `framatsch` GitHub account
+  (`ghcr.io/framatsch/market-data-hub`); Admin UI links updated.
+- README consolidated: removed unsupported LSEG sections and verbose internals.
+
 ## [1.2.0] - 2026-11-06
 
 ### Added
