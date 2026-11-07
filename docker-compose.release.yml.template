@@ -1,0 +1,80 @@
+# Production Market Data Hub stack ({{IMAGE_TAG}})
+#
+# Usage:
+# 1. cp env.example .env
+# 2. Edit .env (at least set APP_ENCRYPTION_KEY and the ADMIN_OIDC_* values)
+#    Non-production trial: APP_ENV=test and ADMIN_AUTH_ENABLED=false
+# 3. docker compose -f docker-compose.release.yml up -d
+#
+# Provider credentials are stored encrypted in keys.db via the Admin UI/API.
+
+services:
+  market-data-hub:
+    image: ghcr.io/framatsch/market-data-hub:{{IMAGE_TAG}}
+    restart: always
+    ports:
+      - "${APP_PORT:-9000}:${APP_PORT:-9000}"
+    env_file:
+      - .env
+    environment:
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-9000}
+      APP_ENV: ${APP_ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is required}
+      KEYS_DB_PATH: /app/data/keys.db
+      ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-true}
+      ADMIN_OIDC_ISSUER: ${ADMIN_OIDC_ISSUER:-}
+      ADMIN_OIDC_CLIENT_ID: ${ADMIN_OIDC_CLIENT_ID:-}
+      ADMIN_OIDC_CLIENT_SECRET: ${ADMIN_OIDC_CLIENT_SECRET:-}
+    depends_on:
+      redis:
+        condition: service_started
+    volumes:
+      - keys-db:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:${APP_PORT:-9000}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-data-hub
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command:
+      - redis-server
+      - --save
+      - "300"
+      - "1"
+      - --save
+      - "60"
+      - "1000"
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - market-data-hub
+
+networks:
+  market-data-hub:
+    driver: bridge
+
+volumes:
+  keys-db:
+  redis-data:

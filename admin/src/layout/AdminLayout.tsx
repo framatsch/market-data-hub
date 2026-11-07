@@ -182,7 +182,7 @@ export default function AdminLayout() {
                 variant="outlined"
                 color="primary"
                 startIcon={<GitHubIcon />}
-                href="https://github.com/scheffold/market-data-hub"
+                href="https://github.com/framatsch/market-data-hub"
                 target="_blank"
                 rel="noopener noreferrer"
                 fullWidth
@@ -193,7 +193,7 @@ export default function AdminLayout() {
               <Typography variant="caption" color="text.secondary">
                 License:{' '}
                 <Link
-                  href="https://github.com/scheffold/market-data-hub/blob/main/LICENSE"
+                  href="https://github.com/framatsch/market-data-hub/blob/main/LICENSE"
                   target="_blank"
                   rel="noopener noreferrer"
                   color="inherit"

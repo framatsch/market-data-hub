@@ -166,8 +166,8 @@ If new log noise appears, add a filter here rather than raising the global log l
 ```bash
 # Manual push (CI does this automatically)
 docker login ghcr.io -u USERNAME --password-stdin
-docker build -t ghcr.io/OWNER/market-data-hub:latest .
-docker push ghcr.io/OWNER/market-data-hub:latest
+docker build -t ghcr.io/framatsch/market-data-hub:latest .
+docker push ghcr.io/framatsch/market-data-hub:latest
 ```
 
 ---

@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: market-data-hub:latest
+    image: ${MDH_IMAGE:-ghcr.io/framatsch/market-data-hub:latest}
     ports:
       - "${APP_PORT:-9000}:${APP_PORT:-9000}"
     env_file:
