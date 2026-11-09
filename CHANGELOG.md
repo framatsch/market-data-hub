@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-09
+
+### Added
+
+- Namespaced symbols with one grammar across REST, MCP and WebSocket: bare symbols
+  are stocks/ETFs, `I:`/`^` are indices, `F:`/`/` futures and `O:` option ids. A
+  central parser (`app/utils/symbols.py`) resolves prefix/`sec_type` conflicts and
+  responses return canonical symbols.
+- Per-provider symbol mapping (IBKR Index/ContFuture, LSEG `.ROOT`/`ROOTc1`,
+  Schwab `$ROOT`/`/ROOT`, Polygon `I:ROOT`) with declared support sets; unsupported
+  combinations answer 501 `CAPABILITY_NOT_SUPPORTED` before any provider call.
+- New 403 `PROVIDER_NOT_ENTITLED` error for runtime subscription/entitlement denials
+  (applied after previous-close and delayed-data fallbacks); Admin UI shows provider
+  support sets.
+
+### Changed
+
+- **Breaking:** `symbol` in responses is canonical (`I:SPX`, `F:ES`; stocks
+  unchanged); missing subscriptions answer 403 instead of 503; `.SPX`/`$SPX` input
+  is rejected; index/future requests at providers without a mapping answer 501;
+  cache keys changed (old entries expire).
+
+### Fixed
+
+- Stored credentials encrypted with another `APP_ENCRYPTION_KEY` no longer break
+  provider configuration or the admin credential list; they are logged and treated
+  as unconfigured.
+- Schwab futures quotes are keyed by the active contract; LSEG index ATMIV records
+  without a market field are handled.
+
 ## [1.2.1] - 2026-11-07
 
 ### Added
