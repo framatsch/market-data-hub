@@ -29,6 +29,7 @@ import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
 import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
 import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
 import { ProviderConfigSection } from '../components/provider/ProviderConfigSection';
+import { ProviderSupport } from '../components/provider/ProviderSupport';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -181,6 +182,8 @@ function ProviderDrawer({
                   ))}
                 </Box>
               )}
+
+              <ProviderSupport provider={provider} />
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                 <Chip

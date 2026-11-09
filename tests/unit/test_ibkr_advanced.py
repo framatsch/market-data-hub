@@ -41,25 +41,34 @@ def test_map_interval_all(ibkr_provider):
 
 def test_create_contract_types(ibkr_provider):
     with patch("app.providers.ibkr.Stock") as mock_stock:
-        ibkr_provider._create_contract("AAPL", sec_type="stock")
+        ibkr_provider._contract_for("AAPL", sec_type="stock")
         mock_stock.assert_called()
 
     with patch("app.providers.ibkr.Index") as mock_index:
-        ibkr_provider._create_contract("SPX", sec_type="index")
+        ibkr_provider._contract_for("SPX", sec_type="index")
         mock_index.assert_called()
 
 def test_create_contract_future(ibkr_provider):
     with patch("app.providers.ibkr.Future") as mock_future:
-        ibkr_provider._create_contract("ES", sec_type="future")
-        mock_future.assert_called()
+        ibkr_provider._contract_for("ES", sec_type="future")
+        mock_future.assert_called_with("ES", exchange="CME")
+
+    with patch("app.providers.ibkr.ContFuture") as mock_cont:
+        ibkr_provider._contract_for("ZN", sec_type="future", continuous=True)
+        mock_cont.assert_called_with("ZN", exchange="CBOT")
 
 
 
 def test_create_contract_indices(ibkr_provider):
     with patch("app.providers.ibkr.Index") as mock_index:
-        ibkr_provider._create_contract("^SPX", sec_type="index")
-        # Should strip ^
+        ibkr_provider._contract_for("SPX", sec_type="index")
         mock_index.assert_called_with("SPX", "CBOE")
-        
-        ibkr_provider._create_contract("INDU", sec_type="index")
+
+        ibkr_provider._contract_for("INDU", sec_type="index")
         mock_index.assert_called_with("INDU", "NYSE")
+
+        # Canonical DJI is listed as INDU at IBKR; unknown roots pass through.
+        ibkr_provider._contract_for("DJI", sec_type="index")
+        mock_index.assert_called_with("INDU", "NYSE")
+        ibkr_provider._contract_for("OEX", sec_type="index")
+        mock_index.assert_called_with("OEX", "CBOE")

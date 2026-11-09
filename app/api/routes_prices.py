@@ -15,31 +15,31 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
+from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 
 from app.cache import cache
 from app.config import settings
-from app.dependencies import PriceServiceDep
+from app.dependencies import PriceServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
+from app.utils.symbols import PRICE_TYPES, ParsedSymbol
 
 router = APIRouter(prefix="/prices", tags=["Prices"])
+
+PriceSymbol = Annotated[ParsedSymbol, Depends(symbol_param(PRICE_TYPES))]
 
 
 @router.get("/{symbol}/last")
 async def get_last_price(
-    symbol: str,
+    symbol: PriceSymbol,
     service: PriceServiceDep,
     provider: str | None = Query(
         None,
         description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type",
-    ),
-    sec_type: str = Query(
-        "stock",
-        description="Security type: 'stock' (default) or 'index'. For indices like ^RUT, use 'index'.",
     ),
     market_data_type: int | None = Query(
         None,
@@ -50,28 +50,33 @@ async def get_last_price(
     """
     Get the latest price quote for a symbol.
 
+    Symbol notation: `AAPL` (stock/ETF), `I:SPX` or `^SPX` (index), `F:ES`
+    (front-month future). The response `symbol` is the canonical form. The optional
+    `sec_type` query parameter (stock, etf, index, future) is accepted for legacy
+    clients and must agree with any prefix.
+
     Query Parameters:
     - market_data_type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)
     - format: "json" (default) or "csv"
 
+    Errors:
+    - 501: the provider has no hub implementation for this instrument type
+    - 403 PROVIDER_NOT_ENTITLED: the provider subscription does not cover it
+
     Provider notes:
-    - IBKR: honors `market_data_type`; Level 1 requires subscription and will return 503 if unavailable
+    - IBKR: honors `market_data_type`; Level 1 requires a subscription
     - LSEG: ignores `market_data_type` and returns latest daily summary (historical_pricing)
-    - For indices (^RUT, ^VIX, etc.), set sec_type='index' and remove ^ prefix from symbol
     """
-    symbol = symbol.upper()
     provider = provider.lower() if provider else None
-    sec_type = sec_type.lower()
-    quote = await service.get_latest_price(symbol, provider, market_data_type, sec_type)
+    quote = await service.get_latest_price(symbol, provider, market_data_type)
 
     if format.lower() == "csv":
-        content_type, csv_data = to_csv(quote, f"{symbol}_last_price.csv")
+        filename = f"{url_quote(symbol.canonical, safe='')}_last_price.csv"
+        content_type, csv_data = to_csv(quote, filename)
         return StreamingResponse(
             iter([csv_data]),
             media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={symbol}_last_price.csv"
-            },
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     return ResponseEnvelope(data=quote)
@@ -80,7 +85,7 @@ async def get_last_price(
 @router.get("/{symbol}/history")
 @cache(expire=settings.CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS)
 async def get_historical_prices(
-    symbol: str,
+    symbol: PriceSymbol,
     service: PriceServiceDep,
     interval: str = "1d",
     start: datetime | None = None,
@@ -89,38 +94,41 @@ async def get_historical_prices(
         False, description="Include extended trading hours (pre-market/after-hours)"
     ),
     provider: str | None = None,
-    sec_type: str = Query("stock", description="Security type: 'stock' or 'index'"),
     format: str = "json",
 ) -> Any:
     """
     Get historical price bars.
+
+    Symbol notation: `AAPL`, `I:SPX` / `^SPX`, `F:ES` (provider continuous
+    front-month series, unadjusted). Responses carry the canonical `symbol` and,
+    where useful, the provider-native `source_instrument`.
 
     Query Parameters:
     - interval: "1d" (default), "1h", "5m", etc.
     - start: Start date (default: 30 days ago)
     - end: End date (default: now)
     - format: "json" (default) or "csv"
+
+    Errors: 501 when the hub does not implement the type for the provider,
+    403 PROVIDER_NOT_ENTITLED when the subscription does not cover it.
     """
     if not end:
         end = datetime.now(UTC)
     if not start:
         start = end - timedelta(days=30)
 
-    symbol = symbol.upper()
     provider = provider.lower() if provider else None
-    sec_type = sec_type.lower()
     bars = await service.get_historical_prices(
-        symbol, interval, start, end, extended_hours, provider, sec_type
+        symbol, interval, start, end, extended_hours, provider
     )
 
     if format.lower() == "csv":
-        content_type, csv_data = to_csv(bars, f"{symbol}_history_{interval}.csv")
+        filename = f"{url_quote(symbol.canonical, safe='')}_history_{interval}.csv"
+        content_type, csv_data = to_csv(bars, filename)
         return Response(
             content=csv_data,
             media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={symbol}_history_{interval}.csv"
-            },
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     return ResponseEnvelope(data=bars)

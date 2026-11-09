@@ -4,6 +4,13 @@ export interface Provider {
   status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled' | 'unavailable';
   error?: string | null;
   capabilities?: string[];
+  price_support?: {
+    price_sec_types: string[];
+    price_history_sec_types: string[];
+  } | null;
+  options_support?: {
+    option_underlying_sec_types: string[];
+  } | null;
   volatility_support?: {
     volatility_sec_types: string[];
     volatility_history_sec_types: string[];

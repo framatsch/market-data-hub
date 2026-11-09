@@ -203,7 +203,17 @@ async def test_volatility_implicit_provider_key(policy, monkeypatch, route):
         (
             "/options/{symbol}/chain",
             "provider=Schwab&format=CSV&sec_type=INDEX",
-            "mdh:options:chain:SPX:format=csv&provider=schwab&sec_type=index",
+            "mdh:options:chain:I%3ASPX:format=csv&provider=schwab",
+        ),
+        (
+            "/options/{symbol}/chain",
+            "provider=Schwab&sec_type=etf",
+            "mdh:options:chain:SPX:provider=schwab&sec_type=etf",
+        ),
+        (
+            "/options/{symbol}/chain",
+            "provider=Schwab&sec_type=STK",
+            "mdh:options:chain:SPX:provider=schwab",
         ),
         (
             "/prices/{symbol}/history",
@@ -233,6 +243,95 @@ async def test_key_builder(policy, path, query, expected):
     )
     assert (
         await response_cache.mdh_key_builder(None, "mdh:", request=request) == expected
+    )
+
+
+def _symbol_request(path, symbol, query=""):
+    route = SimpleNamespace(
+        path=path,
+        dependant=SimpleNamespace(
+            query_params=[SimpleNamespace(alias="provider")]
+        ),
+    )
+    return Request(
+        {
+            "type": "http",
+            "route": route,
+            "path_params": {"symbol": symbol},
+            "query_string": query.encode(),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "symbol,query",
+    [
+        ("F:ES", "provider=lseg"),
+        ("f:es", "provider=lseg"),
+        ("/ES", "provider=lseg"),
+        ("ES", "provider=lseg&sec_type=future"),
+        ("ES", "provider=lseg&sec_type=FUTURE"),
+    ],
+)
+async def test_namespaced_and_legacy_requests_share_key(policy, symbol, query):
+    request = _symbol_request("/volatility/{symbol}/stats", symbol, query)
+    key = await response_cache.mdh_key_builder(
+        None, "mdh:volatility:stats", request=request
+    )
+    assert key == "mdh:volatility:stats:F%3AES:provider=lseg"
+
+
+async def test_alias_and_prefix_share_key(policy):
+    keys = {
+        await response_cache.mdh_key_builder(
+            None,
+            "mdh:",
+            request=_symbol_request(
+                "/prices/{symbol}/history", symbol, "provider=ibkr"
+            ),
+        )
+        for symbol in ("^SPX", "I:SPX", "i:spx")
+    }
+    assert keys == {"mdh:prices:history:I%3ASPX:provider=ibkr"}
+
+
+async def test_etf_key_keeps_sec_type(policy):
+    request = _symbol_request(
+        "/volatility/{symbol}", "SPY", "provider=lseg&sec_type=etf"
+    )
+    key = await response_cache.mdh_key_builder(
+        None, "mdh:volatility:snapshot", request=request
+    )
+    assert key == "mdh:volatility:snapshot:SPY:provider=lseg&sec_type=etf"
+
+
+async def test_invalid_symbol_in_key_builder_raises(policy):
+    from app.utils.errors import DataValidationError
+
+    for symbol, query in (("F:ES", "sec_type=stock"), (".SPX", ""), ("X:Y", "")):
+        with pytest.raises(DataValidationError):
+            await response_cache.mdh_key_builder(
+                None, "mdh:", request=_symbol_request("/prices/{symbol}/last", symbol, query)
+            )
+
+
+@pytest.mark.parametrize(
+    "key,route",
+    [
+        ("mdh:prices:history:I%3ASPX:interval=1d&provider=ibkr", "prices:history"),
+        ("mdh:volatility:stats:F%3AES:provider=lseg", "volatility:stats"),
+    ],
+)
+def test_key_parts_derives_route_for_namespaced_symbol(key, route):
+    derived, params = response_cache._key_parts(key)
+    assert derived == route
+    assert params["provider"] in {"ibkr", "lseg"}
+
+
+def test_compose_key_without_symbol(policy):
+    assert (
+        response_cache._compose_key("market-status", None, {"provider": "Polygon"})
+        == "mdh:market-status::provider=polygon"
     )
 
 
@@ -367,6 +466,36 @@ def test_errors_not_cached(route_client, cache_redis):
     assert not cache_redis.entries
     assert client.get("/options/AAPL/chain?min_strike=invalid").status_code == 422
     assert not cache_redis.entries
+
+
+def test_not_entitled_not_cached_so_upgrade_takes_effect(route_client, cache_redis):
+    from fastapi.responses import JSONResponse
+
+    from app.utils.errors import AppError, ProviderNotEntitledError
+
+    client, options, _ = route_client
+    client.app.add_exception_handler(
+        AppError,
+        lambda _request, exc: JSONResponse(
+            {"error": {"code": exc.code}}, status_code=403
+        ),
+    )
+    chain = options.get_option_chain.return_value
+    options.get_option_chain.side_effect = [
+        ProviderNotEntitledError("schwab", symbol="I:SPX"),
+        ProviderNotEntitledError("schwab", symbol="I:SPX"),
+        chain,
+    ]
+    url = "/options/AAPL/chain?provider=schwab"
+    for _ in range(2):
+        denied = client.get(url)
+        assert denied.status_code == 403
+        assert denied.json()["error"]["code"] == "PROVIDER_NOT_ENTITLED"
+    assert not cache_redis.entries
+    upgraded = client.get(url)
+    assert upgraded.status_code == 200
+    assert upgraded.headers["x-fastapi-cache"] == "MISS"
+    assert options.get_option_chain.await_count == 3
 
 
 def test_effective_provider_keys_share_then_switch(route_client, monkeypatch):

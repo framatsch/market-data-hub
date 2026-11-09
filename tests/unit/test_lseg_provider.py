@@ -478,7 +478,7 @@ async def test_get_last_price_runs_sync_work_off_event_loop_thread(monkeypatch):
     event_loop_thread_id = threading.get_ident()
     observed: dict[str, int] = {}
 
-    def fake_sync(symbol: str, market_data_type=None):
+    def fake_sync(symbol: str, market_data_type=None, sec_type="stock"):
         observed["thread_id"] = threading.get_ident()
         class Quote:
             pass

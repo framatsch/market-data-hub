@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Box, Tabs, Tab, Typography, Chip, Stack, Switch, Tooltip } from '@mui/material';
+import type { Provider } from '../../types';
 import { ProviderConfigSection } from './ProviderConfigSection';
+import { ProviderSupport } from './ProviderSupport';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -29,6 +31,7 @@ function CustomTabPanel(props: TabPanelProps) {
 }
 
 export function ProviderDetailsPanel({
+  provider,
   providerName,
   enabled,
   authSection,
@@ -38,6 +41,7 @@ export function ProviderDetailsPanel({
   onToggle,
   defaultTab = 0,
 }: {
+  provider?: Provider;
   providerName: string;
   enabled: boolean;
   authSection: React.ReactNode;
@@ -82,6 +86,8 @@ export function ProviderDetailsPanel({
           )}
         </Stack>
       </Stack>
+
+      {provider && <ProviderSupport provider={provider} />}
 
       {/* Tabs: Tab 0 = Auth, Tab 1 = Configuration */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>

@@ -250,6 +250,35 @@ def test_schwab_auth_callback_saves_token_and_unpauses(client, monkeypatch) -> N
     assert status.json()["storage"] == "sqlite"
 
 
+def test_schwab_auth_url_returns_503_when_stored_credentials_fail_decryption(
+    client, tmp_path
+) -> None:
+    db_path = str(tmp_path / "keys.db")
+    other_key = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    stale_repo = KeyRepository(db_path, CryptoService(other_key))
+    asyncio.run(stale_repo.save("schwab", "api_key", "stale-key"))
+    asyncio.run(stale_repo.save("schwab", "app_secret", "stale-secret"))
+    asyncio.run(stale_repo.save("schwab", "token_json", '{"access_token": "stale"}'))
+
+    url_response = client.get("/api/admin/schwab/auth/url")
+    assert url_response.status_code == 503
+    assert url_response.json()["detail"] == "Schwab credentials not configured"
+
+    status_response = client.get("/api/admin/schwab/auth/status")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "not_configured"
+
+    creds_response = client.get("/api/admin/credentials")
+    assert creds_response.status_code == 200
+    schwab_api_key = next(
+        item
+        for item in creds_response.json()
+        if item["provider"] == "schwab" and item["credential_name"] == "api_key"
+    )
+    assert schwab_api_key["set"] is False
+
+
+
 def test_alert_webhook_update_and_test(client, monkeypatch) -> None:
     monkeypatch.setattr(
         "app.utils.webhooks.socket.getaddrinfo",

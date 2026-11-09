@@ -21,6 +21,9 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.utils.errors import DataValidationError
+from app.utils.symbols import STREAM_TYPES, parse_symbol
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
@@ -44,7 +47,10 @@ async def websocket_prices(websocket: WebSocket) -> None:
 
                 # In a real app, we'd handle subscription state here
                 if message_dict.get("type") == "subscribe":
-                    symbols = [s.upper() for s in message_dict.get("symbols", [])]
+                    symbols = [
+                        parse_symbol(s, allowed=STREAM_TYPES).canonical
+                        for s in message_dict.get("symbols", [])
+                    ]
                     provider = message_dict.get("provider", "ibkr").lower()
 
                     logger.info(f"Subscribing to {symbols} from {provider}")
@@ -63,6 +69,15 @@ async def websocket_prices(websocket: WebSocket) -> None:
 
             except json.JSONDecodeError:
                 await websocket.send_text("Invalid JSON")
+            except DataValidationError as exc:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": exc.code,
+                        "message": exc.message,
+                        "details": exc.details,
+                    }
+                )
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")

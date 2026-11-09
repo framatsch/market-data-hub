@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -52,6 +53,53 @@ class ProviderNotAvailableError(AppError):
             "PROVIDER_NOT_AVAILABLE",
             details,
         )
+
+
+class ProviderNotEntitledError(ProviderError):
+    """The provider denied access because the subscription does not cover the data."""
+
+    def __init__(
+        self,
+        provider: str,
+        *,
+        symbol: str | None = None,
+        instrument: str | None = None,
+        provider_message: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
+        merged: dict[str, Any] = {"provider": provider}
+        if symbol is not None:
+            merged["symbol"] = symbol
+        if instrument is not None:
+            merged["instrument"] = instrument
+        if provider_message:
+            merged["provider_message"] = str(provider_message)[:500]
+        merged.update(details or {})
+        super().__init__(
+            f"The subscription at provider '{provider}' does not cover the requested "
+            "instrument or data.",
+            "PROVIDER_NOT_ENTITLED",
+            merged,
+        )
+
+
+def not_entitled(
+    provider: str,
+    root: str,
+    sec_type: str,
+    *,
+    instrument: str | None = None,
+    message: object = None,
+) -> ProviderNotEntitledError:
+    """Build the uniform not-entitled error from a provider's root and type."""
+    from app.utils.symbols import canonical_symbol
+
+    return ProviderNotEntitledError(
+        provider,
+        symbol=canonical_symbol(root, sec_type),
+        instrument=instrument,
+        provider_message=None if message is None else str(message),
+    )
 
 
 class ProviderTimeoutError(AppError):
@@ -121,8 +169,15 @@ def map_httpx_http_error(
     error: httpx.HTTPStatusError,
     entity: str,
     identifier: str,
+    classify_forbidden: Callable[[httpx.HTTPStatusError], bool] | None = None,
+    symbol: str | None = None,
+    instrument: str | None = None,
 ) -> AppError:
-    """Map HTTP status errors from providers to internal AppError types."""
+    """Map HTTP status errors from providers to internal AppError types.
+
+    HTTP 401 always means a credential failure. HTTP 403 is a credential failure
+    too unless `classify_forbidden` says the response is a missing entitlement.
+    """
     status_code = error.response.status_code
     details = {
         "provider": provider,
@@ -135,6 +190,18 @@ def map_httpx_http_error(
 
     if status_code == 404:
         return DataNotFoundError(entity, identifier, details=details)
+    if (
+        status_code == 403
+        and classify_forbidden is not None
+        and classify_forbidden(error)
+    ):
+        return ProviderNotEntitledError(
+            provider,
+            symbol=symbol or identifier,
+            instrument=instrument,
+            provider_message=response_text,
+            details={"status_code": status_code},
+        )
     if status_code in (401, 403):
         return ProviderNotAvailableError(provider, details=details)
     if status_code == 429:

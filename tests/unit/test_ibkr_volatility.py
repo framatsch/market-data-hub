@@ -243,8 +243,10 @@ async def test_not_entitled_after_fallback(provider, fallback_enabled, configure
     provider.ib.reqMktData.side_effect = request
     with pytest.raises(ProviderError) as error:
         await provider.get_implied_volatility("AAPL")
-    assert error.value.code == "PROVIDER_NOT_AVAILABLE"
-    assert error.value.details["reason"] == "not_entitled"
+    assert error.value.code == "PROVIDER_NOT_ENTITLED"
+    assert error.value.details["provider"] == "ibkr"
+    assert error.value.details["symbol"] == "AAPL"
+    assert "Not subscribed" in error.value.details["provider_message"]
     assert provider.ib.reqMktData.call_count == expected_calls
     assert provider.ib.cancelMktData.call_count == expected_calls
     assert len(provider.ib.errorEvent) == 0
@@ -358,7 +360,7 @@ async def test_history_request_scoped_entitlement_error(provider):
     provider.ib.reqHistoricalDataAsync.side_effect = history
     with pytest.raises(ProviderError) as error:
         await provider.get_implied_volatility_history("AAPL", TODAY - timedelta(days=30), TODAY)
-    assert error.value.details["reason"] == "not_entitled"
+    assert error.value.code == "PROVIDER_NOT_ENTITLED"
     assert not provider._level1_subscription_error
     assert provider._subscription_errors == []
 

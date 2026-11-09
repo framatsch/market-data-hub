@@ -243,6 +243,8 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
         status_code = 400
     elif exc.code == "DATA_VALIDATION_ERROR":
         status_code = 422
+    elif exc.code == "PROVIDER_NOT_ENTITLED":
+        status_code = 403
     elif exc.code == "CAPABILITY_NOT_SUPPORTED":
         status_code = 501
     elif exc.code in (

@@ -52,7 +52,10 @@ from app.utils.errors import (
     DataValidationError,
     ProviderConnectionError,
     ProviderError,
+    ProviderNotEntitledError,
+    not_entitled,
 )
+from app.utils.symbols import canonical_symbol
 
 logger = logging.getLogger(__name__)
 _REFINITIV_HTTPX_PROXY_PATCHED = False
@@ -72,6 +75,43 @@ IV_FIDS = [f"{tenor}D_A_IM_{side}" for tenor in (30, 60, 90) for side in ("C", "
 META_FIDS = ["TRADE_DATE", "DSPLY_NAME", "UNDERLYING", "INST_DESC", "GN_TXT16_5"]
 
 
+# Provider error text that means "the account is not permitted", not "no data".
+_PERMISSION_TOKENS = (
+    "usernotpermission",
+    "user has no permission",
+    "user does not have permission",
+    "insufficient scope",
+)
+
+# Canonical (CME Globex) futures roots that LSEG lists under another RIC root.
+_FUTURES_ROOT_OVERRIDES = {
+    "ZC": "C",
+    "ZW": "W",
+    "ZS": "S",
+    "ZN": "TY",
+    "ZB": "US",
+}
+
+
+def _is_permission_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    return any(token in message for token in _PERMISSION_TOKENS)
+
+
+def _native_instrument(root: str, sec_type: str) -> str | None:
+    """LSEG RIC for non-equity types: ``.SPX`` indices, ``ESc1`` front-month futures.
+
+    Stocks and ETFs return None and go through the equity RIC search. Unknown
+    roots pass through unchanged.
+    """
+    kind = sec_type.lower()
+    if kind == "index":
+        return f".{root}"
+    if kind == "future":
+        return f"{_FUTURES_ROOT_OVERRIDES.get(root, root)}c1"
+    return None
+
+
 def _volatility_instrument(
     symbol: str, sec_type: VolatilitySecType, ric: str | None = None
 ) -> str:
@@ -80,7 +120,7 @@ def _volatility_instrument(
         raise DataValidationError(f"Invalid volatility security type: {sec_type}")
     if ric is not None:
         return ric
-    root = symbol.upper().lstrip("^.")
+    root = symbol.upper()
     return f"{root}ATMIV" if sec_type == "future" else f"{root}ATMIV.U"
 
 
@@ -145,6 +185,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
     LSEG subscription lacks 'trapi.data.pricing.read' scope required for real-time Greeks.
     """
 
+    # Index RICs (``.SPX``) and front-month continuation RICs (``ESc1``) are
+    # documented LSEG instrument codes; entitlement is decided by LSEG at runtime.
+    price_sec_types = frozenset({"stock", "etf", "index", "future"})
+    price_history_sec_types = price_sec_types
     volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
     volatility_history_sec_types = volatility_sec_types
     volatility_tenors = frozenset({30, 60, 90})
@@ -617,10 +661,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             "no such",
             "unknown",
             "invalid ric",
-            "usernotpermission",
-            "user has no permission",
-            "user does not have permission",
-            "insufficient scope",
+            *_PERMISSION_TOKENS,
         ]
         if any(keyword in error_str for keyword in non_retryable_keywords):
             return False
@@ -635,7 +676,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
     # Data Validation & Extraction
     # ========================================================================
 
-    def _validate_and_extract(self, df: pd.DataFrame, symbol: str) -> PriceQuote:
+    def _validate_and_extract(
+        self, df: pd.DataFrame, symbol: str, source_instrument: str | None = None
+    ) -> PriceQuote:
         """Extract and validate quote data from DataFrame."""
         if df is None or df.empty:
             raise DataNotFoundError("Quote", symbol)
@@ -681,6 +724,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"])
             else None,
             timestamp=datetime.now(UTC),
+            source_instrument=source_instrument,
         )
 
     # ========================================================================
@@ -693,8 +737,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         """Get current price quote for a symbol.
 
         Note: LSEG uses historical pricing summaries (daily) and does not support
-        IBKR-style market data types. The `market_data_type` and `sec_type` parameters
-        are accepted for interface compatibility but are ignored.
+        IBKR-style market data types, so `market_data_type` is ignored. `sec_type`
+        selects the RIC: equity search for stocks/ETFs, ``.ROOT`` for indices and
+        ``ROOTc1`` for futures (with the `_FUTURES_ROOT_OVERRIDES` table).
         """
         # Log only if caller passed a market_data_type to make behavior explicit
         if market_data_type is not None:
@@ -705,18 +750,24 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             self._get_last_price_sync,
             symbol,
             market_data_type,
+            sec_type,
         )
 
     def _get_last_price_sync(
-        self, symbol: str, market_data_type: int | None = None
+        self,
+        symbol: str,
+        market_data_type: int | None = None,
+        sec_type: str = "stock",
     ) -> PriceQuote:
-        # Check cache first
-        cached = self._get_cached_quote(symbol)
+        native = _native_instrument(symbol, sec_type)
+        # The instrument keys the cache so a stock and a future with one root differ.
+        cache_key = native or symbol
+        cached = self._get_cached_quote(cache_key)
         if cached:
             return cached
 
-        # Convert ticker to RIC
-        ric = self._ticker_to_ric(symbol)
+        # Index/future RICs bypass the equity RIC search
+        ric = native or self._ticker_to_ric(symbol)
 
         # Fetch quote using historical_pricing (like test_connect.py does)
         def fetch_quote() -> Any:
@@ -739,35 +790,39 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
 
             return response.data.df
 
-        df = self._retry_with_backoff(fetch_quote)
-        quote = self._validate_and_extract(df, symbol)
+        try:
+            df = self._retry_with_backoff(fetch_quote)
+        except Exception as exc:
+            if _is_permission_error(exc):
+                raise not_entitled(
+                    "lseg", symbol, sec_type, instrument=ric, message=exc
+                ) from exc
+            raise
+        quote = self._validate_and_extract(df, symbol, native)
 
         # Cache result
-        self._cache_quote(symbol, quote)
+        self._cache_quote(cache_key, quote)
 
         return quote
 
     def _fetch_volatility_data(
-        self, fetch: Callable[[], pd.DataFrame], instrument: str, reason: str
+        self,
+        fetch: Callable[[], pd.DataFrame],
+        instrument: str,
+        reason: str,
+        canonical: str | None = None,
     ) -> pd.DataFrame:
         """Use existing retries and classify entitlement errors before no-data errors."""
         try:
             return self._retry_with_backoff(fetch)
         except Exception as exc:
             message = str(exc).lower()
-            if any(
-                token in message
-                for token in (
-                    "usernotpermission",
-                    "user has no permission",
-                    "user does not have permission",
-                    "insufficient scope",
-                )
-            ):
-                raise ProviderError(
-                    "LSEG implied volatility is not entitled",
-                    code="PROVIDER_NOT_AVAILABLE",
-                    details={"reason": "not_entitled", "instrument": instrument},
+            if _is_permission_error(exc):
+                raise ProviderNotEntitledError(
+                    "lseg",
+                    symbol=canonical,
+                    instrument=instrument,
+                    provider_message=str(exc),
                 ) from exc
             if isinstance(exc, (DataNotFoundError, DataValidationError, ProviderError)):
                 raise
@@ -784,13 +839,25 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
 
     @staticmethod
     def _validate_volatility_market(
-        row: pd.Series, sec_type: VolatilitySecType, ric: str | None
+        row: pd.Series, sec_type: VolatilitySecType, ric: str | None, symbol: str
     ) -> None:
         if ric is not None:
             return
         expected = ["COMFUT", "CMEG"] if sec_type == "future" else ["OPRA"]
         market = _volatility_text(row.get("GN_TXT16_5"))
         market = market.upper() if market else None
+        if (
+            market is None
+            and sec_type == "index"
+            and _volatility_text(row.get("Instrument"))
+            == _volatility_instrument(symbol, sec_type)
+            and _volatility_text(row.get("UNDERLYING"))
+            == _native_instrument(symbol.upper(), sec_type)
+        ):
+            # LSEG can omit GN_TXT16_5 on index ATMIV records while returning
+            # valid IV. The exact record and cash-index underlying still prove
+            # its identity. An explicit conflicting market remains an error.
+            return
         if market not in expected:
             raise DataValidationError(
                 "LSEG volatility instrument market does not match the security type",
@@ -822,7 +889,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             self._throttle()
             return rd.get_data(instrument, IV_FIDS + META_FIDS)
 
-        frame = self._fetch_volatility_data(fetch, instrument, "no_iv_data")
+        frame = self._fetch_volatility_data(
+            fetch, instrument, "no_iv_data", canonical_symbol(symbol, sec_type)
+        )
         tenors: dict[int, ImpliedVolatilityTenor] = {}
         if frame is not None and not frame.empty:
             row = frame.iloc[0]
@@ -836,7 +905,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             raise DataNotFoundError(
                 "ImpliedVolatility", instrument, details={"reason": "no_iv_data"}
             )
-        self._validate_volatility_market(row, sec_type, ric)
+        self._validate_volatility_market(row, sec_type, ric, symbol)
         trade_date = pd.to_datetime(row.get("TRADE_DATE"), errors="coerce")
         market = _volatility_text(row.get("GN_TXT16_5"))
         return VolatilitySnapshot(
@@ -894,17 +963,23 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
                 return rd.get_data(instrument, META_FIDS)
 
             metadata = self._fetch_volatility_data(
-                fetch_metadata, instrument, "no_iv_history"
+                fetch_metadata,
+                instrument,
+                "no_iv_history",
+                canonical_symbol(symbol, sec_type),
             )
             if (
                 metadata is None
                 or metadata.empty
-                or _volatility_text(metadata.iloc[0].get("GN_TXT16_5")) is None
+                or (
+                    _volatility_text(metadata.iloc[0].get("GN_TXT16_5")) is None
+                    and _volatility_text(metadata.iloc[0].get("UNDERLYING")) is None
+                )
             ):
                 raise DataNotFoundError(
                     "ImpliedVolatility", instrument, details={"reason": "no_iv_history"}
                 )
-            self._validate_volatility_market(metadata.iloc[0], sec_type, ric)
+            self._validate_volatility_market(metadata.iloc[0], sec_type, ric, symbol)
 
         fields = [f"{tenor_days}D_A_IM_C", f"{tenor_days}D_A_IM_P"]
 
@@ -925,7 +1000,12 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
                 .data.df
             )
 
-        frame = self._fetch_volatility_data(fetch_history, instrument, "no_iv_history")
+        frame = self._fetch_volatility_data(
+            fetch_history,
+            instrument,
+            "no_iv_history",
+            canonical_symbol(symbol, sec_type),
+        )
         points = []
         if frame is not None:
             for index, row in frame.iterrows():
@@ -963,13 +1043,14 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        sec_type: str = "STK",
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         """
         Get historical price bars for a symbol.
 
         Note:
-            - sec_type is ignored (LSEG handles stocks and indices via RIC lookup)
+            - sec_type selects the RIC: equity search (stock/ETF), ``.ROOT`` (index)
+              or the ``ROOTc1`` continuous front-month series (future)
             - Intraday intervals (1m, 5m, etc.) limited to ~20 trading days max
             - Very old intraday data (>2 years) may not be available; use daily intervals
         """
@@ -980,6 +1061,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             start,
             end,
             extended_hours,
+            sec_type,
         )
 
     def _get_historical_prices_sync(
@@ -989,6 +1071,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         # Ensure start/end are timezone-aware (convert naive to UTC)
         if start.tzinfo is None:
@@ -996,8 +1079,9 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         if end.tzinfo is None:
             end = end.replace(tzinfo=UTC)
 
-        # Convert ticker to RIC
-        ric = self._ticker_to_ric(symbol)
+        # Index/future RICs bypass the equity RIC search
+        native = _native_instrument(symbol, sec_type)
+        ric = native or self._ticker_to_ric(symbol)
 
         # Map interval to Refinitiv format
         refinitiv_interval = self._map_interval(interval)
@@ -1102,6 +1186,10 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             raise
         except Exception as e:
             # Catch any other RDError or exception from LSEG
+            if _is_permission_error(e):
+                raise not_entitled(
+                    "lseg", symbol, sec_type, instrument=ric, message=e
+                ) from e
             error_msg = str(e).lower()
             if "system cannot return data" in error_msg or "no data" in error_msg:
                 raise DataNotFoundError(
@@ -1155,6 +1243,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
                     if "ACVOL_UNS" in df.columns and pd.notna(row["ACVOL_UNS"])
                     else 0,
                     provider="lseg",
+                    source_instrument=native,
                 )
                 bars.append(bar)
             except Exception as e:

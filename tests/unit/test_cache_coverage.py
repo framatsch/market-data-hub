@@ -23,6 +23,7 @@ from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsArticle
 from app.models.options import OptionChain
 from app.utils.errors import AppError
+from app.utils.symbols import parse_symbol
 
 NOW = datetime(2026, 11, 4, 11, tzinfo=ET)
 ROUTES = {
@@ -68,7 +69,7 @@ def services(monkeypatch):
     monkeypatch.setattr(mcp, "_company_service", lambda: company)
     monkeypatch.setattr(mcp, "_price_service", lambda: prices)
     monkeypatch.setattr(mcp, "_options_service", lambda: options)
-    monkeypatch.setattr(mcp, "get_registry", lambda: SimpleNamespace(get_news_provider=lambda _: news))
+    monkeypatch.setattr(mcp, "_news_service", lambda: news)
     return company, news, prices, options
 
 
@@ -193,11 +194,12 @@ async def test_mcp_cached_tools_hit_refresh_schema_and_keys(cache_redis, service
 async def test_mcp_helper_refresh_overwrites_and_isolates_http(cache_redis, client):
     loader = AsyncMock(return_value={"name": "first"})
     params = {"provider": "finnhub"}
-    await response_cache.cached_call("companies:profile", "aapl", params, loader)
+    aapl = parse_symbol("aapl")
+    await response_cache.cached_call("companies:profile", aapl, params, loader)
     assert client.get("/companies/AAPL?provider=finnhub&channel=mcp").headers["x-fastapi-cache"] == "MISS"
     loader.return_value = {"name": "new"}
-    await response_cache.cached_call("companies:profile", "aapl", params, loader, refresh=True)
-    assert await response_cache.cached_call("companies:profile", "aapl", params, loader) == {"name": "new"}
+    await response_cache.cached_call("companies:profile", aapl, params, loader, refresh=True)
+    assert await response_cache.cached_call("companies:profile", aapl, params, loader) == {"name": "new"}
     assert loader.await_count == 2
 
 

@@ -22,7 +22,17 @@ from decimal import Decimal
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ib_async import IB, Contract, ContractDetails, Future, Index, Option, Stock, Ticker
+from ib_async import (
+    IB,
+    ContFuture,
+    Contract,
+    ContractDetails,
+    Future,
+    Index,
+    Option,
+    Stock,
+    Ticker,
+)
 from ib_async.objects import BarData, HistoricalNews
 
 from app.config import settings
@@ -54,9 +64,12 @@ from app.utils.errors import (
     DataValidationError,
     ProviderConnectionError,
     ProviderError,
+    ProviderNotEntitledError,
     ProviderTimeoutError,
+    not_entitled,
 )
 from app.utils.logging import logger
+from app.utils.symbols import canonical_symbol
 
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
@@ -67,6 +80,8 @@ _FUTURES_EXCHANGES = {
     **dict.fromkeys(("CL", "NG", "RB", "HO"), "NYMEX"),
     **dict.fromkeys(("GC", "SI", "HG"), "COMEX"),
 }
+# Canonical (primary listing) index roots that IBKR lists under another symbol.
+_INDEX_ROOT_OVERRIDES = {"DJI": "INDU"}
 
 
 class IBKRProvider(
@@ -76,8 +91,15 @@ class IBKRProvider(
     BaseNewsProvider,
     BaseVolatilityProvider,
 ):
-    """Implementation for IBKR provider using ib_async."""
+    """Implementation for IBKR provider using ib_async.
 
+    Instrument types: stocks/ETFs (SMART), indices (``Index`` contract, with the
+    ``_INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
+    price, ``ContFuture`` for history). Option underlyings stay stock/ETF.
+    """
+
+    price_sec_types = frozenset({"stock", "etf", "index", "future"})
+    price_history_sec_types = frozenset({"stock", "etf", "index", "future"})
     volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
     volatility_history_sec_types = frozenset({"stock", "etf", "index"})
     volatility_tenors = frozenset({30})
@@ -192,11 +214,17 @@ class IBKRProvider(
                 self._subscription_errors[-1] if self._subscription_errors else {}
             )
             self._level1_subscription_error = False  # Reset flag
-            raise ProviderError(
-                "Level 1 (Live) market data requires additional subscription. "
-                "Please check 'Market Data Connections' in TWS/Gateway settings or use market_data_type=2 or 3.",
-                details=error_details,
-                code="PROVIDER_NOT_AVAILABLE",
+            raise ProviderNotEntitledError(
+                "ibkr",
+                instrument=(contracts[0].localSymbol or contracts[0].symbol)
+                if contracts
+                else None,
+                provider_message=error_details.get("error_string")
+                or error_details.get("error"),
+                details={
+                    "hint": "Level 1 (Live) market data requires a subscription; "
+                    "use market_data_type=2 or 3 for frozen/delayed data."
+                },
             )
 
         if failed_contracts:
@@ -619,6 +647,107 @@ class IBKRProvider(
             self._connected = False
             logger.debug("Disconnected from IBKR")
 
+    def _contract_for(
+        self, root: str, sec_type: str = "stock", *, continuous: bool = False
+    ) -> Contract:
+        """Native IBKR contract for a canonical root and resolved type.
+
+        Futures are returned unqualified (a concrete month needs
+        `_resolve_contract`); `continuous=True` yields the `ContFuture` series.
+        Index roots deviating from the primary listing live in
+        `_INDEX_ROOT_OVERRIDES`; unknown roots pass through.
+        """
+        kind = sec_type.lower()
+        if kind == "index":
+            native = _INDEX_ROOT_OVERRIDES.get(root, root)
+            return Index(native, self._get_index_exchange(native))
+        if kind == "future":
+            exchange = _FUTURES_EXCHANGES.get(root, "")
+            if continuous:
+                return ContFuture(root, exchange=exchange)
+            return Future(root, exchange=exchange)
+        return Stock(root, "SMART", "USD")
+
+    async def _resolve_contract(
+        self, root: str, sec_type: str, *, continuous: bool = False
+    ) -> Contract:
+        """Concrete contract: the front-month future, or its continuous series."""
+        if sec_type.lower() != "future":
+            return self._contract_for(root, sec_type)
+        if continuous and root in _FUTURES_EXCHANGES:
+            return self._contract_for(root, "future", continuous=True)
+        front, _ = await self._front_month_future(root, "MarketData", "no_front_month")
+        if continuous:
+            return ContFuture(root, exchange=front.exchange)
+        return front
+
+    @staticmethod
+    def _source_instrument(root: str, contract: Contract) -> str | None:
+        """Native identifier actually queried, when it differs from the root."""
+        native = contract.localSymbol or contract.symbol
+        return native if native and native != root else None
+
+    async def _fetch_bars(
+        self,
+        contract: Contract,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended_hours: bool,
+    ) -> list[PriceBar]:
+        """Request historical bars for an already resolved contract."""
+        bar_size = self._map_interval(interval)
+        duration_str = self._calculate_duration(start, end)
+        source = self._source_instrument(symbol, contract)
+
+        logger.info(
+            f"Fetching historical prices for {symbol} ({interval}) from {start} to {end}"
+        )
+
+        # whatToShow='TRADES' gives OHLCV
+        bars: list[BarData] = await self.ib.reqHistoricalDataAsync(
+            contract,
+            endDateTime=end,
+            durationStr=duration_str,
+            barSizeSetting=bar_size,
+            whatToShow="TRADES",
+            useRTH=not extended_hours,
+            formatDate=1,  # Flow date as string
+        )
+
+        if not bars:
+            # Usually an empty list implies no data
+            return []
+
+        result = []
+        for b in bars:
+            # Date is a date for '1 day' bars and a datetime for intraday bars.
+            bar_start = b.date
+            if isinstance(bar_start, date) and not isinstance(bar_start, datetime):
+                bar_start = datetime.combine(bar_start, datetime.min.time())
+
+            # Simplification: the bar end is not derived from the interval.
+            bar_end = bar_start
+
+            result.append(
+                PriceBar(
+                    symbol=symbol,
+                    start=bar_start,
+                    end=bar_end,
+                    open=Decimal(str(b.open)),
+                    high=Decimal(str(b.high)),
+                    low=Decimal(str(b.low)),
+                    close=Decimal(str(b.close)),
+                    volume=int(b.volume),
+                    provider="ibkr",
+                    source_instrument=source,
+                )
+            )
+
+        logger.info(f"Retrieved {len(result)} bars for {symbol}")
+        return result
+
     async def get_historical_prices(
         self,
         symbol: str,
@@ -626,74 +755,32 @@ class IBKRProvider(
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        sec_type: str = "STK",
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         try:
             await self._ensure_connection()
-
-            contract = self._create_contract(symbol, sec_type)
-
-            # Map interval to IBKR bar size
-            bar_size = self._map_interval(interval)
-
-            # Calculate duration string
-            duration_str = self._calculate_duration(start, end)
-
-            logger.info(
-                f"Fetching historical prices for {symbol} ({interval}) from {start} to {end}"
+            contract = await self._resolve_contract(symbol, sec_type, continuous=True)
+            return await self._fetch_bars(
+                contract, symbol, interval, start, end, extended_hours
             )
-
-            # Request data
-            # whatToShow='TRADES' gives OHLCV
-            bars: list[BarData] = await self.ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime=end,
-                durationStr=duration_str,
-                barSizeSetting=bar_size,
-                whatToShow="TRADES",
-                useRTH=not extended_hours,
-                formatDate=1,  # Flow date as string
-            )
-
-            if not bars:
-                # Fallback or check errors?
-                # Usually empty list implies no data
-                return []
-
-            result = []
-            for b in bars:
-                # IBKR bars data: date, open, high, low, close, volume...
-                # Date is usually naive or localized.
-                # If '1 day' bars, date is date object. If intraday, datetime.
-
-                bar_start = b.date
-                if isinstance(bar_start, date) and not isinstance(bar_start, datetime):
-                    bar_start = datetime.combine(bar_start, datetime.min.time())
-
-                # Assume end is start + interval (approx)
-                # We won't be perfectly precise on 'end' without parsing interval,
-                # but PriceBar needs it.
-                bar_end = bar_start  # Placeholder, or calculate
-
-                result.append(
-                    PriceBar(
-                        symbol=symbol,
-                        start=bar_start,
-                        end=bar_end,  # Simplification
-                        open=Decimal(str(b.open)),
-                        high=Decimal(str(b.high)),
-                        low=Decimal(str(b.low)),
-                        close=Decimal(str(b.close)),
-                        volume=int(b.volume),
-                        provider="ibkr",
-                    )
-                )
-
-            logger.info(f"Retrieved {len(result)} bars for {symbol}")
-            return result
-
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, sec_type))
+            raise
         except Exception as e:
             logger.error(f"Error getting historical prices for {symbol}: {e}")
+            if any(
+                token in str(e).lower()
+                for token in ("no market data permissions", "not subscribed", "354")
+            ):
+                raise not_entitled(
+                    "ibkr",
+                    symbol,
+                    sec_type,
+                    instrument=self._source_instrument(
+                        symbol, self._contract_for(symbol, sec_type)
+                    ),
+                    message=e,
+                ) from e
             raise ProviderError(f"IBKR error: {e}")
         finally:
             await self._disconnect()
@@ -702,12 +789,12 @@ class IBKRProvider(
         self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock"
     ) -> PriceQuote:
         """
-        Get the latest price quote for a stock or index.
+        Get the latest price quote for a stock, ETF, index or front-month future.
 
         Args:
-            symbol: Stock ticker symbol or index symbol
+            symbol: Canonical root (``AAPL``, ``SPX``, ``ES``); never prefixed
             market_data_type: 1=Live (Level 2), 2=Frozen (OPRA), 3=Delayed (default)
-            sec_type: Security type - "stock" (default) or "index"
+            sec_type: "stock", "etf", "index" or "future"
 
         Returns:
             PriceQuote with:
@@ -718,11 +805,43 @@ class IBKRProvider(
               - volume: NOT available in historical fallback
 
         Note:
-            - Level 2/3 for stocks do not provide real-time bid/ask without subscription
-            - When snapshot fails, system falls back to most recent daily close price
-            - This fallback behavior is logged with date and close value
-            - For indices: Use sec_type="index" and symbol without ^ prefix (e.g., "RUT" not "^RUT")
+            - Futures resolve the nearest non-expired contract; ``source_instrument``
+              carries its local symbol (e.g. ``ESZ6``).
+            - The historical fallback reuses the resolved contract, so an index
+              stays an index and a future stays the same month.
+            - A missing subscription raises ``ProviderNotEntitledError`` (403)
+              once the configured fallbacks are exhausted.
         """
+        entitlement_errors: list[str] = []
+        handler_registered = False
+        contract: Contract | None = None
+
+        def on_entitlement_error(
+            req_id: int, code: int, message: str, error_contract: Contract | None
+        ) -> None:
+            if code not in (354, 10089, 10091):
+                return
+            if (
+                contract is not None
+                and error_contract is not None
+                and error_contract.conId not in (0, contract.conId)
+            ):
+                return
+            entitlement_errors.append(f"{code}: {message}")
+
+        def entitlement_error(details: Any = None) -> ProviderNotEntitledError:
+            assert contract is not None
+            message = entitlement_errors[-1] if entitlement_errors else None
+            if message is None and isinstance(details, dict):
+                message = details.get("error_string") or details.get("error")
+            return not_entitled(
+                "ibkr",
+                symbol,
+                sec_type,
+                instrument=contract.localSymbol or contract.symbol,
+                message=message or "Market data subscription required",
+            )
+
         try:
             await self._ensure_connection()
             # Reset subscription errors from previous calls (e.g., from options queries)
@@ -732,12 +851,14 @@ class IBKRProvider(
             if market_data_type is not None:
                 await self._set_market_data_type(market_data_type)
 
-            # Create contract based on security type
-            contract = self._create_contract(symbol, sec_type)
+            contract = await self._resolve_contract(symbol, sec_type)
+            if sec_type.lower() != "future":
+                # Qualify contract to get conId etc specific to SMART
+                await self.ib.qualifyContractsAsync(contract)
+            logger.debug(f"Resolved contract for {symbol}: {contract}")
 
-            # Qualify contract to get conId etc specific to SMART
-            await self.ib.qualifyContractsAsync(contract)
-            logger.debug(f"Qualified contract for {symbol}: {contract}")
+            self.ib.errorEvent += on_entitlement_error
+            handler_registered = True
 
             # Request snapshot using helper
             tickers = await self._get_tickers_snapshot([contract])
@@ -749,7 +870,7 @@ class IBKRProvider(
                 )
             ticker = tickers[0]
 
-            # For Level 1: if any subscription error was recorded, abort with provider not available
+            # For Level 1: if any subscription error was recorded, abort as not entitled
             if (
                 self._get_effective_market_data_type() == 1
                 and self._subscription_errors
@@ -758,11 +879,7 @@ class IBKRProvider(
                 # Reset flag for subsequent calls
                 self._level1_subscription_error = False
                 self._subscription_errors.clear()
-                raise ProviderError(
-                    "Level 1 (Live) market data requires additional subscription.",
-                    code="PROVIDER_NOT_AVAILABLE",
-                    details=details,
-                )
+                raise entitlement_error(details)
 
             # Use last price, or close, or mid...
             # If market is closed, look for 'close' or 'last'.
@@ -783,21 +900,18 @@ class IBKRProvider(
                     # Reset flags for subsequent calls
                     self._level1_subscription_error = False
                     self._subscription_errors.clear()
-                    raise ProviderError(
-                        "Level 1 (Live) market data requires additional subscription.",
-                        code="PROVIDER_NOT_AVAILABLE",
-                        details=details,
-                    )
-                # Otherwise, fallback to historical data
+                    raise entitlement_error(details)
+                # Otherwise, fall back to historical data of the same contract
                 effective_type = self._get_effective_market_data_type()
                 logger.info(
                     f"Snapshot not available for {symbol} (market_data_type={effective_type}), falling back to historical daily data"
                 )
                 end_dt = datetime.now()
                 start_dt = end_dt - timedelta(days=7)
+                price = None
                 try:
-                    bars = await self.get_historical_prices(
-                        symbol, "1d", start_dt, end_dt
+                    bars = await self._fetch_bars(
+                        contract, symbol, "1d", start_dt, end_dt, False
                     )
                     if bars:
                         last_bar = bars[-1]
@@ -811,10 +925,13 @@ class IBKRProvider(
                             f"(Note: bid/ask not available for Level 2/3 stocks without subscription)"
                         )
                     else:
-                        price = 0.0
                         logger.warning(f"No historical data available for {symbol}")
                 except Exception as ex:
                     logger.warning(f"Fallback to historical data failed: {ex}")
+                if price is None:
+                    # The fallback is exhausted: a recorded denial is an entitlement error
+                    if entitlement_errors:
+                        raise entitlement_error()
                     price = 0.0
 
             quote = PriceQuote(
@@ -827,10 +944,14 @@ class IBKRProvider(
                 ask=self._to_decimal(ticker.ask),
                 volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
                 is_market_open=await self._get_market_open_status(contract),
+                source_instrument=self._source_instrument(symbol, contract),
             )
             logger.info(f"Got quote for {symbol}: {quote}")
             return quote
 
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, sec_type))
+            raise
         except Exception as e:
             logger.error(f"Error getting last price for {symbol}: {e}")
             # If Level 1 was requested and subscription error occurred, signal provider not available
@@ -838,6 +959,8 @@ class IBKRProvider(
                 raise ProviderError(f"IBKR error: {e}", code="PROVIDER_NOT_AVAILABLE")
             raise ProviderError(f"IBKR error: {e}")
         finally:
+            if handler_registered:
+                self.ib.errorEvent -= on_entitlement_error
             await self._disconnect()
 
     def _validate_volatility_request(
@@ -875,13 +998,9 @@ class IBKRProvider(
     async def _volatility_contract(
         self, symbol: str, sec_type: VolatilitySecType
     ) -> tuple[Contract, ContractDetails | None]:
-        root = symbol.upper().lstrip("^.")
+        root = symbol.upper()
         if sec_type != "future":
-            contract = (
-                Index(root, self._get_index_exchange(root))
-                if sec_type == "index"
-                else Stock(root, "SMART", "USD")
-            )
+            contract = self._contract_for(root, sec_type)
             qualified = await self.ib.qualifyContractsAsync(contract)
             qualified_contract = qualified[0] if qualified else None
             if not isinstance(qualified_contract, Contract):
@@ -889,6 +1008,12 @@ class IBKRProvider(
             details = await self.ib.reqContractDetailsAsync(qualified_contract)
             return qualified_contract, details[0] if details else None
 
+        return await self._front_month_future(root, "ImpliedVolatility", "no_iv_data")
+
+    async def _front_month_future(
+        self, root: str, entity: str, reason: str
+    ) -> tuple[Contract, ContractDetails]:
+        """Nearest non-expired contract of a futures root (7-day roll buffer)."""
         exchange = _FUTURES_EXCHANGES.get(root)
         details = await self.ib.reqContractDetailsAsync(
             Future(root, exchange=exchange or "")
@@ -924,9 +1049,7 @@ class IBKRProvider(
             if last_trade >= cutoff:
                 candidates.append((last_trade, future_contract, detail))
         if not candidates:
-            raise DataNotFoundError(
-                "ImpliedVolatility", root, details={"reason": "no_iv_data"}
-            )
+            raise DataNotFoundError(entity, root, details={"reason": reason})
         _, selected_contract, selected = min(candidates, key=lambda item: item[0])
         return selected_contract, selected
 
@@ -949,10 +1072,8 @@ class IBKRProvider(
                 "no market data permissions",
             )
         ):
-            return ProviderError(
-                "IBKR implied volatility is not entitled",
-                code="PROVIDER_NOT_AVAILABLE",
-                details={**details, "reason": "not_entitled"},
+            return ProviderNotEntitledError(
+                "ibkr", instrument=instrument, provider_message=str(exc)
             )
         if "hmds query returned no data" in message or "no data" in message:
             return DataNotFoundError(
@@ -1010,13 +1131,10 @@ class IBKRProvider(
             deadline = loop.time() + settings.IBKR_IV_TIMEOUT_SECONDS
             while True:
                 if errors:
-                    raise ProviderError(
-                        "IBKR implied volatility is not entitled",
-                        code="PROVIDER_NOT_AVAILABLE",
-                        details={
-                            "reason": "not_entitled",
-                            "instrument": contract.localSymbol or contract.symbol,
-                        },
+                    raise ProviderNotEntitledError(
+                        "ibkr",
+                        instrument=contract.localSymbol or contract.symbol,
+                        provider_message=errors[-1],
                     )
                 iv = quantize_iv(ticker.impliedVolatility)
                 if iv is not None and iv > 0:
@@ -1058,7 +1176,7 @@ class IBKRProvider(
                 if (
                     self.market_data_type != 1
                     or not self.fallback_on_subscription_error
-                    or error.details.get("reason") != "not_entitled"
+                    or not isinstance(error, ProviderNotEntitledError)
                 ):
                     if error is exc:
                         raise
@@ -1095,6 +1213,9 @@ class IBKRProvider(
                 ),
                 provider="ibkr",
             )
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, sec_type))
+            raise
         except AppError:
             raise
         except Exception as exc:
@@ -1198,6 +1319,9 @@ class IBKRProvider(
                 points=points,
                 provider="ibkr",
             )
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, sec_type))
+            raise
         except AppError:
             raise
         except Exception as exc:
@@ -1346,6 +1470,9 @@ class IBKRProvider(
                 provider="ibkr",
             )
 
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, "stock"))
+            raise
         except Exception as e:
             logger.error(f"Error getting option chain for {symbol}: {e}")
             raise ProviderError(f"IBKR error: {e}")
@@ -1434,6 +1561,9 @@ class IBKRProvider(
                 provider="ibkr",
             )
 
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", canonical_symbol(symbol, "stock"))
+            raise
         except Exception as e:
             logger.error(f"Error getting option quote {option_id}: {e}")
             raise ProviderError(f"IBKR error: {e}")
@@ -1489,37 +1619,6 @@ class IBKRProvider(
         # Less than 1 day
         seconds = diff.total_seconds()
         return f"{int(seconds) + 60} S"
-
-    def _create_contract(self, symbol: str, sec_type: str = "stock") -> Contract:
-        """
-        Create appropriate IBKR contract based on security type.
-
-        Args:
-            symbol: Ticker symbol (e.g., "AAPL", "RUT")
-            sec_type: "stock" or "index"
-
-        Returns:
-            Stock or Index contract
-
-        Note:
-            - For indices, removes ^ prefix if present (e.g., "^RUT" -> "RUT")
-            - Stock contracts use SMART routing
-            - Index contracts use their primary exchange (CBOE for most US indices)
-        """
-        # Remove ^ prefix for indices (Yahoo Finance convention)
-        if sec_type.lower() == "index" and symbol.startswith("^"):
-            symbol = symbol[1:]
-
-        if sec_type.lower() == "index":
-            # Index contract - use appropriate exchange
-            # Common US indices trade on CBOE
-            exchange = self._get_index_exchange(symbol)
-            return Index(symbol, exchange)
-        elif sec_type.lower() == "future":
-            return Future(symbol, exchange="CME")
-        else:
-            # Stock contract - default behavior
-            return Stock(symbol, "SMART", "USD")
 
     def _get_index_exchange(self, symbol: str) -> str:
         """Get primary exchange for index symbols."""

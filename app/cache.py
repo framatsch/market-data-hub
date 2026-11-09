@@ -10,7 +10,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from typing import Annotated, Any, Literal, ParamSpec, TypeVar
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from fastapi import Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -43,6 +43,7 @@ from app.market_hours import (
     next_transition,
 )
 from app.providers.registry import registry
+from app.utils.symbols import ParsedSymbol, parse_symbol
 
 logger = logging.getLogger(__name__)
 P = ParamSpec("P")
@@ -273,14 +274,22 @@ def _key_parts(key: str | bytes) -> tuple[str, dict[str, str]]:
     return route, dict(parse_qsl(segments[-1]))
 
 
-def _compose_key(route_key: str, symbol: str, params: dict[str, Any]) -> str:
-    """Compose provider-isolated keys for HTTP and non-HTTP callers."""
+def _compose_key(
+    route_key: str, symbol: ParsedSymbol | None, params: dict[str, Any]
+) -> str:
+    """Compose provider-isolated keys for HTTP and non-HTTP callers.
+
+    The symbol segment is the percent-encoded canonical symbol (no raw ``:``), which
+    already encodes the instrument type; `sec_type` is only kept for ETFs.
+    """
     params = {
         name: str(value)
         for name, value in params.items()
-        if value is not None and value != ""
+        if value is not None and value != "" and name != "sec_type"
     }
-    for name in ("provider", "format", "sec_type"):
+    if symbol is not None and symbol.sec_type == "etf":
+        params["sec_type"] = "etf"
+    for name in ("provider", "format"):
         if name in params:
             params[name] = params[name].lower()
     if route_key == "companies:search" and "q" in params:
@@ -299,9 +308,8 @@ def _compose_key(route_key: str, symbol: str, params: dict[str, Any]) -> str:
         }.get(route_key)
         if default:
             params["provider"] = default.lower()
-    return (
-        f"mdh:{route_key}:{symbol.upper()}:{urlencode(sorted(params.items())) or '-'}"
-    )
+    segment = quote(symbol.canonical, safe="") if symbol is not None else ""
+    return f"mdh:{route_key}:{segment}:{urlencode(sorted(params.items())) or '-'}"
 
 
 async def mdh_key_builder(
@@ -325,7 +333,13 @@ async def mdh_key_builder(
         for name, value in request.query_params.items()
         if name in declared and value != ""
     }
-    symbol = request.path_params.get("symbol", "")
+    raw_symbol = request.path_params.get("symbol")
+    # A malformed symbol raises DataValidationError, so nothing is cached for it.
+    symbol = (
+        parse_symbol(raw_symbol, request.query_params.get("sec_type"))
+        if raw_symbol
+        else None
+    )
     await policy.refresh()
     return _compose_key(path, symbol, params)
 
@@ -394,7 +408,7 @@ def cache(
 
 async def cached_call(
     route_key: str,
-    symbol: str,
+    symbol: ParsedSymbol | None,
     params: dict[str, Any],
     loader: Callable[[], Awaitable[Any]],
     *,

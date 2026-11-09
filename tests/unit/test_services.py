@@ -30,6 +30,8 @@ from app.services.company_service import CompanyService
 from app.services.news_service import NewsService
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
+from app.utils.errors import CapabilityNotSupportedError
+from app.utils.symbols import parse_symbol
 
 
 @pytest.fixture
@@ -63,12 +65,13 @@ def _context_for(provider):
 @pytest.mark.asyncio
 async def test_get_option_chain(options_service, mock_registry):
     mock_provider = MagicMock()
+    mock_provider.option_underlying_sec_types = frozenset({"stock", "etf"})
     mock_provider.get_option_chain = AsyncMock(return_value=OptionChain(
         underlying_symbol="AAPL", expiry=date(2024, 1, 19), options=[], provider="test"
     ))
     mock_registry.use_options_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
-    result = await options_service.get_option_chain("AAPL", date(2024, 1, 19), provider_name="test")
+    result = await options_service.get_option_chain(parse_symbol("AAPL"), date(2024, 1, 19), provider_name="test")
     
     assert result.underlying_symbol == "AAPL"
     mock_registry.use_options_provider.assert_called_with("test")
@@ -77,6 +80,7 @@ async def test_get_option_chain(options_service, mock_registry):
 @pytest.mark.asyncio
 async def test_get_option_quote(options_service, mock_registry):
     mock_provider = MagicMock()
+    mock_provider.option_underlying_sec_types = frozenset({"stock", "etf"})
     mock_provider.get_option_quote = AsyncMock(return_value=OptionQuote(
         symbol="AAPL240119C00150000", underlying_symbol="AAPL", strike=Decimal(150), 
         expiry=date(2024, 1, 19), type="call", price=Decimal("5.00"), 
@@ -84,7 +88,7 @@ async def test_get_option_quote(options_service, mock_registry):
     ))
     mock_registry.use_options_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
-    result = await options_service.get_option_quote("AAPL", "AAPL240119C00150000", provider_name="test")
+    result = await options_service.get_option_quote(parse_symbol("AAPL"), "AAPL240119C00150000", provider_name="test")
     
     assert result.symbol == "AAPL240119C00150000"
     mock_registry.use_options_provider.assert_called_with("test")
@@ -98,7 +102,7 @@ async def test_get_company_profile(company_service, mock_registry):
     ))
     mock_registry.use_company_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
-    result = await company_service.get_company_profile("AAPL", provider_name="test")
+    result = await company_service.get_company_profile(parse_symbol("AAPL"), provider_name="test")
     
     assert result.symbol == "AAPL"
     mock_registry.use_company_provider.assert_called_with("test")
@@ -121,13 +125,14 @@ async def test_search_companies(company_service, mock_registry):
 @pytest.mark.asyncio
 async def test_get_latest_price(price_service, mock_registry):
     mock_provider = MagicMock()
+    mock_provider.price_sec_types = frozenset({"stock", "etf"})
     mock_provider.get_last_price = AsyncMock(return_value=PriceQuote(
         symbol="AAPL", price=Decimal("150.00"), currency="USD", 
         timestamp=datetime.now(), provider="test"
     ))
     mock_registry.use_price_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
     
-    result = await price_service.get_latest_price("AAPL", provider_name="test")
+    result = await price_service.get_latest_price(parse_symbol("AAPL"), provider_name="test")
     
     assert result.symbol == "AAPL"
     mock_registry.use_price_provider.assert_called_with("test")
@@ -136,6 +141,7 @@ async def test_get_latest_price(price_service, mock_registry):
 @pytest.mark.asyncio
 async def test_get_historical_prices(price_service, mock_registry):
     mock_provider = MagicMock()
+    mock_provider.price_history_sec_types = frozenset({"stock", "etf"})
     mock_provider.get_historical_prices = AsyncMock(return_value=[
         PriceBar(symbol="AAPL", start=datetime.now(), end=datetime.now(), 
                  open=Decimal("149.00"), high=Decimal("151.00"), 
@@ -146,7 +152,7 @@ async def test_get_historical_prices(price_service, mock_registry):
     
     start = datetime(2024, 1, 1)
     end = datetime(2024, 1, 2)
-    result = await price_service.get_historical_prices("AAPL", "1d", start, end, provider_name="test")
+    result = await price_service.get_historical_prices(parse_symbol("AAPL"), "1d", start, end, provider_name="test")
     
     assert len(result) == 1
     mock_registry.use_price_provider.assert_called_with("test")
@@ -188,7 +194,7 @@ async def test_get_company_news(news_service, mock_registry):
     from_date = date(2024, 1, 1)
     to_date = date(2024, 1, 2)
     result = await news_service.get_company_news(
-        "AAPL",
+        parse_symbol("AAPL"),
         from_date,
         to_date,
         provider_name="test",
@@ -216,6 +222,109 @@ async def test_get_company_news_uses_default_provider(news_service, mock_registr
     mock_provider.get_company_news = AsyncMock(return_value=[])
     mock_registry.use_news_provider.side_effect = lambda *_args, **_kwargs: _context_for(mock_provider)
 
-    await news_service.get_company_news("AAPL", date(2024, 1, 1), date(2024, 1, 2))
+    await news_service.get_company_news(
+        parse_symbol("AAPL"), date(2024, 1, 1), date(2024, 1, 2)
+    )
 
     mock_registry.use_news_provider.assert_called_with(None)
+
+
+
+def _quote(symbol="ES"):
+    return PriceQuote(
+        symbol=symbol, price=Decimal(5000), currency="USD",
+        timestamp=datetime.now(), provider="test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_latest_price_passes_root_and_type_and_sets_canonical(
+    price_service, mock_registry
+):
+    provider = MagicMock()
+    provider.name = "test"
+    provider.price_sec_types = frozenset({"stock", "etf", "index", "future"})
+    provider.get_last_price = AsyncMock(return_value=_quote("ES"))
+    mock_registry.use_price_provider.side_effect = lambda *_a, **_k: _context_for(provider)
+
+    result = await price_service.get_latest_price(parse_symbol("/es"), "test", 1)
+
+    provider.get_last_price.assert_awaited_once_with("ES", 1, "future")
+    assert result.symbol == "F:ES"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["last", "history"])
+async def test_price_type_without_mapping_is_501_before_provider_call(
+    price_service, mock_registry, operation
+):
+    provider = MagicMock()
+    provider.name = "polygon"
+    provider.price_sec_types = frozenset({"stock", "etf", "index"})
+    provider.price_history_sec_types = frozenset({"stock", "etf"})
+    provider.get_last_price = AsyncMock()
+    provider.get_historical_prices = AsyncMock()
+    mock_registry.use_price_provider.side_effect = lambda *_a, **_k: _context_for(provider)
+    future = parse_symbol("F:ES")
+    with pytest.raises(CapabilityNotSupportedError) as error:
+        if operation == "last":
+            await price_service.get_latest_price(future, "polygon")
+        else:
+            await price_service.get_historical_prices(
+                parse_symbol("I:SPX"), "1d", datetime(2024, 1, 1), datetime(2024, 1, 2), provider_name="polygon"
+            )
+    assert error.value.details["operation"] == operation
+    assert error.value.details["provider"] == "polygon"
+    assert error.value.details["supported"]
+    provider.get_last_price.assert_not_awaited()
+    provider.get_historical_prices.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_history_sets_canonical_symbol_on_every_bar(price_service, mock_registry):
+    provider = MagicMock()
+    provider.price_history_sec_types = frozenset({"index"})
+    bar = PriceBar(
+        symbol="SPX", start=datetime.now(), end=datetime.now(), open=Decimal(1),
+        high=Decimal(1), low=Decimal(1), close=Decimal(1), volume=1, provider="test",
+    )
+    provider.get_historical_prices = AsyncMock(return_value=[bar, bar])
+    mock_registry.use_price_provider.side_effect = lambda *_a, **_k: _context_for(provider)
+    bars = await price_service.get_historical_prices(
+        parse_symbol("^SPX"), "1d", datetime(2024, 1, 1), datetime(2024, 1, 2)
+    )
+    assert {b.symbol for b in bars} == {"I:SPX"}
+    assert provider.get_historical_prices.call_args.args[0] == "SPX"
+    assert provider.get_historical_prices.call_args.kwargs["sec_type"] == "index"
+
+
+@pytest.mark.asyncio
+async def test_option_chain_index_underlying(options_service, mock_registry):
+    provider = MagicMock()
+    provider.name = "schwab"
+    provider.option_underlying_sec_types = frozenset({"stock", "etf", "index"})
+    quote = OptionQuote(
+        symbol="SPXW", underlying_symbol="SPX", strike=Decimal(1), expiry=date(2024, 1, 19),
+        type="call", price=Decimal(1), currency="USD", provider="schwab",
+    )
+    provider.get_option_chain = AsyncMock(return_value=OptionChain(
+        underlying_symbol="SPX", expiry=date(2024, 1, 19), options=[quote], provider="schwab"
+    ))
+    mock_registry.use_options_provider.side_effect = lambda *_a, **_k: _context_for(provider)
+    chain = await options_service.get_option_chain(parse_symbol("I:SPX"), date(2024, 1, 19))
+    assert provider.get_option_chain.call_args.args[0] == "SPX"
+    assert provider.get_option_chain.call_args.kwargs["sec_type"] == "index"
+    assert chain.underlying_symbol == "I:SPX"
+    assert chain.options[0].underlying_symbol == "I:SPX"
+
+
+@pytest.mark.asyncio
+async def test_option_underlying_without_mapping_is_501(options_service, mock_registry):
+    provider = MagicMock()
+    provider.name = "polygon"
+    provider.option_underlying_sec_types = frozenset({"stock", "etf"})
+    provider.get_option_chain = AsyncMock()
+    mock_registry.use_options_provider.side_effect = lambda *_a, **_k: _context_for(provider)
+    with pytest.raises(CapabilityNotSupportedError):
+        await options_service.get_option_chain(parse_symbol("I:SPX"), date(2024, 1, 19))
+    provider.get_option_chain.assert_not_awaited()

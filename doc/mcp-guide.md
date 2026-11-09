@@ -36,6 +36,17 @@ The MCP server currently exposes the following tools to clients:
 - `search_companies`: Search for companies by name or ticker.
 - `get_company_news`: Retrieve the latest news articles related to a company.
 
+### Symbol notation
+
+All symbol arguments use the same notation as the REST API: a bare ticker is a stock or ETF (`AAPL`, `SPY`), `I:SPX` or `^SPX` is an index, `F:ES` or `/ES` is the front-month future, and `O:<OCC symbol>` may be used for option ids. A bare `SPX` is a stock, not the index. The optional `sec_type` argument (`stock`, `etf`, `index`, `future`, `option`) must agree with the prefix.
+
+```json
+{"symbol": "/ES"}
+{"symbol": "I:SPX", "provider": "ibkr"}
+```
+
+Provider-native forms (`.SPX`, `$SPX`) are rejected with `DATA_VALIDATION_ERROR`. Results carry the canonical symbol (`I:SPX`, `F:ES`). A tool error with code `CAPABILITY_NOT_SUPPORTED` means the hub has no mapping for that instrument type at the provider; `PROVIDER_NOT_ENTITLED` means the provider subscription does not cover it. See the README section "Symbol notation" for the per-provider translation table.
+
 ## Connecting an MCP Client
 
 ### Connecting from Claude Desktop

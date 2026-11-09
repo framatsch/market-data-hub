@@ -51,8 +51,8 @@ def snapshot_frame(instrument, filename=None):
 @pytest.mark.parametrize("symbol,sec_type,ric,expected", [
     ("aapl", "stock", None, "AAPLATMIV.U"),
     ("spy", "etf", None, "SPYATMIV.U"),
-    ("^SPX", "index", None, "SPXATMIV.U"),
-    (".NDX", "index", None, "NDXATMIV.U"),
+    ("SPX", "index", None, "SPXATMIV.U"),
+    ("NDX", "index", None, "NDXATMIV.U"),
     ("es", "future", None, "ESATMIV"),
     ("DAX", "index", "GDAXATMIV.EX", "GDAXATMIV.EX"),
 ])
@@ -113,6 +113,59 @@ async def test_market_mismatch(provider, monkeypatch):
     }
 
 
+@pytest.mark.parametrize("symbol", ["SPX", "NDX"])
+@pytest.mark.parametrize("market", [None, pd.NA, "   "])
+async def test_index_iv_with_missing_market_uses_verified_underlying(
+    provider, monkeypatch, symbol, market
+):
+    # Live SPXATMIV.U/NDXATMIV.U return valid IV and .SPX/.NDX, but a null market.
+    frame = snapshot_frame(f"{symbol}ATMIV.U")
+    frame["GN_TXT16_5"] = market
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=frame))
+    result = await provider.get_implied_volatility(symbol, sec_type="index")
+    assert result.source_instrument == f"{symbol}ATMIV.U"
+    assert result.underlying == f".{symbol}"
+    assert result.implied[0].iv is not None
+    assert result.market is None  # Do not invent a provider-reported market.
+
+
+async def test_index_iv_history_with_missing_market(provider, monkeypatch):
+    metadata = snapshot_frame("SPXATMIV.U")
+    metadata["GN_TXT16_5"] = pd.NA
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=metadata))
+    history = pd.DataFrame(
+        {"30D_A_IM_C": [12.9, 20.09, 18.85], "30D_A_IM_P": [12.9, 20.09, 18.85]},
+        index=pd.to_datetime(["2026-11-04", "2026-11-05", "2026-11-06"]),
+    )
+    definition = Mock()
+    definition.return_value.get_data.return_value = SimpleNamespace(data=SimpleNamespace(df=history))
+    monkeypatch.setattr(lseg.historical_pricing.summaries, "Definition", definition)
+    result = await provider.get_implied_volatility_history(
+        "SPX", date(2026, 11, 4), date(2026, 11, 6), sec_type="index"
+    )
+    assert [point.iv for point in result.points] == [Decimal("0.1290"), Decimal("0.2009"), Decimal("0.1885")]
+    assert definition.call_args.kwargs["universe"] == "SPXATMIV.U"
+
+
+@pytest.mark.parametrize("market,underlying,instrument", [
+    (None, ".NDX", "SPXATMIV.U"),
+    (None, "SPX", "SPXATMIV.U"),
+    (None, None, "SPXATMIV.U"),
+    (None, ".SPX", "NDXATMIV.U"),
+    ("COMFUT", ".SPX", "SPXATMIV.U"),
+])
+async def test_index_missing_market_fallback_requires_matching_identity(
+    provider, monkeypatch, market, underlying, instrument
+):
+    frame = snapshot_frame("SPXATMIV.U")
+    frame["GN_TXT16_5"] = market
+    frame["UNDERLYING"] = underlying
+    frame["Instrument"] = instrument
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=frame))
+    with pytest.raises(DataValidationError):
+        await provider.get_implied_volatility("SPX", sec_type="index")
+
+
 @pytest.mark.parametrize("frame", [None, pd.DataFrame(), pd.read_csv(
     FIXTURES / "P1b_batch_mixed__AAPLATMIV.U_MSFTATMIV.U_ZZZZATMIV.U.csv"
 ).iloc[[2]]])
@@ -133,8 +186,10 @@ async def test_entitlement_mapping(provider, monkeypatch, operation, error_row):
             await provider.get_implied_volatility("AAPL")
         else:
             await provider.get_implied_volatility_history("AAPL", date(2026, 1, 1), date(2026, 11, 5))
-    assert error.value.code == "PROVIDER_NOT_AVAILABLE"
-    assert error.value.details == {"reason": "not_entitled", "instrument": "AAPLATMIV.U"}
+    assert error.value.code == "PROVIDER_NOT_ENTITLED"
+    assert error.value.details["symbol"] == "AAPL"
+    assert error.value.details["instrument"] == "AAPLATMIV.U"
+    assert error.value.details["provider_message"] == error_row["message"][:500]
     assert upstream.call_count == 1
 
 
@@ -204,7 +259,7 @@ async def test_invalid_parameters(provider):
 
 
 @pytest.mark.parametrize("message,expected,reason", [
-    ("UserNotPermission: User has no permission", ProviderError, "not_entitled"),
+    ("UserNotPermission: User has no permission", ProviderError, None),
     ("No data to return", DataNotFoundError, "no_iv_history"),
     ("503 connection timeout", ProviderConnectionError, None),
 ])

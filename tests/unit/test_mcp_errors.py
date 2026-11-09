@@ -34,6 +34,18 @@ async def test_dispatch_tool_error():
             await _dispatch("tools/call", {"name": "get_last_price", "arguments": {"symbol": "AAPL"}})
 
 @pytest.mark.asyncio
+async def test_mcp_tool_error_carries_not_entitled_code():
+    from app.api.mcp import _handle_json_rpc
+    from app.utils.errors import ProviderNotEntitledError
+
+    error = ProviderNotEntitledError("polygon", symbol="I:SPX")
+    with patch("app.api.mcp._dispatch", AsyncMock(side_effect=error)):
+        response = await _handle_json_rpc("tools/call", {}, 1)
+    assert response["error"]["code"] == "PROVIDER_NOT_ENTITLED"
+    assert "subscription" in response["error"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_unknown_method():
     from app.utils.errors import AppError
     with pytest.raises(AppError) as exc:

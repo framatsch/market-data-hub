@@ -31,6 +31,7 @@ from app.models.price import PriceBar
 from app.providers.base import BasePriceProvider
 from app.providers.registry import ProviderRegistry
 from app.services.price_service import PriceService
+from app.utils.symbols import parse_symbol
 
 NOW = datetime(2026, 11, 6, 12, 30, tzinfo=UTC)
 START = datetime(2026, 11, 1, tzinfo=UTC)
@@ -132,7 +133,9 @@ def assert_utc_range(calls, start, end, count):
     (START.astimezone(timezone(timedelta(hours=2))), END.astimezone(timezone(timedelta(hours=-5)))),
 ])
 async def test_service_normalizes_both_request_dates(history_env, start, end):
-    bars = await history_env.service.get_historical_prices("AAPL", "1d", start, end)
+    bars = await history_env.service.get_historical_prices(
+        parse_symbol("AAPL"), "1d", start, end
+    )
     assert_utc_range(history_env.provider.calls, START, END, 1)
     assert bars[0].start == START
     assert bars[0].close == Decimal("101.02")

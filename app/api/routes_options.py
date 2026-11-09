@@ -16,24 +16,30 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 
 from app.cache import cache
 from app.config import settings
-from app.dependencies import OptionsServiceDep
+from app.dependencies import OptionsServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
 from app.utils.csv_export import to_csv
+from app.utils.symbols import OPTION_UNDERLYING_TYPES, ParsedSymbol, strip_option_prefix
 
 router = APIRouter(prefix="/options", tags=["Options"])
+
+UnderlyingSymbol = Annotated[
+    ParsedSymbol, Depends(symbol_param(OPTION_UNDERLYING_TYPES))
+]
 
 
 @router.get("/{symbol}/chain")
 @cache(expire=settings.CACHE_TTL_OPTION_CHAIN_SECONDS)
 async def get_option_chain(
-    symbol: str,
+    symbol: UnderlyingSymbol,
     service: OptionsServiceDep,
     expiry: date | None = None,
     min_strike: Decimal | None = Query(
@@ -54,6 +60,10 @@ async def get_option_chain(
 ) -> Any:
     """Get option chain for a symbol and expiry.
 
+    The underlying may be a stock/ETF (`AAPL`) or an index (`I:SPX`, `^SPX`);
+    the response `underlying_symbol` is canonical. Providers without an index
+    option implementation answer 501.
+
     Query Parameters:
     - expiry: Option expiration date (default: today)
     - min_strike: Filter by minimum strike price
@@ -66,7 +76,6 @@ async def get_option_chain(
     - If market_data_type is not specified, uses default from config (currently 3=Delayed)
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
-    symbol = symbol.upper()
     provider = provider.lower() if provider else None
     if not expiry:
         # Default to today
@@ -82,15 +91,12 @@ async def get_option_chain(
     )
 
     if format.lower() == "csv":
-        content_type, csv_data = to_csv(
-            chain.model_dump(), f"{symbol}_options_chain_{expiry}.csv"
-        )
+        filename = f"{url_quote(symbol.canonical, safe='')}_options_chain_{expiry}.csv"
+        content_type, csv_data = to_csv(chain.model_dump(), filename)
         return Response(
             content=csv_data,
             media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={symbol}_options_chain_{expiry}.csv"
-            },
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     return ResponseEnvelope(data=chain)
@@ -98,7 +104,7 @@ async def get_option_chain(
 
 @router.get("/{symbol}/quote/{option_id}")
 async def get_option_quote(
-    symbol: str,
+    symbol: UnderlyingSymbol,
     option_id: str,
     service: OptionsServiceDep,
     market_data_type: int | None = Query(
@@ -110,6 +116,9 @@ async def get_option_quote(
 ) -> Any:
     """Get a specific option quote.
 
+    `option_id` may carry the `O:` prefix (`O:AAPL250117C00150000`), which is
+    stripped before the provider call.
+
     Query Parameters:
     - market_data_type: 1=Live (requires Level 2 subscription), 2=Frozen (OPRA), 3=Delayed (default, free)
     - format: "json" (default) or "csv"
@@ -118,8 +127,7 @@ async def get_option_quote(
     - If market_data_type is not specified, uses default from config (currently 3=Delayed)
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
-    symbol = symbol.upper()
-    option_id = option_id.upper()
+    option_id = strip_option_prefix(option_id)
     provider = provider.lower() if provider else None
     quote = await service.get_option_quote(
         symbol, option_id, provider, market_data_type=market_data_type

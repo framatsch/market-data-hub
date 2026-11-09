@@ -79,10 +79,57 @@ def test_map_httpx_http_error():
     mock_response.status_code = 500
     mapped = map_httpx_http_error(provider="test", error=error, entity="Entity", identifier="ID")
     assert mapped.code == "PROVIDER_CONNECTION_ERROR"
+
+    mock_response.status_code = 403
+    mock_response.text = "plan does not include this"
+    mapped = map_httpx_http_error(
+        provider="test",
+        error=error,
+        entity="Entity",
+        identifier="ID",
+        classify_forbidden=lambda exc: "plan" in exc.response.text,
+        symbol="I:SPX",
+    )
+    assert mapped.code == "PROVIDER_NOT_ENTITLED"
+    assert mapped.details["symbol"] == "I:SPX"
+    assert mapped.details["provider_message"] == "plan does not include this"
+    mapped = map_httpx_http_error(
+        provider="test",
+        error=error,
+        entity="Entity",
+        identifier="ID",
+        classify_forbidden=lambda exc: False,
+    )
+    assert mapped.code == "PROVIDER_NOT_AVAILABLE"
+    mock_response.status_code = 401
+    mapped = map_httpx_http_error(
+        provider="test",
+        error=error,
+        entity="Entity",
+        identifier="ID",
+        classify_forbidden=lambda exc: True,
+    )
+    assert mapped.code == "PROVIDER_NOT_AVAILABLE"
     
     mock_response.status_code = 400
     mapped = map_httpx_http_error(provider="test", error=error, entity="Entity", identifier="ID")
     assert mapped.code == "PROVIDER_ERROR"
+
+def test_provider_not_entitled_error_shape():
+    from app.utils.errors import ProviderNotEntitledError
+
+    error = ProviderNotEntitledError(
+        "polygon",
+        symbol="I:SPX",
+        instrument="I:SPX",
+        provider_message="x" * 800,
+    )
+    assert error.code == "PROVIDER_NOT_ENTITLED"
+    assert error.details["provider"] == "polygon"
+    assert error.details["symbol"] == "I:SPX"
+    assert len(error.details["provider_message"]) == 500
+    assert "subscription" in error.message
+
 
 def test_error_response_models():
     from app.utils.errors import ErrorDetail, ErrorResponse

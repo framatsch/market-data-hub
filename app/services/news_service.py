@@ -20,6 +20,7 @@ import structlog
 
 from app.models.news import NewsArticle
 from app.providers.registry import ProviderRegistry, get_registry
+from app.utils.symbols import ParsedSymbol
 
 
 class NewsService:
@@ -28,7 +29,7 @@ class NewsService:
 
     async def get_company_news(
         self,
-        symbol: str,
+        symbol: ParsedSymbol,
         from_date: date,
         to_date: date,
         provider_name: str | None = None,
@@ -40,7 +41,7 @@ class NewsService:
         async with self.registry.use_news_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             return await provider.get_company_news(
-                symbol=symbol,
+                symbol=symbol.root,
                 from_date=from_date,
                 to_date=to_date,
                 limit=limit,

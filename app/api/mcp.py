@@ -40,10 +40,21 @@ from app.cache import cached_call
 from app.config import APP_VERSION
 from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
+from app.services.news_service import NewsService
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
 from app.services.volatility_service import VolatilityService
 from app.utils.errors import AppError, DataValidationError
+from app.utils.symbols import (
+    COMPANY_TYPES,
+    OPTION_UNDERLYING_TYPES,
+    PRICE_TYPES,
+    VOLATILITY_TYPES,
+    ParsedSymbol,
+    SecType,
+    parse_symbol,
+    strip_option_prefix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +285,10 @@ def _company_service() -> CompanyService:
     return CompanyService(get_registry())
 
 
+def _news_service() -> NewsService:
+    return NewsService(get_registry())
+
+
 # ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
@@ -289,22 +304,23 @@ def _cache_data(data: Any) -> Any:
     return json.loads(json.dumps(data, default=str))
 
 
+def _symbol(args: dict[str, Any], allowed: frozenset[SecType]) -> ParsedSymbol:
+    """Resolve the tool's `symbol` + optional `sec_type` with the central parser."""
+    return parse_symbol(args["symbol"], args.get("sec_type"), allowed=allowed)
+
+
 async def _tool_get_last_price(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
-    sec_type = args.get("sec_type", "stock")
+    symbol = _symbol(args, PRICE_TYPES)
     provider = args.get("provider")
-    quote = await _price_service().get_latest_price(
-        symbol, provider_name=provider, sec_type=sec_type
-    )
+    quote = await _price_service().get_latest_price(symbol, provider_name=provider)
     if not quote:
-        return _text_content(f"No price data found for {symbol} ({sec_type})")
+        return _text_content(f"No price data found for {symbol.canonical}")
     return _text_content(quote.model_dump())
 
 
 async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, PRICE_TYPES)
     interval = args.get("interval", "1d")
-    sec_type = args.get("sec_type", "stock")
     provider = args.get("provider")
     end = (
         datetime.fromisoformat(args["end_date"])
@@ -324,7 +340,6 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
             start,
             end,
             provider_name=provider,
-            sec_type=sec_type,
         )
         return _cache_data([b.model_dump() for b in bars])
 
@@ -333,7 +348,6 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
         symbol,
         {
             "interval": interval,
-            "sec_type": sec_type,
             "provider": provider,
             "start": args.get("start_date"),
             "end": args.get("end_date"),
@@ -342,12 +356,12 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
         refresh=args.get("refresh", False),
     )
     if not bars:
-        return _text_content(f"No historical data found for {symbol} ({sec_type})")
+        return _text_content(f"No historical data found for {symbol.canonical}")
     return _text_content(bars)
 
 
 async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, OPTION_UNDERLYING_TYPES)
     expiry_str = args.get("expiry")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
     provider = args.get("provider")
@@ -369,8 +383,8 @@ async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
-    option_id = args["option_id"].upper()
+    symbol = _symbol(args, OPTION_UNDERLYING_TYPES)
+    option_id = strip_option_prefix(args["option_id"])
     provider = args.get("provider")
     quote = await _options_service().get_option_quote(
         symbol, option_id, provider_name=provider
@@ -379,7 +393,7 @@ async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, COMPANY_TYPES)
     provider = args.get("provider")
 
     async def load() -> Any:
@@ -410,7 +424,7 @@ async def _tool_search_companies(args: dict[str, Any]) -> dict[str, Any]:
 
     results = await cached_call(
         "companies:search",
-        "",
+        None,
         {"q": query, "provider": provider},
         load,
         refresh=args.get("refresh", False),
@@ -419,7 +433,7 @@ async def _tool_search_companies(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, COMPANY_TYPES)
     to_date = date.today()
     from_date = to_date - timedelta(days=7)
     if "from_date" in args:
@@ -430,9 +444,8 @@ async def _tool_get_company_news(args: dict[str, Any]) -> dict[str, Any]:
     provider_name = args.get("provider")
 
     async def load() -> Any:
-        provider = get_registry().get_news_provider(provider_name)
-        articles = await provider.get_company_news(
-            symbol, from_date, to_date, limit=limit
+        articles = await _news_service().get_company_news(
+            symbol, from_date, to_date, provider_name=provider_name, limit=limit
         )
         return _cache_data([a.model_dump() for a in articles])
 
@@ -460,7 +473,7 @@ async def _tool_get_market_status(args: dict[str, Any]) -> dict[str, Any]:
 
     status = await cached_call(
         "market-status",
-        "",
+        None,
         {"provider": provider},
         load,
         refresh=args.get("refresh", False),
@@ -478,12 +491,11 @@ def _volatility_service() -> VolatilityService:
 
 
 async def _tool_get_implied_volatility(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, VOLATILITY_TYPES)
 
     async def load() -> Any:
         snapshot = await _volatility_service().get_implied_volatility(
             symbol,
-            sec_type=args.get("sec_type", "stock"),
             ric=args.get("ric"),
             provider_name=(args.get("provider") or "").lower() or None,
         )
@@ -493,7 +505,6 @@ async def _tool_get_implied_volatility(args: dict[str, Any]) -> dict[str, Any]:
         "volatility:snapshot",
         symbol,
         {
-            "sec_type": args.get("sec_type"),
             "ric": args.get("ric"),
             "provider": args.get("provider"),
         },
@@ -517,7 +528,7 @@ async def _tool_get_implied_volatility_history(args: dict[str, Any]) -> dict[str
         )
     except ValueError as exc:
         raise DataValidationError("IV history dates must use YYYY-MM-DD") from exc
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, VOLATILITY_TYPES)
 
     async def load() -> Any:
         history = await _volatility_service().get_implied_volatility_history(
@@ -525,7 +536,6 @@ async def _tool_get_implied_volatility_history(args: dict[str, Any]) -> dict[str
             start,
             end,
             tenor_days=args.get("tenor_days", 30),
-            sec_type=args.get("sec_type", "stock"),
             ric=args.get("ric"),
             provider_name=(args.get("provider") or "").lower() or None,
         )
@@ -538,7 +548,6 @@ async def _tool_get_implied_volatility_history(args: dict[str, Any]) -> dict[str
             "start": args.get("start_date"),
             "end": args.get("end_date"),
             "tenor_days": args.get("tenor_days"),
-            "sec_type": args.get("sec_type"),
             "ric": args.get("ric"),
             "provider": args.get("provider"),
         },
@@ -549,14 +558,13 @@ async def _tool_get_implied_volatility_history(args: dict[str, Any]) -> dict[str
 
 
 async def _tool_get_implied_volatility_stats(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = args["symbol"].upper()
+    symbol = _symbol(args, VOLATILITY_TYPES)
 
     async def load() -> Any:
         stats = await _volatility_service().get_implied_volatility_stats(
             symbol,
             window=args.get("window", 252),
             tenor_days=args.get("tenor_days", 30),
-            sec_type=args.get("sec_type", "stock"),
             ric=args.get("ric"),
             provider_name=(args.get("provider") or "").lower() or None,
         )
@@ -568,7 +576,6 @@ async def _tool_get_implied_volatility_stats(args: dict[str, Any]) -> dict[str, 
         {
             "window": args.get("window"),
             "tenor_days": args.get("tenor_days"),
-            "sec_type": args.get("sec_type"),
             "ric": args.get("ric"),
             "provider": args.get("provider"),
         },
@@ -578,20 +585,40 @@ async def _tool_get_implied_volatility_stats(args: dict[str, Any]) -> dict[str, 
     return _text_content(stats)
 
 
+_SYMBOL_HELP = (
+    "Symbol: AAPL (stock/ETF), I:SPX or ^SPX (index), F:ES or /ES (front-month "
+    "future). Provider-native forms (.SPX, $SPX, ESc1) are rejected. Errors: "
+    "501 CAPABILITY_NOT_SUPPORTED = not implemented for this provider and type; "
+    "403 PROVIDER_NOT_ENTITLED = the provider subscription does not cover it."
+)
+_SYMBOL_PRICE = {"type": "string", "description": _SYMBOL_HELP}
+_SYMBOL_UNDERLYING = {
+    "type": "string",
+    "description": "Underlying: AAPL (stock/ETF) or I:SPX / ^SPX (index). "
+    "501 when the provider has no index option implementation.",
+}
+_SYMBOL_COMPANY = {
+    "type": "string",
+    "description": "Stock or ETF ticker, e.g. AAPL; index and future symbols are rejected.",
+}
+_SEC_TYPE = {
+    "type": "string",
+    "enum": ["stock", "etf", "index", "future"],
+    "description": "Optional, case-insensitive; prefer the symbol prefix (F:, I:). "
+    "Must agree with any prefix.",
+}
+
+
 TOOL_REGISTRY: list[dict[str, Any]] = [
     {
         "name": "get_last_price",
-        "description": "Get the latest price quote for a stock or index symbol.",
+        "description": "Get the latest price quote for a stock, ETF, index or front-month future.",
         "inputSchema": {
             "type": "object",
             "required": ["symbol"],
             "properties": {
-                "symbol": {"type": "string", "description": "Ticker symbol, e.g. AAPL"},
-                "sec_type": {
-                    "type": "string",
-                    "enum": ["stock", "index"],
-                    "description": "Security type (default: stock)",
-                },
+                "symbol": _SYMBOL_PRICE,
+                "sec_type": _SEC_TYPE,
                 "provider": {
                     "type": "string",
                     "description": "Data provider override (e.g. ibkr, lseg)",
@@ -611,7 +638,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": {"type": "string"},
+                "symbol": _SYMBOL_PRICE,
                 "interval": {
                     "type": "string",
                     "description": "Bar interval, e.g. 1d, 1h, 5m (default: 1d)",
@@ -626,7 +653,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "format": "date",
                     "description": "ISO date string (default: today)",
                 },
-                "sec_type": {"type": "string", "enum": ["stock", "index"]},
+                "sec_type": _SEC_TYPE,
                 "provider": {
                     "type": "string",
                     "description": "Data provider override (e.g. ibkr, lseg)",
@@ -646,7 +673,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": {"type": "string"},
+                "symbol": _SYMBOL_UNDERLYING,
                 "expiry": {
                     "type": "string",
                     "format": "date",
@@ -666,10 +693,10 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
             "type": "object",
             "required": ["symbol", "option_id"],
             "properties": {
-                "symbol": {"type": "string"},
+                "symbol": _SYMBOL_UNDERLYING,
                 "option_id": {
                     "type": "string",
-                    "description": "Option contract identifier, e.g. AAPL240119C00150000",
+                    "description": "Option contract identifier, e.g. AAPL240119C00150000; an O: prefix is accepted and stripped.",
                 },
                 "provider": {
                     "type": "string",
@@ -690,7 +717,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": {"type": "string"},
+                "symbol": _SYMBOL_COMPANY,
                 "provider": {
                     "type": "string",
                     "description": "Data provider override (e.g. ibkr, lseg)",
@@ -730,7 +757,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": {"type": "string"},
+                "symbol": _SYMBOL_COMPANY,
                 "from_date": {
                     "type": "string",
                     "format": "date",
@@ -786,12 +813,8 @@ TOOL_REGISTRY.extend(
                         "default": False,
                         "description": "Fetch live data and overwrite the cache.",
                     },
-                    "symbol": {"type": "string"},
-                    "sec_type": {
-                        "type": "string",
-                        "enum": ["stock", "etf", "index", "future"],
-                        "default": "stock",
-                    },
+                    "symbol": _SYMBOL_PRICE,
+                    "sec_type": _SEC_TYPE,
                     "ric": {
                         "type": "string",
                         "description": "LSEG-only explicit instrument override; bypasses market validation.",
@@ -815,7 +838,7 @@ TOOL_REGISTRY.extend(
                         "default": False,
                         "description": "Fetch live data and overwrite the cache.",
                     },
-                    "symbol": {"type": "string"},
+                    "symbol": _SYMBOL_PRICE,
                     "start_date": {
                         "type": "string",
                         "format": "date",
@@ -831,11 +854,7 @@ TOOL_REGISTRY.extend(
                         "enum": [30, 60, 90],
                         "default": 30,
                     },
-                    "sec_type": {
-                        "type": "string",
-                        "enum": ["stock", "etf", "index", "future"],
-                        "default": "stock",
-                    },
+                    "sec_type": _SEC_TYPE,
                     "ric": {
                         "type": "string",
                         "description": "LSEG-only explicit instrument override.",
@@ -859,7 +878,7 @@ TOOL_REGISTRY.extend(
                         "default": False,
                         "description": "Fetch live data and overwrite the cache.",
                     },
-                    "symbol": {"type": "string"},
+                    "symbol": _SYMBOL_PRICE,
                     "window": {
                         "type": "integer",
                         "minimum": 20,
@@ -871,11 +890,7 @@ TOOL_REGISTRY.extend(
                         "enum": [30, 60, 90],
                         "default": 30,
                     },
-                    "sec_type": {
-                        "type": "string",
-                        "enum": ["stock", "etf", "index", "future"],
-                        "default": "stock",
-                    },
+                    "sec_type": _SEC_TYPE,
                     "ric": {
                         "type": "string",
                         "description": "LSEG-only explicit instrument override.",

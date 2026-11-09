@@ -21,7 +21,29 @@ from typing import Literal
 import structlog
 
 from app.models.options import OptionChain, OptionQuote
+from app.providers.base import BaseOptionsProvider
 from app.providers.registry import ProviderRegistry, get_registry
+from app.utils.errors import CapabilityNotSupportedError
+from app.utils.symbols import ParsedSymbol
+
+
+def _check_support(
+    provider: BaseOptionsProvider, operation: str, symbol: ParsedSymbol
+) -> None:
+    """501 before any provider call when the underlying type has no mapping."""
+    supported = provider.option_underlying_sec_types
+    if symbol.sec_type not in supported:
+        raise CapabilityNotSupportedError(
+            provider.name,
+            operation,
+            sec_type=symbol.sec_type,
+            supported=sorted(supported),
+        )
+
+
+def _type_kwargs(symbol: ParsedSymbol) -> dict[str, str]:
+    """Stocks and ETFs use the provider default; only other types are passed."""
+    return {} if symbol.sec_type in ("stock", "etf") else {"sec_type": symbol.sec_type}
 
 
 class OptionsService:
@@ -30,7 +52,7 @@ class OptionsService:
 
     async def get_option_chain(
         self,
-        symbol: str,
+        symbol: ParsedSymbol,
         expiry: date,
         provider_name: str | None = None,
         min_strike: Decimal | None = None,
@@ -40,27 +62,45 @@ class OptionsService:
     ) -> OptionChain:
         async with self.registry.use_options_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
-            return await provider.get_option_chain(
-                symbol,
+            _check_support(provider, "option_chain", symbol)
+            chain = await provider.get_option_chain(
+                symbol.root,
                 expiry,
                 min_strike=min_strike,
                 max_strike=max_strike,
                 right=right,
                 market_data_type=market_data_type,
+                **_type_kwargs(symbol),
+            )
+            return chain.model_copy(
+                update={
+                    "underlying_symbol": symbol.canonical,
+                    "options": [
+                        option.model_copy(
+                            update={"underlying_symbol": symbol.canonical}
+                        )
+                        for option in chain.options
+                    ],
+                }
             )
 
     async def get_option_quote(
         self,
-        symbol: str,
+        symbol: ParsedSymbol,
         option_id: str,
         provider_name: str | None = None,
         market_data_type: int | None = None,
     ) -> OptionQuote:
         async with self.registry.use_options_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
-            return await provider.get_option_quote(
-                symbol, option_id, market_data_type=market_data_type
+            _check_support(provider, "option_quote", symbol)
+            quote = await provider.get_option_quote(
+                symbol.root,
+                option_id,
+                market_data_type=market_data_type,
+                **_type_kwargs(symbol),
             )
+            return quote.model_copy(update={"underlying_symbol": symbol.canonical})
 
 
 options_service = OptionsService()

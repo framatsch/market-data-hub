@@ -34,6 +34,10 @@ from app.models.volatility import (
 
 class BasePriceProvider(ABC):
     name = "none"
+    # Instrument types the hub has implemented a native mapping for. These describe
+    # code, never the user's subscription (see PROVIDER_NOT_ENTITLED for that).
+    price_sec_types: frozenset[str] = frozenset({"stock", "etf"})
+    price_history_sec_types: frozenset[str] = frozenset({"stock", "etf"})
 
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""
@@ -90,6 +94,7 @@ class BaseCompanyProvider(ABC):
 
 class BaseOptionsProvider(ABC):
     name = "none"
+    option_underlying_sec_types: frozenset[str] = frozenset({"stock", "etf"})
 
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""

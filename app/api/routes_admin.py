@@ -376,13 +376,38 @@ def _provider_capabilities(name: str, provider: object | None) -> list[str]:
     return capabilities
 
 
-def _provider_volatility_support(name: str) -> dict[str, list[Any]] | None:
+def _provider_for_support(name: str, base: type) -> Any | None:
+    """Return the loaded instance, else the class, if it implements `base`."""
     provider = registry.get_provider_instance(name)
     if provider is None:
         provider = registry.provider_classes.get(name)
-        if provider is None or not issubclass(provider, BaseVolatilityProvider):
+        if provider is None or not issubclass(provider, base):
             return None
-    elif not isinstance(provider, BaseVolatilityProvider):
+    elif not isinstance(provider, base):
+        return None
+    return provider
+
+
+def _provider_price_support(name: str) -> dict[str, list[Any]] | None:
+    provider = _provider_for_support(name, BasePriceProvider)
+    if provider is None:
+        return None
+    return {
+        "price_sec_types": sorted(provider.price_sec_types),
+        "price_history_sec_types": sorted(provider.price_history_sec_types),
+    }
+
+
+def _provider_options_support(name: str) -> dict[str, list[Any]] | None:
+    provider = _provider_for_support(name, BaseOptionsProvider)
+    if provider is None:
+        return None
+    return {"option_underlying_sec_types": sorted(provider.option_underlying_sec_types)}
+
+
+def _provider_volatility_support(name: str) -> dict[str, list[Any]] | None:
+    provider = _provider_for_support(name, BaseVolatilityProvider)
+    if provider is None:
         return None
     return {
         "volatility_sec_types": sorted(provider.volatility_sec_types),
@@ -522,6 +547,8 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
     return [
         {
             **_provider_status(name, configs[name]),
+            "price_support": _provider_price_support(name),
+            "options_support": _provider_options_support(name),
             "volatility_support": _provider_volatility_support(name),
             "config": configs[name].model_dump(),
             "config_summary": {

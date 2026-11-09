@@ -11,9 +11,26 @@ from app.providers.base import BasePriceProvider
 from app.providers.credentials import get_provider_credential_sync
 from app.utils.errors import AppError, ProviderError, map_httpx_http_error
 
+# A 403 is only a missing entitlement when the body points at the plan and not at the
+# API key; anything unclear stays a credential failure (PROVIDER_NOT_AVAILABLE).
+_PLAN_TOKENS = ("plan", "upgrade", "subscription", "pro+", "entitle", "tier")
+_CREDENTIAL_TOKENS = ("api key", "api_key", "invalid", "token", "unauthor", "expired")
+
+
+def _is_plan_restriction(error: httpx.HTTPStatusError) -> bool:
+    text = error.response.text.lower()
+    if any(token in text for token in _CREDENTIAL_TOKENS):
+        return False
+    return any(token in text for token in _PLAN_TOKENS)
+
 
 class PrixeProvider(BasePriceProvider):
-    """Prixe provider for latest stock prices via POST /api/last_sold."""
+    """Prixe provider for latest stock prices via POST /api/last_sold.
+
+    Prixe's API documents stock tickers only (plus a separate crypto product), with
+    no index or futures notation, so the default support sets ``{stock, etf}`` apply
+    and ``I:``/``F:`` symbols are answered with 501 before any call is made.
+    """
 
     def __init__(self) -> None:
         self._api_key: str | None = None
@@ -121,6 +138,7 @@ class PrixeProvider(BasePriceProvider):
                 error=exc,
                 entity="Ticker",
                 identifier=normalized_symbol,
+                classify_forbidden=_is_plan_restriction,
             ) from exc
         except httpx.TimeoutException as exc:
             raise ProviderError(
@@ -143,7 +161,7 @@ class PrixeProvider(BasePriceProvider):
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        sec_type: str = "STK",
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         del sec_type
 
@@ -217,6 +235,7 @@ class PrixeProvider(BasePriceProvider):
                 error=exc,
                 entity="Ticker",
                 identifier=normalized_symbol,
+                classify_forbidden=_is_plan_restriction,
             ) from exc
         except httpx.TimeoutException as exc:
             raise ProviderError(

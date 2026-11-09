@@ -15,25 +15,29 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date, timedelta
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from app.cache import cache
 from app.config import settings
-from app.dependencies import VolatilityServiceDep
+from app.dependencies import VolatilityServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
 from app.models.volatility import (
     VolatilityHistory,
-    VolatilitySecType,
     VolatilitySnapshot,
     VolatilityStats,
 )
 from app.utils.csv_export import to_csv
+from app.utils.symbols import VOLATILITY_TYPES, ParsedSymbol
 
 router = APIRouter(prefix="/volatility", tags=["Volatility"])
+
+VolatilitySymbol = Annotated[
+    ParsedSymbol, Depends(symbol_param(VOLATILITY_TYPES))
+]
 
 
 def _csv_response(data: Any, symbol: str, suffix: str) -> Response:
@@ -49,12 +53,8 @@ def _csv_response(data: Any, symbol: str, suffix: str) -> Response:
 @router.get("/{symbol}", response_model=ResponseEnvelope[VolatilitySnapshot])
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:snapshot")
 async def get_implied_volatility(
-    symbol: str,
+    symbol: VolatilitySymbol,
     service: VolatilityServiceDep,
-    sec_type: VolatilitySecType = Query(
-        "stock",
-        description="Underlying security type; futures use an options root, indices do not use stock tickers.",
-    ),
     ric: str | None = Query(
         None,
         description="LSEG-only explicit ATMIV RIC, returned verbatim and exempt from market validation.",
@@ -70,21 +70,25 @@ async def get_implied_volatility(
 ) -> Any:
     """Underlying IV in annualized decimal fractions (0.2676 = 26.76%), four places.
 
+    Symbol notation: `AAPL`, `I:SPX` / `^SPX` (index), `F:ES` (future). The
+    optional `sec_type` (case-insensitive) must agree with any prefix. The
+    response `symbol` is canonical. 501 = the hub has no implementation for the
+    type at this provider; 403 PROVIDER_NOT_ENTITLED = the subscription lacks it.
+
     LSEG is end-of-day (indices update roughly hourly): stocks/ETFs/indices use
     `{SYMBOL}ATMIV.U` (OPRA); futures use `{ROOT}ATMIV` without `.U`. `ric` is
     an explicit LSEG instrument override, e.g. GDAXATMIV.EX, and skips market
     validation. IBKR uses its live/delayed 30-day model and rejects `ric`.
     Unsupported tenors are null; this endpoint does not change price quotes.
     """
-    symbol = symbol.upper()
     snapshot = await service.get_implied_volatility(
-        symbol, sec_type, ric, provider.lower() if provider else None
+        symbol, ric, provider.lower() if provider else None
     )
     if format == "csv":
         metadata = snapshot.model_dump(exclude={"implied"})
         return _csv_response(
             [{**metadata, **tenor.model_dump()} for tenor in snapshot.implied],
-            symbol,
+            symbol.canonical,
             "",
         )
     return ResponseEnvelope(data=snapshot)
@@ -93,7 +97,7 @@ async def get_implied_volatility(
 @router.get("/{symbol}/history", response_model=ResponseEnvelope[VolatilityHistory])
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:history")
 async def get_implied_volatility_history(
-    symbol: str,
+    symbol: VolatilitySymbol,
     service: VolatilityServiceDep,
     start: date | None = Query(
         None, description="First daily point (default end minus 365 calendar days)."
@@ -103,10 +107,6 @@ async def get_implied_volatility_history(
         30,
         description="Constant-maturity IV tenor: 30, 60 or 90 days; IBKR supports only 30.",
         json_schema_extra={"enum": [30, 60, 90]},
-    ),
-    sec_type: VolatilitySecType = Query(
-        "stock",
-        description="Underlying security type; IBKR futures history is unsupported.",
     ),
     ric: str | None = Query(
         None, description="LSEG-only explicit ATMIV instrument override."
@@ -122,6 +122,9 @@ async def get_implied_volatility_history(
 ) -> Any:
     """Daily end-of-day underlying IV, in four-place decimal fractions.
 
+    Symbol notation as for the snapshot (`I:SPX`, `F:ES`); IBKR futures history
+    is unsupported (501).
+
     The default range is end minus 365 calendar days through today. LSEG OPRA
     records use `.U`, futures omit it, and `ric` overrides the instrument.
     IBKR only supports stock/ETF/index history and a 30-day tenor. Missing
@@ -129,13 +132,11 @@ async def get_implied_volatility_history(
     """
     end = end or date.today()
     start = start or end - timedelta(days=365)
-    symbol = symbol.upper()
     history = await service.get_implied_volatility_history(
         symbol,
         start,
         end,
         tenor_days,
-        sec_type,
         ric,
         provider.lower() if provider else None,
     )
@@ -143,7 +144,7 @@ async def get_implied_volatility_history(
         metadata = history.model_dump(exclude={"points"})
         return _csv_response(
             [{**metadata, **point.model_dump()} for point in history.points],
-            symbol,
+            symbol.canonical,
             "_history",
         )
     return ResponseEnvelope(data=history)
@@ -152,7 +153,7 @@ async def get_implied_volatility_history(
 @router.get("/{symbol}/stats", response_model=ResponseEnvelope[VolatilityStats])
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:stats")
 async def get_implied_volatility_stats(
-    symbol: str,
+    symbol: VolatilitySymbol,
     service: VolatilityServiceDep,
     window: int = Query(
         252,
@@ -164,10 +165,6 @@ async def get_implied_volatility_stats(
         30,
         description="IV tenor: 30, 60 or 90 days; IBKR supports only 30.",
         json_schema_extra={"enum": [30, 60, 90]},
-    ),
-    sec_type: VolatilitySecType = Query(
-        "stock",
-        description="Underlying security type; IBKR futures statistics are unsupported.",
     ),
     ric: str | None = Query(
         None, description="LSEG-only explicit ATMIV instrument override."
@@ -189,15 +186,13 @@ async def get_implied_volatility_stats(
     outlier filtering. Flat windows have null IVR; fewer than 20 points is 404.
     LSEG history is end-of-day; `.U` means OPRA, not futures. `ric` is LSEG-only.
     """
-    symbol = symbol.upper()
     stats = await service.get_implied_volatility_stats(
         symbol,
         window,
         tenor_days,
-        sec_type,
         ric,
         provider.lower() if provider else None,
     )
     if format == "csv":
-        return _csv_response(stats, symbol, "_stats")
+        return _csv_response(stats, symbol.canonical, "_stats")
     return ResponseEnvelope(data=stats)

@@ -33,6 +33,7 @@ class PriceQuote(BaseModel):
     low: Decimal | None = None
     volume: int | None = None
     is_market_open: bool | None = None
+    source_instrument: str | None = None
 
     @property
     def last_price(self) -> Decimal:
@@ -49,3 +50,4 @@ class PriceBar(BaseModel):
     close: Decimal
     volume: int
     provider: str
+    source_instrument: str | None = None

@@ -48,7 +48,9 @@ from app.utils.errors import (
     DataValidationError,
     ProviderConnectionError,
     ProviderError,
+    ProviderNotEntitledError,
     ProviderTimeoutError,
+    not_entitled,
 )
 from app.utils.webhooks import validate_webhook_url
 
@@ -67,6 +69,38 @@ _HTTP_UNAUTHORIZED = 401
 _HTTP_FORBIDDEN = 403
 _OCC_OPTION_SYMBOL_RE = re.compile(r"^([A-Z]+)\s+(\d{6})([CP])(\d{8})$")
 
+# A 403 is only an entitlement error when the body says so and does not point at the
+# OAuth token; anything else keeps the token-reset behaviour.
+_ENTITLEMENT_TOKENS = (
+    "entitle",
+    "subscription",
+    "not subscribed",
+    "market data agreement",
+    "not permitted to access",
+)
+_CREDENTIAL_TOKENS = ("token", "expired", "refresh", "invalid_client", "unauthorized")
+
+
+def _is_entitlement_body(body: str | None) -> bool:
+    text = (body or "").lower()
+    if any(token in text for token in _CREDENTIAL_TOKENS):
+        return False
+    return any(token in text for token in _ENTITLEMENT_TOKENS)
+
+
+def _native_symbol(root: str, sec_type: str) -> str:
+    """Schwab identifier: ``$SPX`` indices, ``/ES`` futures, plain roots otherwise.
+
+    Schwab lists indices and futures under their primary symbols, so there is no
+    deviation table; unknown roots pass through with the type decoration.
+    """
+    kind = sec_type.lower()
+    if kind == "index":
+        return f"${root}"
+    if kind == "future":
+        return f"/{root}"
+    return root
+
 
 def _option_iv_fraction(value: Any) -> float | None:
     """Schwab option IV is percent; retain contract precision when converting."""
@@ -84,13 +118,21 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     """Schwab Individual Trader API provider.
 
     Supports:
-    - get_last_price: delayed quote via get_quotes()
-    - get_historical_prices: OHLCV bars (1m–1w) via price history endpoints
+    - get_last_price: delayed quote via get_quotes() for stocks, ETFs, indices
+      (``$SPX``) and futures (``/ES``)
+    - get_historical_prices: OHLCV bars (1m–1w) via price history endpoints for
+      stocks, ETFs and indices; Schwab provides no futures price history
+    - get_option_chain: stock, ETF and index (``$SPX``) underlyings
 
     Rate limiting: sliding-window deque, SCHWAB_RATE_LIMIT_PER_SEC (default 5).
     Timeout: SCHWAB_TIMEOUT_SECONDS applied via asyncio.wait_for (default 30s).
-    Token rotation: every 7 days; 401/403 clears the cached client automatically.
+    Token rotation: every 7 days; 401/403 clears the cached client automatically,
+    except a 403 whose body names a missing entitlement (``PROVIDER_NOT_ENTITLED``).
     """
+
+    price_sec_types = frozenset({"stock", "etf", "index", "future"})
+    price_history_sec_types = frozenset({"stock", "etf", "index"})
+    option_underlying_sec_types = frozenset({"stock", "etf", "index"})
 
     _INTERVAL_METHODS: dict[str, str] = {
         "1m": "get_price_history_every_minute",
@@ -402,7 +444,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             )
         return now - delta
 
-    def _parse_ohlcv(self, data: dict[str, Any], symbol: str) -> list[PriceBar]:
+    def _parse_ohlcv(
+        self, data: dict[str, Any], symbol: str, source_instrument: str | None = None
+    ) -> list[PriceBar]:
         candles = data.get("candles", []) if isinstance(data, dict) else []
         if not isinstance(candles, list):
             raise DataValidationError(
@@ -429,6 +473,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                         close=Decimal(str(candle["close"])),
                         volume=int(candle.get("volume", 0)),
                         provider="schwab",
+                        source_instrument=source_instrument,
                     )
                 )
             except (KeyError, ValueError, TypeError) as exc:
@@ -439,8 +484,28 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
         return bars
 
-    def _parse_quote(self, symbol: str, data: dict[str, Any]) -> PriceQuote:
-        entry = data.get(symbol) or data.get(symbol.upper())
+    def _parse_quote(
+        self, symbol: str, data: dict[str, Any], native: str | None = None
+    ) -> PriceQuote:
+        key = native or symbol
+        entry = data.get(key) or data.get(key.upper())
+        if not entry and key.startswith("/"):
+            # A root quote (/ES) is keyed by its active contract (/ESZ26).
+            # Match provider metadata, never a prefix or the first returned item.
+            matches = []
+            for contract_key, candidate in data.items():
+                if not isinstance(candidate, dict):
+                    continue
+                reference = candidate.get("reference") or {}
+                if (
+                    candidate.get("assetMainType") == "FUTURE"
+                    and isinstance(reference, dict)
+                    and reference.get("product") == key
+                    and reference.get("futureIsActive") is True
+                ):
+                    matches.append((contract_key, candidate))
+            if len(matches) == 1:
+                native, entry = matches[0]
         if not entry:
             raise DataNotFoundError("Symbol", symbol)
 
@@ -464,6 +529,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             volume=int(quote["totalVolume"])
             if quote.get("totalVolume") is not None
             else None,
+            source_instrument=native if native and native != symbol else None,
         )
 
     def _parse_option_chain(
@@ -563,10 +629,30 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         self._client = None
         return was_initialized
 
+    @staticmethod
+    def _entitlement_error(
+        response: Any, root: str, sec_type: str, instrument: str
+    ) -> ProviderNotEntitledError | None:
+        """A 403 whose body names a missing entitlement, never a token failure."""
+        if getattr(response, "status_code", None) != _HTTP_FORBIDDEN:
+            return None
+        body = getattr(response, "text", None)
+        if not _is_entitlement_body(body if isinstance(body, str) else None):
+            return None
+        return not_entitled(
+            "schwab", root, sec_type, instrument=instrument, message=body
+        )
+
     async def _handle_error_status(
-        self, status_code: int, symbol: str, context: str
+        self,
+        status_code: int,
+        symbol: str,
+        context: str,
+        entitlement: ProviderNotEntitledError | None = None,
     ) -> None:
         """Map Schwab HTTP error codes to appropriate AppError types."""
+        if entitlement is not None:
+            raise entitlement
         if status_code == _HTTP_RATE_LIMITED:
             raise ProviderTimeoutError("schwab", details={"status_code": status_code})
         if status_code in (_HTTP_UNAUTHORIZED, _HTTP_FORBIDDEN):
@@ -633,8 +719,14 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             logger.warning("Failed to send Schwab token-expiry webhook", exc_info=True)
 
     def _map_schwab_option_http_error(
-        self, status_code: int, symbol: str, context: str
+        self,
+        status_code: int,
+        symbol: str,
+        context: str,
+        entitlement: ProviderNotEntitledError | None = None,
     ) -> None:
+        if entitlement is not None:
+            raise entitlement
         if status_code == _HTTP_UNAUTHORIZED:
             raise ProviderConnectionError(
                 f"Schwab {context} request unauthorized for {symbol}.",
@@ -751,6 +843,8 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         extended_hours: bool = False,
         sec_type: str = "stock",
     ) -> list[PriceBar]:
+        native = _native_symbol(symbol, sec_type)
+        source_instrument = native if native != symbol else None
         await self._check_rate_limit()
         client = await self._get_client()
 
@@ -776,7 +870,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         try:
             response = await asyncio.wait_for(
                 method(
-                    symbol=symbol,
+                    symbol=native,
                     start_datetime=start,
                     end_datetime=end,
                     need_extended_hours_data=extended_hours,
@@ -794,10 +888,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
         if response.status_code != _HTTP_OK:
             await self._handle_error_status(
-                response.status_code, symbol, "historical price"
+                response.status_code,
+                symbol,
+                "historical price",
+                self._entitlement_error(response, symbol, sec_type, native),
             )
 
-        bars = self._parse_ohlcv(response.json(), symbol)
+        bars = self._parse_ohlcv(response.json(), symbol, source_instrument)
         if not bars:
             raise DataNotFoundError("Historical data", symbol)
 
@@ -809,12 +906,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         market_data_type: int | None = None,
         sec_type: str = "stock",
     ) -> PriceQuote:
+        native = _native_symbol(symbol, sec_type)
         await self._check_rate_limit()
         client = await self._get_client()
 
         try:
             response = await asyncio.wait_for(
-                client.get_quotes([symbol]),
+                client.get_quotes([native]),
                 timeout=self.timeout_seconds,
             )
         except TimeoutError:
@@ -827,9 +925,14 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
             )
 
         if response.status_code != _HTTP_OK:
-            await self._handle_error_status(response.status_code, symbol, "quote")
+            await self._handle_error_status(
+                response.status_code,
+                symbol,
+                "quote",
+                self._entitlement_error(response, symbol, sec_type, native),
+            )
 
-        return self._parse_quote(symbol, response.json())
+        return self._parse_quote(symbol, response.json(), native)
 
     async def get_option_chain(
         self,
@@ -839,11 +942,13 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
+        sec_type: str = "stock",
     ) -> OptionChain:
         del (
             market_data_type
         )  # Schwab options endpoint does not expose data-type selection.
 
+        native = _native_symbol(symbol, sec_type)
         client = await self._get_client()
 
         contract_type: Any = {None: "ALL", "call": "CALL", "put": "PUT"}[right]
@@ -863,7 +968,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         try:
             response = await asyncio.wait_for(
                 client.get_option_chain(
-                    symbol,
+                    native,
                     contract_type=contract_type,
                     from_date=expiry,
                     to_date=expiry,
@@ -881,7 +986,10 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
 
         if response.status_code != _HTTP_OK:
             self._map_schwab_option_http_error(
-                response.status_code, symbol, "option chain"
+                response.status_code,
+                symbol,
+                "option chain",
+                self._entitlement_error(response, symbol, sec_type, native),
             )
 
         options = self._parse_option_chain(
@@ -898,10 +1006,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         symbol: str,
         option_id: str,
         market_data_type: int | None = None,
+        sec_type: str = "stock",
     ) -> OptionQuote:
-        del (
-            market_data_type
-        )  # Schwab options endpoint does not expose data-type selection.
+        del market_data_type  # Schwab options endpoint does not expose data-type selection.
 
         client = await self._get_client()
         try:
@@ -947,6 +1054,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
                 min_strike=parsed_strike,
                 max_strike=parsed_strike,
                 right=parsed_right,
+                sec_type=sec_type,
             )
             matches = [
                 opt

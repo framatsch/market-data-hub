@@ -15,19 +15,23 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date, timedelta
-from typing import Any
+from typing import Annotated, Any
+from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.cache import cache
 from app.config import settings
-from app.dependencies import CompanyServiceDep, NewsServiceDep
+from app.dependencies import CompanyServiceDep, NewsServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.news import NewsMetadata, NewsResponse
 from app.utils.csv_export import to_csv
+from app.utils.symbols import COMPANY_TYPES, ParsedSymbol
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
+
+CompanySymbol = Annotated[ParsedSymbol, Depends(symbol_param(COMPANY_TYPES))]
 
 
 @router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
@@ -44,10 +48,9 @@ async def search_companies(
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
 @cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
-    symbol: str, service: CompanyServiceDep, provider: str | None = None
+    symbol: CompanySymbol, service: CompanyServiceDep, provider: str | None = None
 ) -> Any:
-    """Get company profile information."""
-    symbol = symbol.upper()
+    """Get company profile information (stocks and ETFs only; others are 422)."""
     provider = provider.lower() if provider else None
     profile = await service.get_company_profile(symbol, provider)
     return ResponseEnvelope(data=profile)
@@ -56,7 +59,7 @@ async def get_company_profile(
 @router.get("/{symbol}/news", response_model=NewsResponse)
 @cache(expire=settings.CACHE_TTL_COMPANY_NEWS_SECONDS, key="companies:news")
 async def get_company_news(
-    symbol: str,
+    symbol: CompanySymbol,
     service: NewsServiceDep,
     provider: str | None = Query(
         None, description="News provider (finnhub, ibkr, mock)"
@@ -92,7 +95,6 @@ async def get_company_news(
     - Pagination: `?limit=50&offset=50`
     - IBKR provider: `?provider=ibkr`
     """
-    symbol = symbol.upper()
     provider = provider.lower() if provider else None
     response_provider = provider or service.registry.default_news_provider or "none"
 
@@ -128,11 +130,12 @@ async def get_company_news(
 
     # 5. CSV export if requested
     if format.lower() == "csv":
-        content_type, csv_bytes = to_csv(articles, filename=f"{symbol}_news.csv")
+        filename = f"{url_quote(symbol.canonical, safe='')}_news.csv"
+        content_type, csv_bytes = to_csv(articles, filename=filename)
         return Response(
             csv_bytes,
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={symbol}_news.csv"},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     # 6. Return JSON response

@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, Query
 
 from app.providers.registry import get_provider as _get_provider
 from app.services.company_service import CompanyService
@@ -25,6 +26,7 @@ from app.services.news_service import NewsService, news_service
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
 from app.services.volatility_service import VolatilityService
+from app.utils.symbols import ParsedSymbol, SecType, parse_symbol
 
 
 @lru_cache
@@ -57,6 +59,24 @@ CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 NewsServiceDep = Annotated[NewsService, Depends(get_news_service)]
 VolatilityServiceDep = Annotated[VolatilityService, Depends(get_volatility_service)]
+
+
+def symbol_param(allowed: frozenset[SecType]) -> Callable[..., ParsedSymbol]:
+    """Dependency factory: resolve path `symbol` + query `sec_type` centrally."""
+
+    def resolve(
+        symbol: str,
+        sec_type: str | None = Query(
+            None,
+            description=(
+                "Optional instrument type (case-insensitive): stock, etf, index, "
+                "future or option. Prefer the symbol prefix: F:ES, I:SPX, ^SPX."
+            ),
+        ),
+    ) -> ParsedSymbol:
+        return parse_symbol(symbol, sec_type, allowed=allowed)
+
+    return resolve
 
 
 def get_provider(provider_type: str, name: str | None = None) -> Any:

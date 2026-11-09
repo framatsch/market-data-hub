@@ -449,6 +449,39 @@ def _extract_price(self, response, ticker: str) -> Optional[Decimal]:
       price = response.data.df['CLOSE'].iloc[0]
   ```
 
+#### Symbol namespaces (all symbol-taking interfaces)
+
+- Grammar `[<NS>:]<ROOT>`: bare = stock/ETF, `I:`/`^` = index, `F:`/`/` = future,
+  `O:` = option id. A bare `SPX` is a stock, never an index. `.SPX`/`$SPX` input is
+  rejected (422) — native forms only exist inside providers.
+- `app/utils/symbols.py` is the **only** place that parses: `parse_symbol(raw,
+  sec_type, allowed=...)` → `ParsedSymbol(root, sec_type, canonical)`. REST uses
+  `symbol_param(TYPES)` dependencies, MCP handlers call `parse_symbol`, cache keys
+  take the `ParsedSymbol`. Never add inline `.upper()`/`.lstrip("^.")`.
+- Services take `ParsedSymbol`, pass bare `root` + `sec_type` to providers, and
+  overwrite `symbol`/`underlying_symbol` with `canonical`. Provider signatures in
+  `base.py` stay unchanged; providers receive `sec_type` as the lower-case value
+  (`stock|etf|index|future`), never `STK`.
+- Provider translation lives in the provider (`_contract_for`, `_native_instrument`,
+  `_native_symbol`, polygon `_format_ticker`) with a per-provider root-deviation
+  table; unknown roots pass through with the type decoration. Prices set
+  `source_instrument` to the native identifier actually queried.
+- Two gates, never mixed: **implementation** (`price_sec_types`,
+  `price_history_sec_types`, `option_underlying_sec_types`,
+  `volatility_*_sec_types` — static code facts → 501 `CAPABILITY_NOT_SUPPORTED`
+  before the call) and **entitlement** (runtime provider response → 403
+  `PROVIDER_NOT_ENTITLED` via `not_entitled(...)`/`ProviderNotEntitledError`).
+  Never hard-code subscriptions. Declare a type in a support set only after the
+  native notation is verified against provider docs or a live response.
+- Entitlement detection: Polygon 403/`NOT_AUTHORIZED` (after the previous-close
+  fallback), LSEG permission tokens (`_is_permission_error`), IBKR 354/10089/10091
+  (after `IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR`), Schwab/Prixe 403 only when the
+  body names plan/entitlement and not a token/key. 401 and unclear 403 stay
+  `PROVIDER_NOT_AVAILABLE` (Schwab keeps its client reset). `ProviderNotEntitledError`
+  subclasses `ProviderError`, so provider `except Exception` blocks must re-raise it.
+- Cache keys use the percent-encoded canonical symbol (`F%3AES`); `_key_parts`
+  splits on `:`, so a raw colon in the symbol segment would corrupt TTL lookup.
+
 #### Underlying implied volatility (LSEG and IBKR)
 
 - `BaseVolatilityProvider` is independent of option-chain capability. `PriceQuote`
@@ -476,7 +509,7 @@ def _extract_price(self, response, ticker: str) -> Optional[Decimal]:
   Do not add a second provider cache. IV is mostly end-of-day, hourly for indices;
   use `TRADE_DATE` as `as_of`, not the request timestamp.
 - LSEG resolution is pure string building: stock/etf/index → `{SYM}ATMIV.U`,
-  future → `{ROOT}ATMIV`; uppercase and strip leading `^`/`.`. `.U` means OPRA:
+  future → `{ROOT}ATMIV`; the root arrives already parsed (no `^`/`.` stripping). `.U` means OPRA:
   `ESATMIV.U` is Eversource and `CLATMIV.U` is Colgate. Validate `GN_TXT16_5`
   (`OPRA` vs `COMFUT`/`CMEG`) for snapshot **and history**; return `UNDERLYING`,
   `INST_DESC` and stripped market metadata. Explicit `ric` is verbatim and skips
@@ -493,7 +526,7 @@ def _extract_price(self, response, ticker: str) -> Optional[Decimal]:
   `reqHistoricalDataAsync` uses daily `OPTION_IMPLIED_VOLATILITY`, RTH only;
   its own timer swallows timeouts, so the IV path uses an outer timeout.
 - Error ordering matters: LSEG `UserNotPermission` messages also contain
-  "No data to return". Detect entitlement first → 503 `not_entitled`; empty IV →
+  "No data to return". Detect entitlement first → 403 `PROVIDER_NOT_ENTITLED`; empty IV →
   404 `no_iv_data`/`no_iv_history`; market/input mismatch → 422; support-set
   rejection by `VolatilityService` before any upstream call → 501
   `CAPABILITY_NOT_SUPPORTED`. Admin `volatility_support` exposes the three sets.

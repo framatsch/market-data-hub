@@ -35,6 +35,7 @@ from app.utils.errors import (
     DataNotFoundError,
     DataValidationError,
 )
+from app.utils.symbols import ParsedSymbol
 
 
 class _IVStatistics(TypedDict):
@@ -76,8 +77,6 @@ class VolatilityService:
         sec_type: VolatilitySecType,
         tenor_days: int | None = None,
     ) -> None:
-        if sec_type not in {"stock", "etf", "index", "future"}:
-            raise DataValidationError(f"Invalid volatility security type: {sec_type}")
         if tenor_days is not None and tenor_days not in (30, 60, 90):
             raise DataValidationError("IV tenor must be 30, 60 or 90 days")
         supported = (
@@ -104,49 +103,53 @@ class VolatilityService:
 
     async def get_implied_volatility(
         self,
-        symbol: str,
-        sec_type: VolatilitySecType = "stock",
+        symbol: ParsedSymbol,
         ric: str | None = None,
         provider_name: str | None = None,
     ) -> VolatilitySnapshot:
+        sec_type = cast(VolatilitySecType, symbol.sec_type)
         async with self.registry.use_volatility_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             self._check_support(provider, "snapshot", sec_type)
-            return await provider.get_implied_volatility(symbol.upper(), sec_type, ric)
+            snapshot = await provider.get_implied_volatility(
+                symbol.root, sec_type, ric
+            )
+            return snapshot.model_copy(update={"symbol": symbol.canonical})
 
     async def get_implied_volatility_history(
         self,
-        symbol: str,
+        symbol: ParsedSymbol,
         start: date,
         end: date,
         tenor_days: int = 30,
-        sec_type: VolatilitySecType = "stock",
         ric: str | None = None,
         provider_name: str | None = None,
     ) -> VolatilityHistory:
         if start > end:
             raise DataValidationError("IV history start must not be after end")
+        sec_type = cast(VolatilitySecType, symbol.sec_type)
         async with self.registry.use_volatility_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             self._check_support(provider, "history", sec_type, tenor_days)
-            return await provider.get_implied_volatility_history(
-                symbol.upper(),
+            history = await provider.get_implied_volatility_history(
+                symbol.root,
                 start,
                 end,
                 cast(VolatilityTenorDays, tenor_days),
                 sec_type,
                 ric,
             )
+            return history.model_copy(update={"symbol": symbol.canonical})
 
     async def get_implied_volatility_stats(
         self,
-        symbol: str,
+        symbol: ParsedSymbol,
         window: int = 252,
         tenor_days: int = 30,
-        sec_type: VolatilitySecType = "stock",
         ric: str | None = None,
         provider_name: str | None = None,
     ) -> VolatilityStats:
+        sec_type = cast(VolatilitySecType, symbol.sec_type)
         if (
             not isinstance(window, int)
             or isinstance(window, bool)
@@ -161,7 +164,7 @@ class VolatilityService:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             self._check_support(provider, "stats", sec_type, tenor_days)
             history = await provider.get_implied_volatility_history(
-                symbol.upper(),
+                symbol.root,
                 start,
                 end,
                 cast(VolatilityTenorDays, tenor_days),
@@ -179,11 +182,11 @@ class VolatilityService:
         if len(points) < 20:
             raise DataNotFoundError(
                 "ImpliedVolatility",
-                symbol.upper(),
+                symbol.canonical,
                 details={"reason": "insufficient_history", "points": len(points)},
             )
         return VolatilityStats(
-            symbol=history.symbol,
+            symbol=symbol.canonical,
             sec_type=history.sec_type,
             source_instrument=history.source_instrument,
             tenor_days=history.tenor_days,

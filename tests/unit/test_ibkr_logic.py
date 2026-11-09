@@ -47,11 +47,11 @@ def test_calculate_duration(ibkr_provider):
 
 def test_create_contract(ibkr_provider):
     with patch("app.providers.ibkr.Stock") as mock_stock:
-        ibkr_provider._create_contract("AAPL")
+        ibkr_provider._contract_for("AAPL")
         mock_stock.assert_called_with("AAPL", "SMART", "USD")
 
     with patch("app.providers.ibkr.Index") as mock_index:
-        ibkr_provider._create_contract("SPX", sec_type="index")
+        ibkr_provider._contract_for("SPX", sec_type="index")
         mock_index.assert_called_with("SPX", "CBOE")
 
 def test_get_index_exchange(ibkr_provider):

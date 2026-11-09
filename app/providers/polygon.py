@@ -33,13 +33,54 @@ from app.providers.base import (
     BasePriceProvider,
 )
 from app.providers.credentials import get_provider_credential_sync
-from app.utils.errors import DataNotFoundError, ProviderError
+from app.utils.errors import (
+    DataNotFoundError,
+    ProviderError,
+    ProviderNotEntitledError,
+    not_entitled,
+)
 
 logger = logging.getLogger(__name__)
 
 
+def _is_not_entitled(resp: Any) -> bool:
+    """HTTP 403 or a ``NOT_AUTHORIZED`` body: the plan does not cover the request.
+
+    Invalid keys answer 401 and stay ordinary provider errors.
+    """
+    if resp.status_code == 403:
+        return True
+    try:
+        body = resp.json()
+    except Exception:
+        return False
+    return isinstance(body, dict) and body.get("status") == "NOT_AUTHORIZED"
+
+
+def _message(resp: Any) -> str | None:
+    try:
+        body = resp.json()
+        if isinstance(body, dict) and isinstance(body.get("message"), str):
+            return body["message"]
+    except Exception:
+        pass
+    text = getattr(resp, "text", None)
+    return text if isinstance(text, str) else None
+
+
 class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvider):
-    """Polygon.io provider for US Stocks and Options."""
+    """Polygon.io provider for US stocks, ETFs, indices and options.
+
+    Indices use the ``I:`` ticker (snapshot for the last price, aggregates for
+    history, and as option-chain underlying). Futures are a separate Polygon
+    product and are not declared. Missing plan access (HTTP 403 or
+    ``NOT_AUTHORIZED``) raises ``ProviderNotEntitledError`` once the previous-close
+    fallback has been tried.
+    """
+
+    price_sec_types = frozenset({"stock", "etf", "index"})
+    price_history_sec_types = frozenset({"stock", "etf", "index"})
+    option_underlying_sec_types = frozenset({"stock", "etf", "index"})
 
     def __init__(self) -> None:
         self.api_key: str | None = None
@@ -111,11 +152,52 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     def _format_ticker(self, symbol: str, sec_type: str) -> str:
         """Format symbol for Polygon API."""
         symbol = symbol.upper()
-        if sec_type == "option":
+        kind = sec_type.lower()
+        if kind == "option":
             # Polygon options use O: prefix
             if not symbol.startswith("O:"):
                 return f"O:{symbol}"
+        if kind == "index" and not symbol.startswith("I:"):
+            return f"I:{symbol}"
         return symbol
+
+    @staticmethod
+    def _source_instrument(symbol: str, ticker: str) -> str | None:
+        return ticker if ticker != symbol.upper() else None
+
+    async def _get_index_snapshot(
+        self, symbol: str, ticker: str, sec_type: str
+    ) -> PriceQuote | None:
+        """Index value from the indices snapshot, or None when the plan lacks it."""
+        resp = await self._client.get(
+            "/v3/snapshot/indices",
+            params={"apiKey": await self._get_api_key(), "ticker.any_of": ticker},
+        )
+        if _is_not_entitled(resp):
+            return None
+        resp.raise_for_status()
+        results = resp.json().get("results") or []
+        entry = results[0] if results else None
+        if not entry:
+            raise DataNotFoundError("Ticker", ticker)
+        if entry.get("error"):
+            return None
+        value = entry.get("value")
+        if value is None:
+            value = (entry.get("session") or {}).get("close")
+        if value is None:
+            raise DataNotFoundError("PriceData", ticker)
+        updated = entry.get("last_updated")
+        return PriceQuote(
+            symbol=symbol.upper(),
+            price=Decimal(str(value)),
+            currency="USD",
+            timestamp=datetime.fromtimestamp(updated / 1e9, tz=UTC)
+            if updated
+            else datetime.now(UTC),
+            provider="polygon",
+            source_instrument=ticker,
+        )
 
     async def get_last_price(
         self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock"
@@ -127,6 +209,16 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         params = {"apiKey": api_key}
 
         try:
+            if sec_type.lower() == "index":
+                # NBBO is an equities endpoint; indices have a value snapshot.
+                quote = await self._get_index_snapshot(symbol, ticker, sec_type)
+                if quote is not None:
+                    return quote
+                logger.info(
+                    f"Polygon index snapshot not covered for {ticker}. Attempting fallback to Previous Close..."
+                )
+                return await self._get_last_price_fallback(symbol, ticker, sec_type)
+
             resp = await self._client.get(url, params=params)
 
             # Handle 403 Forbidden - likely Free Tier trying to access real-time NBBO
@@ -134,7 +226,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 logger.info(
                     f"Polygon NBBO restricted (403) for {ticker}. Attempting fallback to Previous Close..."
                 )
-                return await self._get_last_price_fallback(symbol, ticker)
+                return await self._get_last_price_fallback(symbol, ticker, sec_type)
 
             if resp.status_code == 404:
                 raise DataNotFoundError("Ticker", ticker)
@@ -165,13 +257,15 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 timestamp=timestamp,
                 provider="polygon",
             )
-        except DataNotFoundError:
+        except (DataNotFoundError, ProviderNotEntitledError):
             raise
         except Exception as e:
             logger.error(f"Polygon API error: {e}", exc_info=True)
             raise ProviderError(f"Polygon API error: {e!s}")
 
-    async def _get_last_price_fallback(self, symbol: str, ticker: str) -> PriceQuote:
+    async def _get_last_price_fallback(
+        self, symbol: str, ticker: str, sec_type: str = "stock"
+    ) -> PriceQuote:
         """Fallback for free tier users using the Previous Close endpoint."""
         api_key = await self._get_api_key()
         url = f"/v2/aggs/ticker/{ticker}/prev"
@@ -179,6 +273,14 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
         try:
             resp = await self._client.get(url, params=params)
+            if _is_not_entitled(resp):
+                raise not_entitled(
+                    "polygon",
+                    symbol,
+                    sec_type,
+                    instrument=ticker,
+                    message=_message(resp),
+                )
             resp.raise_for_status()
 
             results = resp.json().get("results", [])
@@ -194,8 +296,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 ask=None,
                 timestamp=datetime.fromtimestamp(data["t"] / 1000),
                 provider="polygon (delayed/prev)",
+                source_instrument=self._source_instrument(symbol, ticker),
             )
-        except DataNotFoundError:
+        except (DataNotFoundError, ProviderNotEntitledError):
             raise
         except Exception as e:
             logger.error(f"Polygon fallback failed: {e}")
@@ -208,7 +311,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
         start: datetime,
         end: datetime,
         extended_hours: bool = False,
-        sec_type: str = "STK",
+        sec_type: str = "stock",
     ) -> list[PriceBar]:
         ticker = self._format_ticker(symbol, sec_type)
         api_key = await self._get_api_key()
@@ -240,6 +343,14 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
         try:
             resp = await self._client.get(url, params=params)
+            if _is_not_entitled(resp):
+                raise not_entitled(
+                    "polygon",
+                    symbol,
+                    sec_type,
+                    instrument=ticker,
+                    message=_message(resp),
+                )
             resp.raise_for_status()
 
             results = resp.json().get("results", [])
@@ -259,12 +370,15 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                         close=Decimal(str(r["c"])),
                         volume=int(r["v"]),
                         provider="polygon",
+                        source_instrument=self._source_instrument(symbol, ticker),
                     )
                 )
             if not extended_hours and interval in ["1m", "5m", "1h"]:
                 bars = self._filter_rth(bars)
 
             return bars
+        except ProviderNotEntitledError:
+            raise
         except Exception as e:
             logger.error(f"Polygon Aggs error: {e}")
             raise ProviderError(f"Polygon Aggs error: {e!s}")
@@ -304,7 +418,9 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     ) -> OptionChain:
         """Fetch option chain using Polygon Snapshots."""
         api_key = await self._get_api_key()
-        url = f"/v3/snapshot/options/{symbol.upper()}"
+        sec_type = str(kwargs.get("sec_type", "stock"))
+        underlying = self._format_ticker(symbol, sec_type)
+        url = f"/v3/snapshot/options/{underlying}"
         params: dict[str, str | int] = {
             "apiKey": api_key,
             "expiration_date": expiry.isoformat(),
@@ -313,6 +429,14 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
 
         try:
             resp = await self._client.get(url, params=params)
+            if _is_not_entitled(resp):
+                raise not_entitled(
+                    "polygon",
+                    symbol,
+                    sec_type,
+                    instrument=underlying,
+                    message=_message(resp),
+                )
             resp.raise_for_status()
 
             results = resp.json().get("results", [])
@@ -350,20 +474,35 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 options=quotes,
                 provider="polygon",
             )
+        except ProviderNotEntitledError:
+            raise
         except Exception as e:
             logger.error(f"Polygon Snapshot error: {e}")
             raise ProviderError(f"Polygon Snapshot error: {e!s}")
 
     async def get_option_quote(
-        self, symbol: str, option_id: str, market_data_type: int | None = None
+        self,
+        symbol: str,
+        option_id: str,
+        market_data_type: int | None = None,
+        sec_type: str = "stock",
     ) -> OptionQuote:
         """Fetch quote for a specific option contract."""
         api_key = await self._get_api_key()
-        url = f"/v3/snapshot/options/{symbol.upper()}/{self._format_ticker(option_id, 'option')}"
+        underlying = self._format_ticker(symbol, sec_type)
+        url = f"/v3/snapshot/options/{underlying}/{self._format_ticker(option_id, 'option')}"
         params = {"apiKey": api_key}
 
         try:
             resp = await self._client.get(url, params=params)
+            if _is_not_entitled(resp):
+                raise not_entitled(
+                    "polygon",
+                    symbol,
+                    sec_type,
+                    instrument=underlying,
+                    message=_message(resp),
+                )
             resp.raise_for_status()
             data = resp.json().get("results", {})
 
@@ -390,6 +529,8 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
                 implied_volatility=float(data.get("implied_volatility", 0) or 0),
                 provider="polygon",
             )
+        except ProviderNotEntitledError:
+            raise
         except Exception as e:
             logger.error(f"Polygon Snapshot error for specific quote: {e}")
             raise ProviderError(f"Polygon Snapshot error: {e!s}")

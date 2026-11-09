@@ -251,6 +251,7 @@ export default function ProvidersPage() {
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
                           <Box sx={{ p: 3, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
                             <ProviderDetailsPanel
+                              provider={provider}
                               providerName={provider.name}
                               enabled={provider.enabled}
                               hideConnectionJson={provider.name === 'ibkr'}

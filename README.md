@@ -19,14 +19,45 @@ MCP is mounted in the same FastAPI app (same port)
 
 | Data | Primary | Fallback | Notes |
 |---|---|---|---|
-| Stock prices | IBKR | LSEG, Polygon, Prixe | IBKR honors `market_data_type` (1 Live, 2 Frozen, 3 Delayed; default 3). Missing Live entitlement → HTTP 503 `PROVIDER_NOT_AVAILABLE`. |
-| Historical OHLCV | IBKR | LSEG, Polygon, Schwab | Coverage depends on symbol/entitlement. |
+| Prices (stock, ETF, index, future) | IBKR | LSEG, Polygon, Prixe, Schwab | IBKR honors `market_data_type` (1 Live, 2 Frozen, 3 Delayed; default 3). Missing subscription → HTTP 403 `PROVIDER_NOT_ENTITLED`. See [Symbol notation](#symbol-notation). |
+| Historical OHLCV | IBKR | LSEG, Polygon, Schwab | Coverage depends on symbol/entitlement. Schwab has no futures history. |
 | Options (chain, quote, Greeks) | IBKR | Schwab | Not available via LSEG (missing pricing scope in our subscription). |
 | Company data | LSEG | Finnhub | |
 | News | Finnhub | IBKR | LSEG news is not exposed (`provider=lseg` → `INVALID_PROVIDER`). Mock provider for development. |
 | Underlying IV | LSEG, IBKR | – | See [Implied Volatility](#underlying-implied-volatility). Polygon/Schwab are not underlying-IV providers. |
 
 Historical REST/MCP dates are normalized to UTC: naive means UTC, omitted `end` = now, omitted `start` = `end` − 30 days.
+
+## Symbol notation
+
+Every REST route, MCP tool and WebSocket subscription takes the same symbol notation `[<NS>:]<ROOT>` (case-insensitive, whitespace ignored):
+
+| Input | Meaning | Canonical |
+|---|---|---|
+| `AAPL`, `SPY` | Stock or ETF (bare symbol) | `AAPL`, `SPY` |
+| `I:SPX`, `^SPX` | Index | `I:SPX` |
+| `F:ES`, `/ES` | Future (front month) | `F:ES` |
+| `O:AAPL250117C00150000` | Option contract (OCC symbol, option ids only) | – |
+
+- A bare symbol is always a stock/ETF: bare `SPX` or `NDX` is **not** an index. Use `I:SPX`, `^SPX` or `sec_type=index`.
+- `/ES` works wherever the symbol is not a URL path segment (MCP arguments, WebSocket, query parameters). In REST paths use `F:ES`; `^SPX` may need `%5E` in strict clients.
+- `sec_type` (`stock|etf|index|future|option`, case-insensitive, legacy `STK`) stays valid. It must agree with a prefix (`F:ES?sec_type=stock` → 422); `ES?sec_type=future` equals `F:ES`; `sec_type=etf` only combines with bare symbols.
+- Provider-native forms (`.SPX`, `$SPX`) are rejected with 422 and a suggestion (`I:SPX`). Native identifiers stay reachable through override parameters such as `ric`.
+- Responses echo the canonical symbol (`symbol`, `underlying_symbol`). `source_instrument` on prices shows the native instrument actually queried (`ESZ6`, `ESc1`, `.SPX`, `$SPX`).
+- Futures mean the front month: last price uses the nearest contract, history the provider's continuous series (IBKR `ContFuture`, LSEG `c1`), without back-adjustment.
+
+Supported types per endpoint: prices and volatility `stock|etf|index|future`; option chain/quote underlying `stock|etf|index`; company profile/news `stock|etf`; WebSocket `stock|etf|index|future`. Anything else → 422 before a provider is called.
+
+| Type | IBKR | LSEG | Schwab | Polygon | Prixe |
+|---|---|---|---|---|---|
+| stock/ETF | `Stock(SMART)` | equity RIC search | `AAPL` | `AAPL` | `AAPL` |
+| index | `Index` (`DJI`→`INDU`) | `.SPX` | `$SPX` | `I:SPX` | – |
+| future | front-month `Future` / `ContFuture` | `ESc1` (`ZN`→`TY`, `ZB`→`US`, `ZC`→`C`, `ZW`→`W`, `ZS`→`S`) | `/ES` (quotes only) | – | – |
+| index option underlying | – | – | `$SPX` | `I:SPX` | – |
+
+Error semantics: **501** `CAPABILITY_NOT_SUPPORTED` means the hub has no mapping for this type at that provider (decided from code, before any call). **403** `PROVIDER_NOT_ENTITLED` means the provider denied access because your subscription does not cover the instrument (decided from the provider's response at request time, never cached; `details` carry `provider`, `symbol`, `instrument`, `provider_message`). 401/credential failures stay `PROVIDER_NOT_AVAILABLE`. Admin → provider details lists the declared support sets.
+
+**Breaking changes:** `symbol` in responses is canonical (`I:SPX`, `F:ES` instead of `SPX`, `ES`; stocks unchanged) · missing subscriptions answer 403 `PROVIDER_NOT_ENTITLED` instead of 503 · `.SPX`/`$SPX` input is rejected · index/future requests at providers without a mapping answer 501 instead of returning stock-like data · cache keys changed (old entries expire; optionally clear the cache).
 
 ## Quick Start
 
@@ -54,6 +85,8 @@ curl "http://localhost:8000/health"
 curl "http://localhost:8000/prices/IWM/last?provider=ibkr&market_data_type=3"
 curl "http://localhost:8000/options/IWM/chain?expiry=2026-01-13&min_strike=227&max_strike=277"
 curl "http://localhost:8000/companies/AAPL?provider=lseg"
+curl "http://localhost:8000/prices/I:SPX/last?provider=ibkr"
+curl "http://localhost:8000/prices/F:ES/history?provider=lseg&interval=1d"
 ```
 
 WebSocket: connect to `ws://localhost:8000/ws/prices` and send `{"type":"subscribe","symbols":["AAPL"],"provider":"ibkr"}`.
@@ -143,7 +176,7 @@ curl 'http://localhost:8000/volatility/AAPL/history?provider=lseg&tenor_days=30&
 - **IBKR** uses generic tick 106 (30-day model); futures use the nearest contract ≥7 days to last trade (`source_instrument`), and futures history is rejected. IBKR futures roots differ (ZC, ZW, ZN). `ric` is rejected.
 - For commodity exposure, ETF proxies (USO, UNG, GLD, SLV) are available but are not the futures' IV. Prefer `sec_type=index` (SPX/NDX) over ES/NQ for equity-index IV.
 
-Error codes: 400 not a volatility provider · 422 invalid input/market · 501 unsupported operation/tenor · 404 no data · 503 connectivity/entitlement/config (also when no default provider is set).
+Error codes: 400 not a volatility provider · 422 invalid input/market · 501 unsupported operation/tenor · 404 no data · 403 `PROVIDER_NOT_ENTITLED` (subscription does not cover the instrument) · 503 connectivity/config (also when no default provider is set).
 
 ## Redis Response Cache
 
@@ -164,7 +197,7 @@ Option chains, price history, company profile/search/news, market status and all
 | `REDIS_MAXMEMORY` | `256mb` | Compose Redis bound |
 
 - TTLs can be overridden at runtime in **Admin → Settings → Response Cache** (0–30 days; 0 disables). Use **Clear cache…** to invalidate (optionally by endpoint/provider); clear after corporate actions or provider/schema changes.
-- Key format: `mdh:{route_path}:{SYMBOL}:{sorted_query}`; the effective provider is part of the key. MCP entries add `channel=mcp`.
+- Key format: `mdh:{route_path}:{CANONICAL_SYMBOL}:{sorted_query}` with the canonical symbol percent-encoded (`F%3AES`), so `ES?sec_type=future`, `F:ES` and `/ES` share one entry; the effective provider is part of the key. MCP entries add `channel=mcp`.
 - Responses carry `X-FastAPI-Cache: HIT|MISS`, `ETag`, `Cache-Control`; `If-None-Match` returns 304.
 - Force live: `Cache-Control: no-cache` (refreshes entry) or `no-store` (bypass). MCP: `refresh: true`.
 - Compose persists Redis in `redis-data` — don't use `docker compose down -v` unless you also want to lose the keys database.
