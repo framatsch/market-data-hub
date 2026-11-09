@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from app.admin.crypto import CryptoService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,7 +101,15 @@ class KeyRepository:
             ).fetchone()
         if row is None:
             return None
-        return self._crypto.decrypt(row[0], row[1], row[2])
+        try:
+            return self._crypto.decrypt(row[0], row[1], row[2])
+        except ValueError:
+            logger.warning(
+                "Stored credential %s.%s could not be decrypted with current APP_ENCRYPTION_KEY; treating as unconfigured",
+                provider_name,
+                credential_name,
+            )
+            return None
 
     async def list_credentials(self) -> list[CredentialMetadata]:
         return await asyncio.to_thread(self._list_credentials_sync)
@@ -107,17 +118,28 @@ class KeyRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT provider_name, credential_name, updated_at
+                SELECT provider_name, credential_name, updated_at, ciphertext, iv, auth_tag
                 FROM api_credentials
                 ORDER BY provider_name, credential_name
                 """
             ).fetchall()
-        return [
-            CredentialMetadata(
-                provider_name=row[0],
-                credential_name=row[1],
-                status="configured",
-                updated_at=row[2],
+        credentials: list[CredentialMetadata] = []
+        for provider_name, credential_name, updated_at, ciphertext, iv, auth_tag in rows:
+            try:
+                self._crypto.decrypt(ciphertext, iv, auth_tag)
+            except ValueError:
+                logger.warning(
+                    "Stored credential %s.%s could not be decrypted with current APP_ENCRYPTION_KEY; excluding from configured credentials",
+                    provider_name,
+                    credential_name,
+                )
+                continue
+            credentials.append(
+                CredentialMetadata(
+                    provider_name=provider_name,
+                    credential_name=credential_name,
+                    status="configured",
+                    updated_at=updated_at,
+                )
             )
-            for row in rows
-        ]
+        return credentials

@@ -46,3 +46,23 @@ async def test_key_repository_lists_metadata_without_secret_material(repository)
     assert metadata[0].status == "configured"
     assert metadata[0].updated_at
     assert "plain-secret" not in repr(metadata)
+
+
+async def test_key_repository_handles_encryption_key_mismatch_gracefully(tmp_path) -> None:
+    db_path = str(tmp_path / "keys.db")
+    old_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+    new_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+    old_repo = KeyRepository(db_path, CryptoService(old_key))
+    await old_repo.save("schwab", "api_key", "old-api-key")
+
+    new_repo = KeyRepository(db_path, CryptoService(new_key))
+    assert await new_repo.get("schwab", "api_key") is None
+    assert await new_repo.list_credentials() == []
+
+    await new_repo.save("schwab", "api_key", "new-api-key")
+    assert await new_repo.get("schwab", "api_key") == "new-api-key"
+    metadata = await new_repo.list_credentials()
+    assert len(metadata) == 1
+    assert metadata[0].provider_name == "schwab"
+    assert metadata[0].credential_name == "api_key"
