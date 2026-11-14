@@ -54,9 +54,13 @@ def update_version(new_version: str) -> None:
     with open(pyproject_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
-    # Update frontend version
+    # Keep admin package metadata in sync (the About dialog reads /health at runtime)
     print("\n--- Updating Admin UI Version ---")
     subprocess.run(["npm", "version", new_version, "--no-git-tag-version", "--allow-same-version"], cwd="admin", check=True)
+
+    # uv.lock records the project's own version; refresh it so `uv sync --frozen` stays consistent
+    print("\n--- Updating uv.lock ---")
+    subprocess.run(["uv", "lock"], check=True)
 
 
 def update_changelog(new_version: str) -> None:
@@ -112,7 +116,7 @@ def main() -> None:
 
     # 4. Commit and Tag
     print("\n--- Creating Git Commit and Tag ---")
-    run_cmd(["git", "add", "pyproject.toml", "CHANGELOG.md", "admin/package.json", "admin/package-lock.json"])
+    run_cmd(["git", "add", "pyproject.toml", "uv.lock", "CHANGELOG.md", "admin/package.json", "admin/package-lock.json"])
     commit_msg = f"⚙️ config: bump version to {new_version}"
     run_cmd(["git", "commit", "-m", commit_msg])
     run_cmd(["git", "tag", "-a", f"v{new_version}", "-m", f"v{new_version}"])

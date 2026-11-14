@@ -44,6 +44,7 @@ class ResponseEnvelope(BaseModel, Generic[T]):
 class HealthResponse(BaseModel):
     status: str
     uptime_seconds: float
+    version: str
 
 
 class MarketStatus(BaseModel):

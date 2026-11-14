@@ -17,6 +17,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import APP_VERSION
 from app.main import app
 
 
@@ -28,6 +29,7 @@ def test_health_check(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "OK"
+    assert response.json()["version"] == APP_VERSION
 
 def test_list_providers(client):
     response = client.get("/providers")

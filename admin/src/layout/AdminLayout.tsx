@@ -18,7 +18,8 @@ import {
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import GitHubIcon from '@mui/icons-material/GitHub';
-import packageJson from '../../package.json';
+import { useQuery } from '@tanstack/react-query';
+import { fetcher } from '../lib/api';
 import Sidebar from './Sidebar';
 
 const drawerWidth = 240;
@@ -27,6 +28,11 @@ const logoUrl = '/admin/logo.svg';
 export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => fetcher<{ version?: string }>('/health'),
+    staleTime: Infinity,
+  });
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -170,7 +176,7 @@ export default function AdminLayout() {
               Market Data Hub Admin
             </Typography>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-              Version {packageJson.version}
+              Version {health?.version ?? '…'}
             </Typography>
             <Typography variant="body2" sx={{ mt: 2, mb: 3, px: 2 }}>
               FastAPI data service and administration panel for real-time and historical market data.

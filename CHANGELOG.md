@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin UI About dialog showed a stale version (`admin/package.json` was never bumped
+  for releases). It now reads the version from `GET /health`, which exposes the new
+  `version` field (backend `APP_VERSION`), so it always matches the running image.
+- `skills/bump_version.py` also refreshes `uv.lock`, and a unit test verifies that
+  `pyproject.toml`, `uv.lock` and the admin package files carry the same version.
+
 ## [1.3.1] - 2026-11-14
 
 ### Fixed

@@ -15,7 +15,15 @@ Bump the version in `pyproject.toml`, commit, tag, push — triggering the CI pi
 
 Single source of truth: `pyproject.toml` → `[project] version = "X.Y.Z"`
 
-No `package.json`, no frontend, no separate backend directory. One file only.
+The version must be identical in all of these files (enforced by `tests/unit/test_version_consistency.py`):
+
+- `pyproject.toml`
+- `uv.lock` (own `market-data-hub` entry — refresh with `uv lock`)
+- `admin/package.json` and `admin/package-lock.json` (use `npm version X.Y.Z --no-git-tag-version` in `admin/`)
+
+The Admin UI About dialog shows `version` from `GET /health`, which is `APP_VERSION` read from `pyproject.toml` at runtime — it does not read `admin/package.json`.
+
+Prefer `python skills/bump_version.py X.Y.Z`, which updates all of the files above, the changelog, commits, tags, pushes and creates the release.
 
 ## Workflow: Creating a Release
 
@@ -27,8 +35,9 @@ When the user asks to "create release version X.Y.Z":
    git describe --tags --abbrev=0
    ```
 
-2. **Edit pyproject.toml**
-   Update `version = "X.Y.Z"` under `[project]`.
+2. **Update every version file**
+   Edit `version = "X.Y.Z"` in `pyproject.toml`, run `uv lock`, and run
+   `npm version X.Y.Z --no-git-tag-version --allow-same-version` in `admin/`.
 
 3. **Lint + test before tagging**
    ```bash
@@ -39,7 +48,7 @@ When the user asks to "create release version X.Y.Z":
 
 4. **Commit the bump**
    ```bash
-   git add pyproject.toml
+   git add pyproject.toml uv.lock admin/package.json admin/package-lock.json CHANGELOG.md
    python skills/commit_helper.py --preview
    # Use: ⚙️ config: bump version to X.Y.Z
    git commit -m "⚙️ config: bump version to X.Y.Z"
@@ -68,7 +77,7 @@ When the user asks to "create release version X.Y.Z":
 ## Guardrails
 
 - Version must follow Semantic Versioning (`X.Y.Z`).
-- Only one file to update: `pyproject.toml`.
+- Update all version files together; the consistency test fails otherwise.
 - Never tag if lint or tests fail.
 - Never commit without explicit user approval.
 - GHCR push happens automatically via CI — do not push Docker images manually.

@@ -21,7 +21,7 @@ from fastapi import APIRouter, Query
 from starlette.responses import Response
 
 from app.cache import cache
-from app.config import settings
+from app.config import APP_VERSION, settings
 from app.dependencies import PriceServiceDep
 from app.models.common import HealthResponse, MarketStatus, ResponseEnvelope
 from app.observability.metrics import metrics_response
@@ -36,7 +36,7 @@ PROMETHEUS_TEXT_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 async def health_check() -> Any:
     """Returns service health status."""
     uptime = (datetime.now() - start_time).total_seconds()
-    return HealthResponse(status="OK", uptime_seconds=uptime)
+    return HealthResponse(status="OK", uptime_seconds=uptime, version=APP_VERSION)
 
 
 @router.get(
