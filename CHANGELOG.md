@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- IBKR connection handling: concurrent requests no longer open several sockets on one
+  client. Previously a race leaked a socket that kept the client id busy at the gateway
+  (error 326 `client id already in use`), so every later IBKR request failed with an
+  empty error until the pod was restarted. Connects are now serialized, failed attempts
+  close their socket, the IB error handler is registered once, the gateway startup sync
+  of positions/orders/executions is skipped (connect ~0.1 s instead of ~8 s), and
+  connection errors name the cause (e.g. client id conflict, `TimeoutError`).
+- `GET /providers` listed a hard-coded `available` set (Schwab missing, LSEG shown for
+  options, Finnhub shown for company data). It is now derived from the enabled providers
+  and the capabilities they implement.
 - Admin UI About dialog showed a stale version (`admin/package.json` was never bumped
   for releases). It now reads the version from `GET /health`, which exposes the new
   `version` field (backend `APP_VERSION`), so it always matches the running image.

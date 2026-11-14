@@ -30,6 +30,7 @@ from ib_async import (
     Future,
     Index,
     Option,
+    StartupFetch,
     Stock,
     Ticker,
 )
@@ -117,6 +118,11 @@ class IBKRProvider(
 
         # Keep track if we are currently connected implementation-wise
         self._connected = False
+        # Serializes connects: concurrent connectAsync calls on one IB object leak
+        # a socket that keeps the client id busy at the gateway (error 326).
+        self._connect_lock = asyncio.Lock()
+        self._error_handler_installed = False
+        self._client_id_conflict = False
 
         # Track subscription errors
         self._subscription_errors: list[dict[str, Any]] = []
@@ -294,62 +300,59 @@ class IBKRProvider(
 
     async def test_connection(self) -> dict[str, Any]:
         """Validate connectivity to IBKR TWS/Gateway."""
-        was_connected = self.ib.isConnected()
-        try:
-            if was_connected:
-                return {
-                    "status_code": 200,
-                    "success": True,
-                    "message": "Connected to IBKR",
-                    "details": {
-                        "host": self.host,
-                        "port": self.port,
-                        "client_id": self.client_id,
-                        "already_connected": True,
-                    },
-                }
+        if self.ib.isConnected():
+            return self._connection_ok(already_connected=True)
 
-            await self.ib.connectAsync(self.host, self.port, self.client_id)
-            return {
-                "status_code": 200,
-                "success": True,
-                "message": "Connected to IBKR",
-                "details": {
-                    "host": self.host,
-                    "port": self.port,
-                    "client_id": self.client_id,
-                    "already_connected": False,
-                },
-            }
-        except Exception as exc:
-            error_message = str(exc)
-            lowered = error_message.lower()
-            if any(
-                token in lowered
-                for token in (
-                    "auth",
-                    "credential",
-                    "login",
-                    "unauthorized",
-                    "forbidden",
-                )
-            ):
+        async with self._connect_lock:
+            if self.ib.isConnected():
+                return self._connection_ok(already_connected=True)
+
+            try:
+                await self._connect_gateway()
+                return self._connection_ok(already_connected=False)
+            except Exception as exc:
+                error_message = self._describe_connect_error(exc)
+                lowered = error_message.lower()
+                if any(
+                    token in lowered
+                    for token in (
+                        "auth",
+                        "credential",
+                        "login",
+                        "unauthorized",
+                        "forbidden",
+                    )
+                ):
+                    return {
+                        "status_code": 401,
+                        "success": False,
+                        "message": "Authentication failed",
+                        "details": {"error": error_message},
+                    }
+
                 return {
-                    "status_code": 401,
+                    "status_code": 503,
                     "success": False,
-                    "message": "Authentication failed",
+                    "message": "IBKR TWS/Gateway not reachable",
                     "details": {"error": error_message},
                 }
+            finally:
+                # A probe must not keep the client id busy for real requests.
+                if self.ib.isConnected():
+                    self.ib.disconnect()
 
-            return {
-                "status_code": 503,
-                "success": False,
-                "message": "IBKR TWS/Gateway not reachable",
-                "details": {"error": error_message},
-            }
-        finally:
-            if not was_connected and self.ib.isConnected():
-                self.ib.disconnect()
+    def _connection_ok(self, *, already_connected: bool) -> dict[str, Any]:
+        return {
+            "status_code": 200,
+            "success": True,
+            "message": "Connected to IBKR",
+            "details": {
+                "host": self.host,
+                "port": self.port,
+                "client_id": self.client_id,
+                "already_connected": already_connected,
+            },
+        }
 
     def _is_valid(self, val: Any) -> bool:
         return val is not None and not (isinstance(val, float) and math.isnan(val))
@@ -392,31 +395,63 @@ class IBKRProvider(
 
         return greeks
 
+    def _install_error_handler(self) -> None:
+        """Register the IB error handler exactly once (events survive reconnects)."""
+        if not self._error_handler_installed:
+            self.ib.errorEvent += self._on_ib_error
+            self._error_handler_installed = True
+
+    async def _connect_gateway(self) -> None:
+        """Open the API socket. Caller must hold ``_connect_lock``.
+
+        Skips the startup sync of positions/orders/executions/account updates,
+        which the hub never uses and which otherwise costs several seconds of
+        timeouts per connect. A failed attempt never leaves a socket behind.
+        """
+        self._install_error_handler()
+        self._client_id_conflict = False
+        try:
+            await self.ib.connectAsync(
+                self.host, self.port, self.client_id, fetchFields=StartupFetch(0)
+            )
+        except BaseException:
+            self.ib.disconnect()
+            self._connected = False
+            raise
+
+    def _describe_connect_error(self, exc: Exception) -> str:
+        if self._client_id_conflict:
+            return (
+                f"client id {self.client_id} is already in use at "
+                f"{self.host}:{self.port} (IBKR error 326)"
+            )
+        return str(exc) or type(exc).__name__
+
     async def _ensure_connection(self) -> None:
         """Ensure we have an active connection to IBKR."""
         if self.ib.isConnected():
             return
 
-        try:
-            logger.info(
-                f"Connecting to IBKR at {self.host}:{self.port} (Client ID: {self.client_id})"
-            )
-            await self.ib.connectAsync(self.host, self.port, self.client_id)
-            # Don't set market data type here - will be set via _set_market_data_type if explicitly requested
-            # or via default in _set_market_data_type when called
+        async with self._connect_lock:
+            if self.ib.isConnected():
+                return
 
-            # Install error handler to catch subscription warnings
-            self.ib.errorEvent += self._on_ib_error
+            try:
+                logger.info(
+                    f"Connecting to IBKR at {self.host}:{self.port} (Client ID: {self.client_id})"
+                )
+                await self._connect_gateway()
 
-            # Set default market data type
-            await self._set_market_data_type(None)
+                # Set default market data type
+                await self._set_market_data_type(None)
 
-            self._connected = True
-        except Exception as e:
-            logger.error(f"Failed to connect to IBKR: {e}")
-            raise ProviderConnectionError(f"Could not connect to IBKR: {e!s}")
-        else:
-            logger.debug("Successfully connected to IBKR")
+                self._connected = True
+            except Exception as e:
+                message = self._describe_connect_error(e)
+                logger.error(f"Failed to connect to IBKR: {message}")
+                raise ProviderConnectionError(f"Could not connect to IBKR: {message}")
+            else:
+                logger.debug("Successfully connected to IBKR")
 
     def _on_ib_error(
         self, reqId: int, errorCode: int, errorString: str, contract: Contract
@@ -427,6 +462,8 @@ class IBKRProvider(
         - For Level 1 (Live): Set flag to raise exception later
         - For Level 2/3 (Frozen/Delayed): Gracefully degrade to available data
         """
+        if errorCode == 326:
+            self._client_id_conflict = True
         if reqId in self._volatility_request_ids:
             return
         if errorCode in (10089, 10091):
