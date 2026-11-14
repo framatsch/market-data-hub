@@ -37,6 +37,14 @@ def test_list_providers(client):
     assert "data" in response.json()
     assert "available" in response.json()["data"]
 
+
+def test_providers_available_matches_registry(client):
+    from app.providers.registry import get_registry
+
+    data = client.get("/providers").json()["data"]
+
+    assert data["available"] == get_registry().list_available_providers()
+
 def test_404_handling(client):
     response = client.get("/non-existent-path")
     assert response.status_code == 404

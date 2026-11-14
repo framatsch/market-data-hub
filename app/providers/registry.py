@@ -330,6 +330,24 @@ class ProviderRegistry:
     def list_provider_instances(self) -> dict[str, object]:
         return dict(self._providers)
 
+    def list_available_providers(self) -> dict[str, list[str]]:
+        """Enabled providers per capability, derived from the loaded instances."""
+        capabilities: dict[str, type] = {
+            "price": BasePriceProvider,
+            "company": BaseCompanyProvider,
+            "options": BaseOptionsProvider,
+            "news": BaseNewsProvider,
+            "volatility": BaseVolatilityProvider,
+        }
+        return {
+            capability: [
+                name
+                for name, provider in sorted(self._providers.items())
+                if isinstance(provider, base_class)
+            ]
+            for capability, base_class in capabilities.items()
+        }
+
     def get_price_provider(self, name: str | None = None) -> BasePriceProvider:
         if name is None and self.default_price_provider is None:
             raise AppError(

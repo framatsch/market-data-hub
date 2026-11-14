@@ -77,14 +77,11 @@ async def get_market_status(
 
 @router.get("/providers", response_model=ResponseEnvelope[dict[str, Any]])
 async def list_providers() -> Any:
-    """Lists available providers and defaults.
+    """Lists enabled providers per capability and the configured defaults.
 
-    Available Providers:
-    - price: "ibkr", "lseg", "polygon"
-    - company: "finnhub", "lseg", "ibkr", "polygon"
-    - options: "ibkr", "lseg", "polygon"
-    - news: "finnhub", "ibkr", "mock"
-    - volatility: "lseg", "ibkr"
+    `available` is derived from the providers currently enabled in the Admin UI;
+    a provider is listed under every capability it implements (price, company,
+    options, news, volatility).
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     Note: Mock provider provides test data for development and testing.
@@ -100,12 +97,6 @@ async def list_providers() -> Any:
                 "news": reg.default_news_provider,
                 "volatility": reg.default_volatility_provider,
             },
-            "available": {
-                "price": ["ibkr", "lseg", "polygon", "prixe"],
-                "company": ["finnhub", "lseg", "ibkr", "polygon"],
-                "options": ["ibkr", "lseg", "polygon"],
-                "news": ["finnhub", "ibkr", "mock"],
-                "volatility": ["lseg", "ibkr"],
-            },
+            "available": reg.list_available_providers(),
         }
     )

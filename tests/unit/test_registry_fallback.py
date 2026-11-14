@@ -63,3 +63,32 @@ class TestProviderDefaults:
 
         with pytest.raises(InvalidProviderError):
             reg.get_news_provider("non_existent")
+
+
+class TestAvailableProviders:
+    def test_lists_loaded_providers_per_capability(self):
+        reg = ProviderRegistry()
+        reg._providers = {
+            name: reg.provider_classes[name]()
+            for name in ("schwab", "ibkr", "finnhub")
+        }
+
+        available = reg.list_available_providers()
+
+        assert available["price"] == ["ibkr", "schwab"]
+        assert available["options"] == ["ibkr", "schwab"]
+        assert available["company"] == ["ibkr"]
+        assert available["news"] == ["finnhub", "ibkr"]
+        assert available["volatility"] == ["ibkr"]
+
+    def test_empty_when_no_provider_enabled(self):
+        reg = ProviderRegistry()
+        reg._providers = {}
+
+        assert reg.list_available_providers() == {
+            "price": [],
+            "company": [],
+            "options": [],
+            "news": [],
+            "volatility": [],
+        }
