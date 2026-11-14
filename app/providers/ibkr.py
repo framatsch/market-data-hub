@@ -128,6 +128,45 @@ class IBKRProvider(
         # Track if Level 1 subscription error occurred (for strict failure)
         self._level1_subscription_error: bool = False
 
+    def configure(self, config: Any) -> None:
+        """Apply admin runtime config; ``connection_config`` overrides env defaults."""
+        super().configure(config)
+        connection_config = getattr(config, "connection_config", None)
+        if not isinstance(connection_config, dict):
+            return
+
+        host = connection_config.get("host")
+        host = host.strip() if isinstance(host, str) and host.strip() else self.host
+        port = self._config_int(connection_config.get("port"), self.port)
+        client_id = self._config_int(connection_config.get("client_id"), self.client_id)
+        self.market_data_type = self._config_int(
+            connection_config.get("market_data_type"), self.market_data_type
+        )
+
+        endpoint_changed = (host, port, client_id) != (
+            self.host,
+            self.port,
+            self.client_id,
+        )
+        self.host, self.port, self.client_id = host, port, client_id
+
+        if endpoint_changed and self.ib.isConnected():
+            logger.info(
+                f"IBKR gateway settings changed, reconnecting to {host}:{port} "
+                f"(Client ID: {client_id})"
+            )
+            self.ib.disconnect()
+            self._connected = False
+
+    @staticmethod
+    def _config_int(value: Any, default: int) -> int:
+        if isinstance(value, bool):
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     async def _get_tickers_snapshot(
         self, contracts: Sequence[Contract], skip_on_error: bool = True
     ) -> list[Ticker]:

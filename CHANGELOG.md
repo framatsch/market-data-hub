@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-14
+
+### Fixed
+
+- IBKR provider now applies the gateway settings saved in the Admin UI (`host`,
+  `port`, `client_id`, `market_data_type`). Previously it only read the
+  `IBKR_HOST`/`IBKR_PORT` environment defaults (`127.0.0.1:4001`), so "Test
+  connection" failed with `Connection refused` for any remote gateway. Changing
+  the endpoint now drops an open connection so the next request reconnects to the
+  new gateway.
+
 ## [1.3.0] - 2026-11-09
 
 ### Added
