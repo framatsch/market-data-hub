@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-14
+
 ### Fixed
 
 - IBKR connection handling: concurrent requests no longer open several sockets on one
