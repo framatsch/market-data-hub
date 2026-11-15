@@ -59,7 +59,12 @@ The system MUST NOT fail a request because Redis is unreachable, slow or returns
 - **THEN** caching resumes without restarting the application
 
 ### Requirement: Transparent cache key naming
-Cache keys SHALL follow `mdh:{route_path}:{symbol}:{query_params}` where `route_path` is the route template without path parameters joined by `:` unless the route declares an explicit route key (`companies:profile` for `GET /companies/{symbol}`), `symbol` is the upper-cased path symbol (empty when the route has none), and `query_params` is the URL-encoded, alphabetically sorted list of declared, non-empty query parameters (`-` when none). `provider`, `format` and `sec_type` values SHALL be lower-cased to mirror route normalization; the company search `q` value SHALL be trimmed, whitespace-collapsed and lower-cased. Undeclared query parameters SHALL NOT influence the key.
+Cache keys SHALL follow `mdh:{route_path}:{symbol}:{query_params}` where:
+- `route_path` is the route template without path parameters joined by `:`, unless the route declares an explicit route key (`companies:profile` for `GET /companies/{symbol}`).
+- `symbol` is the canonical symbol produced by the central symbol parser, percent-encoded so it contains no `:` (`F:ES` becomes `F%3AES`). It is empty when the route has no symbol.
+- `query_params` is the URL-encoded, alphabetically sorted list of declared, non-empty query parameters (`-` when none).
+
+`sec_type` SHALL NOT appear in `query_params` unless it is `etf`, because the canonical symbol already encodes the type. `provider` and `format` values SHALL be lower-cased to mirror route normalization. The company search `q` value SHALL be trimmed, whitespace-collapsed and lower-cased. Undeclared query parameters SHALL NOT influence the key.
 
 #### Scenario: Option chain key
 - **WHEN** `GET /options/spx/chain?provider=Schwab` is requested
@@ -72,6 +77,26 @@ Cache keys SHALL follow `mdh:{route_path}:{symbol}:{query_params}` where `route_
 #### Scenario: Route without symbol
 - **WHEN** `GET /market-status?provider=polygon` is requested
 - **THEN** the cache key is `mdh:market-status::provider=polygon`
+
+#### Scenario: Namespaced symbol key
+- **WHEN** `GET /volatility/F:ES/stats?provider=lseg` is requested
+- **THEN** the cache key is `mdh:volatility:stats:F%3AES:provider=lseg`
+
+#### Scenario: Legacy sec_type shares the entry
+- **WHEN** `GET /volatility/ES/stats?sec_type=future&provider=lseg` and `GET /volatility/F:ES/stats?provider=lseg` are requested
+- **THEN** both requests use the cache key `mdh:volatility:stats:F%3AES:provider=lseg`
+
+#### Scenario: Alias shares the entry
+- **WHEN** `GET /prices/^SPX/history?provider=ibkr` and `GET /prices/I:SPX/history?provider=ibkr` are requested
+- **THEN** both requests use the same cache entry
+
+#### Scenario: ETF keeps sec_type
+- **WHEN** `GET /volatility/SPY?sec_type=etf&provider=lseg` is requested
+- **THEN** the cache key is `mdh:volatility:snapshot:SPY:provider=lseg&sec_type=etf`
+
+#### Scenario: Route key parsing with namespaced symbol
+- **WHEN** the cache backend derives the route of the key `mdh:prices:history:I%3ASPX:interval=1d&provider=ibkr` to resolve its TTL
+- **THEN** the derived route is `prices:history`
 
 ### Requirement: Caching applies to all providers with provider-isolated keys
 Caching SHALL apply regardless of the provider serving the request. The key SHALL always contain the effective provider: the explicit `provider` query parameter, or, when absent, the current system default for the endpoint's capability (`default_options_provider` for options, `default_price_provider` for prices and market status, `default_company_provider` for company profile and search, `default_news_provider` for company news, `default_volatility_provider` for volatility snapshot, history and stats).
@@ -461,3 +486,4 @@ The following SHALL NOT be cached and SHALL NOT carry a cache-derived `Cache-Con
 #### Scenario: Providers list reflects admin changes
 - **WHEN** the default provider is changed in the Admin UI
 - **THEN** the next `GET /providers` immediately shows the new default
+
