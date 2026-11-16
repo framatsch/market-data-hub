@@ -17,7 +17,7 @@
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_serializer
 
 T = TypeVar("T")
 
@@ -32,11 +32,26 @@ class ErrorResponse(BaseModel):
     error: ErrorDetail
 
 
+class EnvelopeMeta(BaseModel):
+    """Metadata of market data responses (see `response-data-timestamp`)."""
+
+    data_as_of: datetime | None = None
+    stale: bool | None = None
+    stale_reason: str | None = None
+    source_provider: str | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler: Any) -> dict[str, Any]:
+        return {k: v for k, v in handler(self).items() if v is not None}
+
+
 class ResponseEnvelope(BaseModel, Generic[T]):
     """Standard API response envelope."""
 
     data: T | None = None
-    meta: dict[str, Any] | None = None
+    meta: EnvelopeMeta | dict[str, Any] | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

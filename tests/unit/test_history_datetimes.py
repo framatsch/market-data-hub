@@ -150,7 +150,11 @@ def test_rest_history_dates(
     first = history_client.get("/prices/AAPL/history", params=params)
     second = history_client.get("/prices/AAPL/history", params=params)
     assert first.status_code == second.status_code == 200
-    assert first.content == second.content
+    if format == "json" and not cache_mode:
+        # Live answers carry the time of their own provider call in meta.
+        assert first.json()["data"] == second.json()["data"]
+    else:
+        assert first.content == second.content
     assert_utc_range(history_env.provider.calls, start, end, 1 if cache_mode else 2)
     if cache_mode:
         assert first.headers["x-fastapi-cache"] == "MISS"

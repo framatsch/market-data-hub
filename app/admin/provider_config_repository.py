@@ -1,13 +1,14 @@
 import asyncio
 import json
 import sqlite3
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
 
+STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
 KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe")
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
@@ -39,6 +40,7 @@ class ProviderRuntimeConfig:
     circuit_breaker_reset_seconds: float
     connection_config: dict[str, Any]
     updated_at: str | None = None
+    history_store_intervals: list[str] = field(default_factory=lambda: ["1d"])
 
     def model_dump(self) -> dict[str, Any]:
         return asdict(self)
@@ -76,6 +78,14 @@ class ProviderConfigRepository:
                 )
                 """
             )
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(provider_config)")
+            }
+            if "history_store_intervals_json" not in columns:
+                conn.execute(
+                    "ALTER TABLE provider_config ADD COLUMN "
+                    "history_store_intervals_json TEXT NOT NULL DEFAULT '[\"1d\"]'"
+                )
 
     async def get(self, provider_name: str) -> ProviderRuntimeConfig:
         return await asyncio.to_thread(self._get_sync, provider_name)
@@ -88,7 +98,7 @@ class ProviderConfigRepository:
                 SELECT provider_name, enabled, timeout_seconds, retry_count,
                     retry_backoff_seconds, rate_limit_per_sec, circuit_breaker_enabled,
                     circuit_breaker_failure_threshold, circuit_breaker_reset_seconds,
-                    connection_config_json, updated_at
+                    connection_config_json, updated_at, history_store_intervals_json
                 FROM provider_config
                 WHERE provider_name = ?
                 """,
@@ -129,8 +139,8 @@ class ProviderConfigRepository:
                     provider_name, enabled, timeout_seconds, retry_count,
                     retry_backoff_seconds, rate_limit_per_sec, circuit_breaker_enabled,
                     circuit_breaker_failure_threshold, circuit_breaker_reset_seconds,
-                    connection_config_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    connection_config_json, updated_at, history_store_intervals_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider_name) DO UPDATE SET
                     enabled = excluded.enabled,
                     timeout_seconds = excluded.timeout_seconds,
@@ -141,7 +151,8 @@ class ProviderConfigRepository:
                     circuit_breaker_failure_threshold = excluded.circuit_breaker_failure_threshold,
                     circuit_breaker_reset_seconds = excluded.circuit_breaker_reset_seconds,
                     connection_config_json = excluded.connection_config_json,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    history_store_intervals_json = excluded.history_store_intervals_json
                 """,
                 (
                     candidate.provider_name,
@@ -155,6 +166,7 @@ class ProviderConfigRepository:
                     candidate.circuit_breaker_reset_seconds,
                     json.dumps(candidate.connection_config, sort_keys=True),
                     candidate.updated_at,
+                    json.dumps(candidate.history_store_intervals),
                 ),
             )
         return candidate
@@ -169,7 +181,7 @@ class ProviderConfigRepository:
                 SELECT provider_name, enabled, timeout_seconds, retry_count,
                     retry_backoff_seconds, rate_limit_per_sec, circuit_breaker_enabled,
                     circuit_breaker_failure_threshold, circuit_breaker_reset_seconds,
-                    connection_config_json, updated_at
+                    connection_config_json, updated_at, history_store_intervals_json
                 FROM provider_config
                 """
             ).fetchall()
@@ -206,7 +218,18 @@ class ProviderConfigRepository:
             circuit_breaker_reset_seconds=float(row["circuit_breaker_reset_seconds"]),
             connection_config=connection_config,
             updated_at=row["updated_at"],
+            history_store_intervals=self._parse_intervals(
+                row["history_store_intervals_json"]
+            ),
         )
+
+    @staticmethod
+    def _parse_intervals(raw: str | None) -> list[str]:
+        try:
+            values = json.loads(raw) if raw else ["1d"]
+        except ValueError:
+            return ["1d"]
+        return [v for v in STORABLE_INTERVALS if v in values]
 
     def _default_config(self, provider_name: str) -> ProviderRuntimeConfig:
         enabled = self._default_enabled(provider_name)
@@ -283,6 +306,13 @@ class ProviderConfigRepository:
             raise ValueError("circuit_breaker_failure_threshold must be at least 1")
         if config.circuit_breaker_reset_seconds <= 0:
             raise ValueError("circuit_breaker_reset_seconds must be greater than 0")
+        if not isinstance(config.history_store_intervals, list) or any(
+            v not in STORABLE_INTERVALS for v in config.history_store_intervals
+        ):
+            raise ValueError(
+                "history_store_intervals must be a list of: "
+                + ", ".join(STORABLE_INTERVALS)
+            )
         allowed_connection_keys = CONNECTION_CONFIG_ALLOWLIST[config.provider_name]
         unknown_keys = set(config.connection_config) - allowed_connection_keys
         if unknown_keys:

@@ -32,6 +32,10 @@ class PrixeProvider(BasePriceProvider):
     and ``I:``/``F:`` symbols are answered with 501 before any call is made.
     """
 
+    native_intervals = frozenset(
+        {"1m", "2m", "5m", "15m", "30m", "1h", "90m", "1d", "5d", "1w", "1mo", "3mo"}
+    )
+
     def __init__(self) -> None:
         self._api_key: str | None = None
 
@@ -166,7 +170,7 @@ class PrixeProvider(BasePriceProvider):
         del sec_type
 
         normalized_symbol = symbol.upper()
-        normalized_interval = interval.lower()
+        normalized_interval = {"1w": "1wk"}.get(interval.lower(), interval.lower())
         supported_intervals = {
             "1m",
             "2m",

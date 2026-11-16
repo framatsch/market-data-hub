@@ -218,7 +218,7 @@ async def test_volatility_implicit_provider_key(policy, monkeypatch, route):
         (
             "/prices/{symbol}/history",
             "start=2026-01-01T00%3A00%3A00&provider=schwab",
-            "mdh:prices:history:SPX:provider=schwab&start=2026-01-01T00%3A00%3A00",
+            "mdh:prices:history:SPX:provider=schwab&start=2026-01-01",
         ),
         ("/other/{symbol}", "_ts=1&format=", "mdh:other:SPX:-"),
     ],

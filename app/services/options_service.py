@@ -20,6 +20,7 @@ from typing import Literal
 
 import structlog
 
+from app import response_meta
 from app.models.options import OptionChain, OptionQuote
 from app.providers.base import BaseOptionsProvider
 from app.providers.registry import ProviderRegistry, get_registry
@@ -72,6 +73,7 @@ class OptionsService:
                 market_data_type=market_data_type,
                 **_type_kwargs(symbol),
             )
+            response_meta.current().record_fetch()
             return chain.model_copy(
                 update={
                     "underlying_symbol": symbol.canonical,

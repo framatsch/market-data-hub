@@ -313,3 +313,64 @@ async def test_history_includes_start_date_with_exclusive_upstream(
     )
     assert [point.date for point in result.points] == expected_dates
     assert result.points[-1].iv == Decimal("0.2676")
+
+
+@pytest.mark.parametrize("symbol,sec_type,instrument,filename,underlying", [
+    ("AAPL", "stock", "AAPLATMIV.U", "P0_full_dump__AAPLATMIV.U.csv", "AAPL.O"),
+    ("MSFT", "stock", "MSFTATMIV.U", "P0_full_dump__AAPLATMIV.U.csv", "MSFT.O"),
+    ("SPY", "etf", "SPYATMIV.U", "P0_full_dump__SPYATMIV.U.csv", "SPY"),
+])
+@pytest.mark.parametrize("market", [None, pd.NA, "   "])
+async def test_equity_iv_with_missing_market_uses_verified_identity(
+    provider, monkeypatch, symbol, sec_type, instrument, filename, underlying, market
+):
+    # Live AAPLATMIV.U, MSFTATMIV.U and SPYATMIV.U return valid IV but a null market.
+    frame = snapshot_frame(instrument, filename)
+    frame["Instrument"] = instrument
+    frame["UNDERLYING"] = underlying
+    frame["GN_TXT16_5"] = market
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=frame))
+    result = await provider.get_implied_volatility(symbol, sec_type=sec_type)
+    assert result.source_instrument == instrument
+    assert result.implied[0].iv is not None
+    assert result.market is None  # Do not invent a provider-reported market.
+
+
+@pytest.mark.parametrize("market,underlying,instrument,sec_type", [
+    (None, "MSFT.O", "AAPLATMIV.U", "stock"),  # wrong underlying
+    (None, "AAPL.O", "AAPLATMIV", "stock"),  # futures-style record
+    (None, None, "AAPLATMIV.U", "stock"),  # no underlying to verify
+    (None, "AAPLX.O", "AAPLATMIV.U", "stock"),  # root only matches as prefix
+    ("COMFUT", "AAPL.O", "AAPLATMIV.U", "stock"),  # explicit conflicting market
+    (None, "AAPL.O", "AAPLATMIV.U", "future"),  # futures never use the equity fallback
+])
+async def test_equity_missing_market_fallback_requires_matching_identity(
+    provider, monkeypatch, market, underlying, instrument, sec_type
+):
+    frame = snapshot_frame("AAPLATMIV.U", "P0_full_dump__AAPLATMIV.U.csv")
+    frame["Instrument"] = instrument
+    frame["UNDERLYING"] = underlying
+    frame["GN_TXT16_5"] = market
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=frame))
+    with pytest.raises(DataValidationError):
+        await provider.get_implied_volatility("AAPL", sec_type=sec_type)
+
+
+async def test_equity_iv_history_with_missing_market(provider, monkeypatch):
+    metadata = snapshot_frame("AAPLATMIV.U", "P0_full_dump__AAPLATMIV.U.csv")
+    metadata["Instrument"] = "AAPLATMIV.U"
+    metadata["UNDERLYING"] = "AAPL.O"
+    metadata["GN_TXT16_5"] = pd.NA
+    monkeypatch.setattr(lseg.rd, "get_data", Mock(return_value=metadata))
+    history = pd.DataFrame(
+        {"30D_A_IM_C": [21.4, 21.5], "30D_A_IM_P": [21.4, 21.5]},
+        index=pd.to_datetime(["2026-11-12", "2026-11-13"]),
+    )
+    definition = Mock()
+    definition.return_value.get_data.return_value = SimpleNamespace(data=SimpleNamespace(df=history))
+    monkeypatch.setattr(lseg.historical_pricing.summaries, "Definition", definition)
+    result = await provider.get_implied_volatility_history(
+        "AAPL", date(2026, 11, 12), date(2026, 11, 13), sec_type="stock"
+    )
+    assert [point.iv for point in result.points] == [Decimal("0.2140"), Decimal("0.2150")]
+    assert definition.call_args.kwargs["universe"] == "AAPLATMIV.U"

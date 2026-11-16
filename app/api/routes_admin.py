@@ -32,8 +32,12 @@ from app.providers.base import (
     BaseVolatilityProvider,
 )
 from app.providers.registry import registry
+from app.store import engine as store_engine
+from app.store import repository as store_repository
 from app.utils.errors import AppError
+from app.utils.intervals import derived_intervals
 from app.utils.secrets import unwrap_secret
+from app.utils.symbols import parse_symbol
 from app.utils.webhooks import validate_webhook_url
 
 try:
@@ -104,6 +108,7 @@ class ProviderConfigUpdate(BaseModel):
     circuit_breaker_failure_threshold: int | None = None
     circuit_breaker_reset_seconds: float | None = None
     connection_config: dict[str, Any] | None = None
+    history_store_intervals: list[str] | None = None
 
 
 class SystemDefaultsUpdate(BaseModel):
@@ -118,6 +123,14 @@ class CacheClearRequest(BaseModel):
     confirm: StrictBool = False
     scope: CacheScope = "all"
     provider: str | None = None
+
+
+class HistoryStoreClearRequest(BaseModel):
+    dataset: Literal["all", "prices", "iv"]
+    symbol: str | None = None
+    provider: str | None = None
+    interval: Literal["1h", "4h", "1d", "1w"] | None = None
+    confirm: StrictBool = False
 
 
 class IbkrGatewayUpdate(BaseModel):
@@ -392,9 +405,12 @@ def _provider_price_support(name: str) -> dict[str, list[Any]] | None:
     provider = _provider_for_support(name, BasePriceProvider)
     if provider is None:
         return None
+    native = provider.native_intervals
     return {
         "price_sec_types": sorted(provider.price_sec_types),
         "price_history_sec_types": sorted(provider.price_history_sec_types),
+        "native_intervals": sorted(native),
+        "derived_intervals": derived_intervals(native),
     }
 
 
@@ -505,6 +521,71 @@ async def clear_admin_cache(
         deleted=deleted,
     )
     return {"deleted": deleted, "scope": payload.scope, "provider": payload.provider}
+
+
+@router.get("/history-store")
+async def get_admin_history_store(_principal: PrincipalDep) -> dict[str, Any]:
+    await store_engine.probe_store()
+    result: dict[str, Any] = {
+        "state": store_engine.store_state(),
+        "database_url": store_engine.redacted_database_url(),
+        "settings": {
+            "resync_seconds": settings.HISTORY_STORE_RESYNC_SECONDS,
+            "overlap_bars": settings.HISTORY_STORE_OVERLAP_BARS,
+            "migrate_on_startup": settings.HISTORY_STORE_MIGRATE_ON_STARTUP,
+        },
+        "prices": None,
+        "iv": None,
+    }
+    if store_engine.store_state() != "connected":
+        return result
+
+    async def load() -> dict[str, Any]:
+        async with store_engine.session_scope() as session:
+            return await store_repository.status(session)
+
+    counts = await store_engine.guarded(load, None)
+    if counts is None:
+        result["state"] = "unavailable"
+        return result
+    result.update(counts)
+    return result
+
+
+@router.post("/history-store/clear")
+async def clear_admin_history_store(
+    payload: HistoryStoreClearRequest, principal: PrincipalDep
+) -> dict[str, Any]:
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=422, detail="Clearing the history store requires confirm: true"
+        )
+    await store_engine.probe_store()
+    if store_engine.store_state() != "connected":
+        raise HTTPException(status_code=503, detail="History store is not available")
+    symbol = parse_symbol(payload.symbol).canonical if payload.symbol else None
+    provider = payload.provider.lower() if payload.provider else None
+
+    async def run() -> dict[str, int]:
+        async with store_engine.session_scope() as session:
+            return await store_repository.clear(
+                session, payload.dataset, symbol, provider, payload.interval
+            )
+
+    deleted = await store_engine.guarded(run, None)
+    if deleted is None:
+        raise HTTPException(status_code=503, detail="History store is not available")
+    audit_log.info(
+        "history_store_cleared",
+        user=principal.user,
+        dataset=payload.dataset,
+        symbol=symbol,
+        provider=provider,
+        interval=payload.interval,
+        deleted_series=deleted["series"],
+        deleted_rows=deleted["rows"],
+    )
+    return {"deleted_series": deleted["series"], "deleted_rows": deleted["rows"]}
 
 
 @router.put("/settings/defaults")

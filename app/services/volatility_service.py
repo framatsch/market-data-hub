@@ -15,12 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import math
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import structlog
 
+from app import response_meta
 from app.models.volatility import (
     VolatilityHistory,
     VolatilitySecType,
@@ -28,9 +29,14 @@ from app.models.volatility import (
     VolatilityStats,
     VolatilityTenorDays,
 )
+from app.observability.metrics import record_history_store_read
 from app.providers.base import BaseVolatilityProvider
 from app.providers.registry import ProviderRegistry, get_registry
+from app.store import engine
+from app.store.repository import SeriesKey
+from app.store.sync import Loaded, Profile, history_sync
 from app.utils.errors import (
+    AppError,
     CapabilityNotSupportedError,
     DataNotFoundError,
     DataValidationError,
@@ -111,10 +117,100 @@ class VolatilityService:
         async with self.registry.use_volatility_provider(provider_name) as provider:
             structlog.contextvars.bind_contextvars(provider=provider.name)
             self._check_support(provider, "snapshot", sec_type)
-            snapshot = await provider.get_implied_volatility(
-                symbol.root, sec_type, ric
-            )
+            snapshot = await provider.get_implied_volatility(symbol.root, sec_type, ric)
             return snapshot.model_copy(update={"symbol": symbol.canonical})
+
+    async def _load_history(
+        self,
+        symbol: ParsedSymbol,
+        start: date,
+        end: date,
+        tenor_days: int,
+        ric: str | None,
+        provider_name: str | None,
+        operation: str = "history",
+    ) -> VolatilityHistory:
+        sec_type = cast(VolatilitySecType, symbol.sec_type)
+        async with self.registry.use_volatility_provider(provider_name) as provider:
+            structlog.contextvars.bind_contextvars(provider=provider.name)
+            self._check_support(provider, operation, sec_type, tenor_days)
+            history = await provider.get_implied_volatility_history(
+                symbol.root,
+                start,
+                end,
+                cast(VolatilityTenorDays, tenor_days),
+                sec_type,
+                ric,
+            )
+        response_meta.current().record_fetch()
+        return history.model_copy(update={"symbol": symbol.canonical})
+
+    async def _stored_history(
+        self,
+        symbol: ParsedSymbol,
+        start: date,
+        end: date,
+        tenor_days: int,
+        ric: str | None,
+        provider_name: str | None,
+        operation: str = "history",
+    ) -> VolatilityHistory | None:
+        """History through the store; None when the store is not usable."""
+        effective = provider_name or self.registry.default_volatility_provider
+        if not effective or not engine.store_enabled():
+            return None
+        key = SeriesKey(
+            "iv", symbol.canonical, effective, "1d", False, tenor_days, ric or ""
+        )
+        statics: dict[str, Any] = {}
+
+        async def loader(load_start: datetime, load_end: datetime) -> Loaded[Any]:
+            history = await self._load_history(
+                symbol,
+                load_start.date(),
+                load_end.date(),
+                tenor_days,
+                ric,
+                effective,
+                operation,
+            )
+            statics["history"] = history
+            return Loaded(
+                items=history.points,
+                source_instrument=history.source_instrument,
+                sec_type=symbol.sec_type,
+            )
+
+        meta = response_meta.current()
+        served = await history_sync.serve(
+            key,
+            Profile("iv", "1d"),
+            datetime.combine(start, time(), UTC),
+            datetime.combine(end, time(), UTC),
+            loader,
+            force=meta.no_cache,
+            sec_type=symbol.sec_type,
+        )
+        if served is None:
+            return None
+        if served.data_as_of is not None:
+            meta.data_as_of = served.data_as_of
+        if served.stale:
+            meta.mark_stale(served.stale_reason or "PROVIDER_ERROR")
+        series = served.series
+        loaded: VolatilityHistory | None = statics.get("history")
+        return VolatilityHistory(
+            symbol=symbol.canonical,
+            sec_type=cast(VolatilitySecType, symbol.sec_type),
+            source_instrument=(
+                loaded.source_instrument
+                if loaded is not None
+                else (series.source_instrument if series else None) or ""
+            ),
+            tenor_days=cast(VolatilityTenorDays, tenor_days),
+            points=served.items,
+            provider=effective,
+        )
 
     async def get_implied_volatility_history(
         self,
@@ -127,19 +223,29 @@ class VolatilityService:
     ) -> VolatilityHistory:
         if start > end:
             raise DataValidationError("IV history start must not be after end")
-        sec_type = cast(VolatilitySecType, symbol.sec_type)
-        async with self.registry.use_volatility_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
-            self._check_support(provider, "history", sec_type, tenor_days)
-            history = await provider.get_implied_volatility_history(
-                symbol.root,
-                start,
-                end,
-                cast(VolatilityTenorDays, tenor_days),
-                sec_type,
-                ric,
-            )
-            return history.model_copy(update={"symbol": symbol.canonical})
+        return await self._history(
+            symbol, start, end, tenor_days, ric, provider_name, "history"
+        )
+
+    async def _history(
+        self,
+        symbol: ParsedSymbol,
+        start: date,
+        end: date,
+        tenor_days: int,
+        ric: str | None,
+        provider_name: str | None,
+        operation: str,
+    ) -> VolatilityHistory:
+        stored = await self._stored_history(
+            symbol, start, end, tenor_days, ric, provider_name, operation
+        )
+        if stored is not None:
+            return stored
+        record_history_store_read("iv", "bypass")
+        return await self._load_history(
+            symbol, start, end, tenor_days, ric, provider_name, operation
+        )
 
     async def get_implied_volatility_stats(
         self,
@@ -149,7 +255,6 @@ class VolatilityService:
         ric: str | None = None,
         provider_name: str | None = None,
     ) -> VolatilityStats:
-        sec_type = cast(VolatilitySecType, symbol.sec_type)
         if (
             not isinstance(window, int)
             or isinstance(window, bool)
@@ -160,17 +265,9 @@ class VolatilityService:
             )
         end = date.today()
         start = end - timedelta(days=math.ceil(window * 365 / 252) + 14)
-        async with self.registry.use_volatility_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
-            self._check_support(provider, "stats", sec_type, tenor_days)
-            history = await provider.get_implied_volatility_history(
-                symbol.root,
-                start,
-                end,
-                cast(VolatilityTenorDays, tenor_days),
-                sec_type,
-                ric,
-            )
+        history = await self._history(
+            symbol, start, end, tenor_days, ric, provider_name, "stats"
+        )
         points = sorted(
             (
                 point
@@ -179,7 +276,13 @@ class VolatilityService:
             ),
             key=lambda point: point.date,
         )[-window:]
+        meta = response_meta.current()
         if len(points) < 20:
+            if meta.stale:
+                raise AppError(
+                    "Provider unavailable and too little stored IV history",
+                    meta.stale_reason or "PROVIDER_ERROR",
+                )
             raise DataNotFoundError(
                 "ImpliedVolatility",
                 symbol.canonical,

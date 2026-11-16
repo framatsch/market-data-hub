@@ -120,6 +120,41 @@ kubectl logs -n market-data-hub deployment/market-data-hub
 
 ---
 
+## History Store (optional PostgreSQL)
+
+Closed daily/weekly/hourly/4-hour price bars and daily IV points can be kept in
+PostgreSQL, so a history or IV Rank request needs at most one small provider call
+(the newest bars) instead of a full download. Without `DATABASE_URL` MDH needs no
+PostgreSQL and behaves exactly as before; credentials, provider configuration and
+settings stay in SQLite (`KEYS_DB_PATH`) in both cases.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `DATABASE_URL` | empty (disabled) | e.g. `postgresql://user:pass@host:5432/mdh` |
+| `HISTORY_STORE_RESYNC_SECONDS` | 300 | minimum interval between top-up calls per series |
+| `HISTORY_STORE_OVERLAP_BARS` | 5 (2–30) | newest stored bars re-read to detect split revisions |
+| `HISTORY_STORE_MIGRATE_ON_STARTUP` | true | apply Alembic migrations at startup (advisory lock) |
+
+**Docker Compose.** Set `DATABASE_URL=postgresql://mdh:mdh@postgres:5432/mdh` in `.env`
+and start with the profile: `docker compose --profile postgres up -d`. Without the
+profile no PostgreSQL container is started and the store is disabled.
+
+**Kubernetes.** Provide the database outside this repository (same namespace as MDH) and
+set `DATABASE_URL` from a secret. Recommended volume: 5 Gi, 10 Gi when `1h` bars are stored.
+
+**Stored intervals** are a provider setting (`history_store_intervals`, default `["1d"]`),
+edited in the provider details of the Admin UI and effective without a restart. `1h`, `4h`
+and `1w` are derived from smaller bars where a provider does not deliver them natively.
+
+**Behaviour.** Only closed bars are stored; the forming bar always comes from the provider.
+A database outage never fails a request (one warning, 30 s cooldown, provider path). When a
+provider fails and the stored series covers the range, the stored data is returned with
+`meta.stale = true`. Daily bars may come from another provider's series
+(`meta.source_provider`); IV never does. Admin: `GET /api/admin/history-store` and
+`POST /api/admin/history-store/clear`. Metric: `mdh_history_store_reads_total`.
+
+**Rollback:** unset `DATABASE_URL`; no data migration in either direction.
+
 ## Environment Variables Reference
 
 ### IBKR

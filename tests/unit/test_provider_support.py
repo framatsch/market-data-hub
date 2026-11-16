@@ -86,6 +86,8 @@ def test_admin_price_and_options_support(monkeypatch):
     assert _provider_price_support("fake") == {
         "price_sec_types": ["etf", "index", "stock"],
         "price_history_sec_types": ["etf", "stock"],
+        "native_intervals": ["1d", "1m", "5m"],
+        "derived_intervals": ["15m", "1h", "4h", "1w"],
     }
     assert _provider_options_support("fake") is None
     # Not loaded: falls back to the declared class.

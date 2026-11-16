@@ -34,6 +34,34 @@ REQUEST_DURATION = Histogram(
 )
 
 
+HISTORY_STORE_RESULTS = frozenset(
+    {
+        "store",
+        "tail_sync",
+        "backfill",
+        "full_load",
+        "reload",
+        "stale",
+        "fallback_provider",
+        "bypass",
+    }
+)
+
+HISTORY_STORE_READS = Counter(
+    "mdh_history_store_reads_total",
+    "History requests by dataset and how the history store served them.",
+    ("dataset", "result"),
+    registry=REGISTRY,
+)
+
+
+def record_history_store_read(dataset: str, result: str) -> None:
+    HISTORY_STORE_READS.labels(
+        _label_value(dataset, frozenset({"prices", "iv"}), "prices"),
+        _label_value(result, HISTORY_STORE_RESULTS, "bypass"),
+    ).inc()
+
+
 def _label_value(value: str | None, allowed: frozenset[str], default: str) -> str:
     if value in allowed:
         return value

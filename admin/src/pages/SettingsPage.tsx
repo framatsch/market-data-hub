@@ -19,6 +19,7 @@ import { useSearchParams } from 'react-router-dom';
 import { fetcher } from '../lib/api';
 import type { SystemDefaults } from '../types';
 import CacheCard from '../components/CacheCard';
+import HistoryStoreCard from '../components/HistoryStoreCard';
 
 interface SettingsProviderCapabilities {
   prices: string[];
@@ -212,6 +213,7 @@ export default function SettingsPage() {
       {activeTab === 'cache' && (
         <Box role="tabpanel" id="settings-panel-cache" aria-labelledby="settings-tab-cache">
           <CacheCard />
+          <HistoryStoreCard />
         </Box>
       )}
 

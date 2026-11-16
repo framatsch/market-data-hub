@@ -39,6 +39,7 @@ from app.config import APP_VERSION, settings
 from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
 from app.observability.middleware import ObservabilityMiddleware
+from app.store.engine import setup_store, shutdown_store
 from app.utils.errors import AppError, ErrorDetail, ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ async def lifespan(app: FastAPI) -> Any:
     initialize_admin_runtime()
     await registry.reload_from_config()
     cache_state = await setup_cache()
+    store_state = await setup_store()
 
     # --- STARTUP PROTOCOL OVERVIEW ---
     active_providers = list(registry._providers.keys())
@@ -83,6 +85,7 @@ async def lifespan(app: FastAPI) -> Any:
 Environment : {settings.APP_ENV}
 MCP Status  : {mcp_status}
 Cache Status: {cache_state}
+History Store: {store_state}
 {"MCP Path    : /mcp/sse, /mcp/messages" if settings.MCP_ENABLED else ""}
 {"-" * 60}
 ACTIVE PROVIDERS:
@@ -108,6 +111,7 @@ ACTIVE PROVIDERS:
     finally:
         logger.info(f"Shutting down {settings.APP_NAME}")
         await shutdown_cache()
+        await shutdown_store()
         await registry.shutdown()
 
 

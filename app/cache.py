@@ -31,6 +31,7 @@ from redis import asyncio as aioredis
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app import response_meta
 from app.admin.runtime import get_settings_repository
 from app.config import settings
 from app.market_hours import (
@@ -38,11 +39,13 @@ from app.market_hours import (
     as_utc,
     bar_length_seconds,
     current_period_start,
+    interval_parts,
     market_state,
     next_open,
     next_transition,
 )
 from app.providers.registry import registry
+from app.utils.intervals import normalize_interval
 from app.utils.symbols import ParsedSymbol, parse_symbol
 
 logger = logging.getLogger(__name__)
@@ -223,7 +226,7 @@ class CachePolicy:
         if route in {"options:chain", "/options/{symbol}/chain"}:
             ttl = values.option_chain_seconds
         elif route in {"prices:history", "/prices/{symbol}/history"}:
-            interval = params.get("interval", "1d")
+            interval = normalize_interval(params.get("interval", "1d"))
             try:
                 length = bar_length_seconds(interval)
                 period = current_period_start(interval, now)
@@ -274,6 +277,25 @@ def _key_parts(key: str | bytes) -> tuple[str, dict[str, str]]:
     return route, dict(parse_qsl(segments[-1]))
 
 
+def _day_granular(params: dict[str, str]) -> None:
+    """Daily-or-longer history keys use the UTC date of start and end."""
+    try:
+        _, unit = interval_parts(params.get("interval", "1d"))
+    except ValueError:
+        return
+    if unit not in {"d", "w", "mo"}:
+        return
+    for name in ("start", "end"):
+        raw = params.get(name)
+        if not raw:
+            continue
+        try:
+            moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        params[name] = as_utc(moment).date().isoformat()
+
+
 def _compose_key(
     route_key: str, symbol: ParsedSymbol | None, params: dict[str, Any]
 ) -> str:
@@ -294,6 +316,10 @@ def _compose_key(
             params[name] = params[name].lower()
     if route_key == "companies:search" and "q" in params:
         params["q"] = " ".join(params["q"].split()).lower()
+    if route_key == "prices:history":
+        if "interval" in params:
+            params["interval"] = normalize_interval(params["interval"])
+        _day_granular(params)
     if "provider" not in params:
         default = {
             "options:chain": registry.default_options_provider,
@@ -386,9 +412,15 @@ def cache(
         async def adapted(*args: P.args, **kwargs: P.kwargs) -> R | Response:
             request = kwargs.get("__fastapi_cache_request")
             token = _request.set(request if isinstance(request, Request) else None)
+            no_cache = isinstance(request, Request) and (
+                request.headers.get("Cache-Control") == "no-cache"
+            )
+            meta_token = response_meta.begin(no_cache=no_cache)
             try:
                 result = await cached(*args, **kwargs)
                 injected = kwargs.get("__fastapi_cache_response")
+                if response_meta.current().stale and isinstance(injected, Response):
+                    injected.headers["Cache-Control"] = "no-store"
                 if (
                     isinstance(result, Response)
                     and isinstance(injected, Response)
@@ -399,6 +431,7 @@ def cache(
                             result.headers[name] = injected.headers[name]
                 return result
             finally:
+                response_meta.end(meta_token)
                 _request.reset(token)
 
         return adapted
@@ -476,6 +509,9 @@ class FailOpenRedisBackend(RedisBackend):
     async def set(self, key: str, value: bytes, expire: int | None = None) -> None:
         route, params = _key_parts(key)
         ttl = policy.resolve(route, params, datetime.now(UTC), expire or 300)
+        state = response_meta.current_or_none()
+        if state is not None and state.stale:
+            ttl = 0  # stale answers are never cached
         request = _request.get()
         if request is not None:
             request.scope["mdh_cache_ttl"] = ttl

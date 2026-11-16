@@ -10,9 +10,11 @@ import {
   Typography,
   Switch,
   FormControlLabel,
+  Checkbox,
+  Alert,
 } from '@mui/material';
 import { fetcher, getErrorMessage } from '../../lib/api';
-import type { ProviderConfig } from '../../types';
+import type { HistoryStoreStatus, Provider, ProviderConfig } from '../../types';
 
 export function ProviderConfigSection({
   providerName,
@@ -30,6 +32,26 @@ export function ProviderConfigSection({
     queryKey: ['providerConfig', providerName],
     queryFn: () => fetcher(`/api/admin/providers/${providerName}/config`),
   });
+
+  const storeQuery = useQuery<HistoryStoreStatus>({
+    queryKey: ['historyStore'],
+    queryFn: () => fetcher('/api/admin/history-store'),
+  });
+  const providersQuery = useQuery<Provider[]>({
+    queryKey: ['providers'],
+    queryFn: () => fetcher('/api/admin/providers'),
+  });
+  const priceSupport = providersQuery.data?.find((p) => p.name === providerName)?.price_support;
+  const storeDisabled = storeQuery.data?.state === 'disabled';
+  const [storedEdit, setStoredEdit] = useState<string[] | null>(null);
+  const storedIntervals = storedEdit ?? configQuery.data?.history_store_intervals ?? ['1d'];
+  const toggleStored = (interval: string) => {
+    setStoredEdit(
+      storedIntervals.includes(interval)
+        ? storedIntervals.filter((item) => item !== interval)
+        : [...storedIntervals, interval],
+    );
+  };
 
   const [edits, setFormData] = useState<Partial<ProviderConfig>>({});
   const formData = { ...configQuery.data, ...edits };
@@ -60,6 +82,9 @@ export function ProviderConfigSection({
         circuit_breaker_failure_threshold: formData.circuit_breaker_failure_threshold,
         circuit_breaker_reset_seconds: formData.circuit_breaker_reset_seconds,
       };
+      if (priceSupport && storedEdit !== null) {
+        payload.history_store_intervals = storedEdit;
+      }
 
       if (!hideConnectionJson) {
         if (connectionConfigText.trim()) {
@@ -191,6 +216,39 @@ export function ProviderConfigSection({
             slotProps={{ htmlInput: { min: 1 } }}
           />
         </Grid>
+
+        {priceSupport && (
+          <Grid size={{ xs: 12 }}>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" gutterBottom>Stored history intervals</Typography>
+            {storeDisabled && (
+              <Alert severity="info" sx={{ mb: 1 }}>
+                The history store is disabled (DATABASE_URL is not set); the selection has no effect yet.
+              </Alert>
+            )}
+            <Box data-testid="stored-intervals">
+              {['1h', '4h', '1d', '1w'].map((interval) => {
+                const native = priceSupport.native_intervals?.includes(interval);
+                return (
+                  <FormControlLabel
+                    key={interval}
+                    control={
+                      <Checkbox
+                        checked={storedIntervals.includes(interval)}
+                        onChange={() => toggleStored(interval)}
+                        disabled={storeDisabled}
+                      />
+                    }
+                    label={`${interval} (${native ? 'native' : 'derived'})`}
+                  />
+                );
+              })}
+            </Box>
+            <Typography variant="caption" color="text.secondary">
+              Closed bars of the selected intervals are kept in the history store. Derived intervals are aggregated from smaller bars.
+            </Typography>
+          </Grid>
+        )}
 
         {!hideConnectionJson && (
           <Grid size={{ xs: 12 }}>

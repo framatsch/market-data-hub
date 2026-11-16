@@ -1,7 +1,7 @@
 """Conservative US equity session clock (holidays deliberately count as weekdays)."""
 
 import re
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -79,3 +79,92 @@ def current_period_start(interval: str, now: datetime) -> datetime:
         return midnight - timedelta(days=local.weekday())
     month = (local.month - 1) // count * count + 1
     return midnight.replace(month=month, day=1)
+
+
+STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
+_SETTLE_GRACE = timedelta(minutes=30)
+
+
+def trading_date(bar_start: datetime) -> date:
+    """Trading date of a daily bar: the UTC calendar date of its start.
+
+    Polygon stamps daily bars at New York midnight (04:00/05:00 UTC), the other
+    providers at UTC midnight; the UTC date is the trading date in both cases.
+    """
+    return as_utc(bar_start).date()
+
+
+def _is_weekday_closed_today(now: datetime) -> bool:
+    local = as_utc(now).astimezone(ET)
+    if local.weekday() >= 5:
+        return False
+    close = datetime.combine(local.date(), time(16), ET)
+    return local >= close + _SETTLE_GRACE
+
+
+def last_closed_day(now: datetime) -> date:
+    """Newest weekday whose session is over (close plus grace); holidays count as weekdays."""
+    local = as_utc(now).astimezone(ET)
+    day = local.date()
+    if not _is_weekday_closed_today(now):
+        day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def is_closed(day: date, now: datetime) -> bool:
+    return day <= last_closed_day(now)
+
+
+def week_monday(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def _period_length(interval: str) -> timedelta:
+    length = bar_length_seconds(interval)
+    if length is None:
+        raise ValueError(f"Not an intraday interval: {interval}")
+    return timedelta(seconds=length)
+
+
+def _period_end(interval: str, bar_start: datetime) -> datetime:
+    start = current_period_start(interval, as_utc(bar_start))
+    return as_utc(start) + _period_length(interval)
+
+
+def is_bar_closed(
+    interval: str, bar_start: datetime, now: datetime, extended_hours: bool = False
+) -> bool:
+    """Whether the bar that starts at `bar_start` is final (see design D3)."""
+    now = as_utc(now)
+    if interval == "1d":
+        return is_closed(trading_date(bar_start), now)
+    if interval == "1w":
+        monday = week_monday(trading_date(bar_start))
+        return is_closed(monday + timedelta(days=4), now)
+    if _period_end(interval, bar_start) <= now:
+        return True
+    return not extended_hours and market_state(now) == "settled"
+
+
+def newest_closed_key(
+    interval: str, now: datetime, extended_hours: bool = False
+) -> datetime:
+    """Start of the newest closed bar period (midnight UTC of the date for 1d/1w)."""
+    now = as_utc(now)
+    if interval == "1d":
+        day = last_closed_day(now)
+        return datetime.combine(day, time(), UTC)
+    if interval == "1w":
+        day = last_closed_day(now)
+        monday = week_monday(day)
+        if day.weekday() < 4:  # Friday of that week is not closed yet
+            monday -= timedelta(days=7)
+        return datetime.combine(monday, time(), UTC)
+    length = _period_length(interval)
+    if not extended_hours and market_state(now) == "settled":
+        day = last_closed_day(now)
+        close = datetime.combine(day, time(16), ET)
+        return as_utc(current_period_start(interval, close - timedelta(seconds=1)))
+    return as_utc(current_period_start(interval, now)) - length

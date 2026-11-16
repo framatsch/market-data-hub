@@ -64,3 +64,19 @@ def test_app_version_requires_string(monkeypatch, version, expected):
     )
 
     assert config._get_app_version() == expected
+
+
+def test_history_store_settings_defaults_and_validation():
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    default = Settings(_env_file=None, DATABASE_URL="  ")
+    assert default.DATABASE_URL == ""
+    assert default.HISTORY_STORE_RESYNC_SECONDS == 300
+    assert default.HISTORY_STORE_OVERLAP_BARS == 5
+    assert default.HISTORY_STORE_MIGRATE_ON_STARTUP is True
+    for bad in ({"HISTORY_STORE_OVERLAP_BARS": 1}, {"HISTORY_STORE_OVERLAP_BARS": 31},
+                {"HISTORY_STORE_RESYNC_SECONDS": -1}):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, **bad)

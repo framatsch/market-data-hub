@@ -641,7 +641,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "symbol": _SYMBOL_PRICE,
                 "interval": {
                     "type": "string",
-                    "description": "Bar interval, e.g. 1d, 1h, 5m (default: 1d)",
+                    "description": "Bar interval: 1m, 5m, 15m, 1h, 4h, 1d, 1w (default: 1d). Missing intervals are derived by aggregating smaller bars; derived bars carry source_interval.",
                 },
                 "start_date": {
                     "type": "string",

@@ -16,9 +16,9 @@
 
 import tomllib
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -148,11 +148,23 @@ class Settings(BaseSettings):
     # Outside the US session (after close + settle grace, weekends) keep entries until next open.
     CACHE_EXTEND_WHEN_MARKET_CLOSED: bool = True
 
+    # History store (optional PostgreSQL). Unset or empty = disabled; every endpoint
+    # then behaves as without the store. Credentials/settings stay in SQLite.
+    DATABASE_URL: str = ""
+    HISTORY_STORE_RESYNC_SECONDS: int = Field(default=300, ge=0)
+    HISTORY_STORE_OVERLAP_BARS: int = Field(default=5, ge=2, le=30)
+    HISTORY_STORE_MIGRATE_ON_STARTUP: bool = True
+
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0
     PROVIDER_MAX_RETRIES: int = 3
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _strip_database_url(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _validate_production_admin_auth(self) -> "Settings":

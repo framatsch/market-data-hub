@@ -21,6 +21,7 @@ from urllib.parse import quote as url_quote
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 
+from app import response_meta
 from app.cache import cache
 from app.config import settings
 from app.dependencies import PriceServiceDep, symbol_param
@@ -128,7 +129,10 @@ async def get_historical_prices(
         return Response(
             content=csv_data,
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename={filename}"},
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                **response_meta.csv_headers(),
+            },
         )
 
-    return ResponseEnvelope(data=bars)
+    return response_meta.envelope(bars)

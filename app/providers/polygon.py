@@ -77,6 +77,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
     ``NOT_AUTHORIZED``) raises ``ProviderNotEntitledError`` once the previous-close
     fallback has been tried.
     """
+    native_intervals = frozenset({"1m", "5m", "1h", "1d"})
 
     price_sec_types = frozenset({"stock", "etf", "index"})
     price_history_sec_types = frozenset({"stock", "etf", "index"})

@@ -124,6 +124,12 @@ def _volatility_instrument(
     return f"{root}ATMIV" if sec_type == "future" else f"{root}ATMIV.U"
 
 
+def _equity_underlying_root(value: Any) -> str | None:
+    """Ticker root of an equity underlying RIC: ``AAPL.O`` -> ``AAPL``, ``SPY`` -> ``SPY``."""
+    text = _volatility_text(value)
+    return text.split(".", 1)[0].upper() if text else None
+
+
 def _percent_iv(value: Any) -> Decimal | None:
     try:
         return quantize_iv(Decimal(str(value)) / 100)
@@ -184,6 +190,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
     ⚠️  Options NOT supported - use IBKR provider instead.
     LSEG subscription lacks 'trapi.data.pricing.read' scope required for real-time Greeks.
     """
+    native_intervals = frozenset({"1m", "5m", "30m", "1h", "1d", "1w"})
 
     # Index RICs (``.SPX``) and front-month continuation RICs (``ESc1``) are
     # documented LSEG instrument codes; entitlement is decided by LSEG at runtime.
@@ -858,6 +865,19 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
             # valid IV. The exact record and cash-index underlying still prove
             # its identity. An explicit conflicting market remains an error.
             return
+        if (
+            market is None
+            and sec_type in {"stock", "etf"}
+            and _volatility_text(row.get("Instrument"))
+            == _volatility_instrument(symbol, sec_type)
+            and _equity_underlying_root(row.get("UNDERLYING")) == symbol.upper()
+        ):
+            # LSEG no longer fills GN_TXT16_5 on equity ATMIV records (verified for
+            # AAPL, MSFT and SPY) although the IV values are valid. The exact ``.U``
+            # equity-option record plus its underlying (``AAPL.O`` or ``SPY``) prove
+            # the identity; a futures record (``ESATMIV``) or an explicit conflicting
+            # market remains an error.
+            return
         if market not in expected:
             raise DataValidationError(
                 "LSEG volatility instrument market does not match the security type",
@@ -1259,9 +1279,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         """Map API interval to Refinitiv Intervals enum."""
         mapping = {
             "1m": historical_pricing.Intervals.MINUTE,
-            "2m": historical_pricing.Intervals.MINUTE,  # Fetch 1min, caller can resample
             "5m": historical_pricing.Intervals.FIVE_MINUTES,
-            "15m": historical_pricing.Intervals.TEN_MINUTES,  # Use TEN_MINUTES as closest
             "30m": historical_pricing.Intervals.THIRTY_MINUTES,
             "1h": historical_pricing.Intervals.HOURLY,
             "1d": historical_pricing.Intervals.DAILY,

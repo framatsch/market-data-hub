@@ -51,3 +51,4 @@ class PriceBar(BaseModel):
     volume: int
     provider: str
     source_instrument: str | None = None
+    source_interval: str | None = None

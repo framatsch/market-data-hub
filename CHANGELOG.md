@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional history store (PostgreSQL, enabled by `DATABASE_URL`): closed price bars of
+  `1h`, `4h`, `1d`, `1w` (selectable per provider via `history_store_intervals`, default
+  `["1d"]`) and daily IV points are loaded once and topped up incrementally with split
+  detection. IV Rank/Percentile are computed from stored points. Fail-open on database
+  errors; Compose profile `postgres`; admin status/clear endpoints and a History Store card.
+- Stored data is served with `meta.stale = true` when a provider fails; daily bars of another
+  provider may be served (`meta.source_provider`). Stale responses are never cached.
+- `meta.data_as_of` on option chain, price history and volatility responses
+  (`X-MDH-Data-As-Of` for CSV), preserved across response-cache hits.
+- Canonical price intervals `1m 5m 15m 1h 4h 1d 1w` work against every price provider:
+  missing intervals are derived by aggregating smaller bars (`source_interval` on the bar,
+  clock-aligned `America/New_York` buckets, ISO weeks, whole-bucket range widening).
+  `60m` and `1wk` are aliases. Admin API/UI list native and derived intervals per provider.
+
+### Fixed
+
+- LSEG implied volatility for stocks and ETFs failed with 422 "market does not match the
+  security type" because LSEG no longer fills the market field `GN_TXT16_5` on equity ATMIV
+  records. A missing market is now accepted when the exact `<SYMBOL>ATMIV.U` record and its
+  underlying (`AAPL.O`, `SPY`) match the requested symbol, as already done for indices; futures
+  records and an explicitly conflicting market remain errors.
+- History store: naive bar timestamps (for example IBKR daily bars) were stored in the system
+  time zone instead of UTC.
+
+### Changed
+
+- Response-cache keys of daily-or-longer history use the UTC date of `start`/`end` and the
+  normalized interval. The first and last daily bar are selected by date, not timestamp.
+- **BREAKING**: LSEG `15m` returns real 15-minute bars (derived from `5m`); LSEG `2m` is
+  rejected with 422. An unsupported interval returns 422 `DATA_VALIDATION_ERROR`.
+
 ## [1.3.2] - 2026-11-14
 
 ### Fixed

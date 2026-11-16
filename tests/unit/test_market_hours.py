@@ -99,3 +99,58 @@ def test_next_transition(clock, expected):
     actual = next_transition(datetime.fromisoformat(clock))
     assert as_utc(actual) == as_utc(datetime.fromisoformat(expected))
     assert actual.tzinfo == ET
+
+
+# ---- history store closed-bar rules -------------------------------------------
+from datetime import UTC as _UTC
+from datetime import date as _date
+from datetime import datetime as _dt
+
+from app.market_hours import (
+    is_bar_closed,
+    last_closed_day,
+    newest_closed_key,
+    trading_date,
+)
+
+
+def _u(*a):
+    return _dt(*a, tzinfo=_UTC)
+
+
+def test_last_closed_day_session_grace_evening_weekend():
+    assert last_closed_day(_u(2026, 11, 11, 16, 0)) == _date(2026, 11, 10)  # Wed 11:00 ET
+    assert last_closed_day(_u(2026, 11, 11, 21, 10)) == _date(2026, 11, 10)  # 16:10, grace
+    assert last_closed_day(_u(2026, 11, 11, 21, 45)) == _date(2026, 11, 11)  # 16:45
+    assert last_closed_day(_u(2026, 11, 14, 12, 0)) == _date(2026, 11, 13)  # Saturday
+    assert last_closed_day(_u(2026, 11, 16, 13, 0)) == _date(2026, 11, 13)  # Monday morning
+
+
+def test_trading_date_is_utc_date_for_both_stamps():
+    assert trading_date(_u(2026, 11, 10, 0)) == _date(2026, 11, 10)
+    assert trading_date(_u(2026, 11, 10, 5)) == _date(2026, 11, 10)  # NY midnight
+
+
+def test_bar_closed_rules():
+    wed_session = _u(2026, 11, 11, 16, 0)
+    assert not is_bar_closed("1d", _u(2026, 11, 11), wed_session)
+    assert is_bar_closed("1d", _u(2026, 11, 10), wed_session)
+    assert not is_bar_closed("1w", _u(2026, 11, 9), wed_session)
+    assert is_bar_closed("1w", _u(2026, 11, 2), wed_session)
+    assert is_bar_closed("1w", _u(2026, 11, 9), _u(2026, 11, 13, 21, 45))
+    now = _u(2026, 11, 11, 16, 20)  # 11:20 ET
+    assert not is_bar_closed("1h", _u(2026, 11, 11, 16), now)
+    assert is_bar_closed("1h", _u(2026, 11, 11, 15), now)
+    evening = _u(2026, 11, 12, 0, 0)
+    assert is_bar_closed("1h", _u(2026, 11, 11, 20), evening)  # RTH, settled
+    assert not is_bar_closed(
+        "1h", _u(2026, 11, 11, 23), _u(2026, 11, 11, 23, 30), extended_hours=True
+    )
+
+
+def test_newest_closed_key():
+    assert newest_closed_key("1d", _u(2026, 11, 14, 12)) == _u(2026, 11, 13)
+    assert newest_closed_key("1w", _u(2026, 11, 11, 16)) == _u(2026, 11, 2)
+    assert newest_closed_key("1w", _u(2026, 11, 14, 12)) == _u(2026, 11, 9)
+    assert newest_closed_key("1h", _u(2026, 11, 12, 0)) == _u(2026, 11, 11, 20)
+    assert newest_closed_key("4h", _u(2026, 11, 12, 0)) == _u(2026, 11, 11, 17)

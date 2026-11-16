@@ -21,6 +21,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
+from app import response_meta
 from app.cache import cache
 from app.config import settings
 from app.dependencies import VolatilityServiceDep, symbol_param
@@ -46,7 +47,10 @@ def _csv_response(data: Any, symbol: str, suffix: str) -> Response:
     return Response(
         content=csv_data,
         media_type=content_type,
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            **response_meta.csv_headers(),
+        },
     )
 
 
@@ -91,7 +95,7 @@ async def get_implied_volatility(
             symbol.canonical,
             "",
         )
-    return ResponseEnvelope(data=snapshot)
+    return response_meta.envelope(snapshot)
 
 
 @router.get("/{symbol}/history", response_model=ResponseEnvelope[VolatilityHistory])
@@ -147,7 +151,7 @@ async def get_implied_volatility_history(
             symbol.canonical,
             "_history",
         )
-    return ResponseEnvelope(data=history)
+    return response_meta.envelope(history)
 
 
 @router.get("/{symbol}/stats", response_model=ResponseEnvelope[VolatilityStats])
@@ -195,4 +199,4 @@ async def get_implied_volatility_stats(
     )
     if format == "csv":
         return _csv_response(stats, symbol.canonical, "_stats")
-    return ResponseEnvelope(data=stats)
+    return response_meta.envelope(stats)

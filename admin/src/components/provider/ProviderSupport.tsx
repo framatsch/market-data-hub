@@ -33,6 +33,12 @@ export function ProviderSupport({ provider }: { provider: Provider }) {
         <>
           <Row label="Last price" types={price_support.price_sec_types} />
           <Row label="Price history" types={price_support.price_history_sec_types} />
+          {price_support.native_intervals && (
+            <Row label="Native intervals" types={price_support.native_intervals} />
+          )}
+          {price_support.derived_intervals && (
+            <Row label="Derived intervals" types={price_support.derived_intervals} />
+          )}
         </>
       )}
       {options_support && (

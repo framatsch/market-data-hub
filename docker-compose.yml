@@ -16,6 +16,7 @@ services:
       MCP_ENABLED: ${MCP_ENABLED:-true}
       CACHE_ENABLED: ${CACHE_ENABLED:-true}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-}
       
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       KEYS_DB_PATH: /app/data/keys.db
@@ -29,6 +30,9 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
+        condition: service_healthy
+        required: false
     volumes:
       - keys-db:/app/data
       # Dev: bind app/ from host so Python changes take effect after docker-compose restart (no --build).
@@ -46,6 +50,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - market-data-hub
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: mdh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mdh}
+      POSTGRES_DB: mdh
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mdh -d mdh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - market-data-hub
 
@@ -82,3 +103,4 @@ networks:
 volumes:
   keys-db:
   redis-data:
+  postgres-data:

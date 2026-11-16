@@ -90,3 +90,36 @@ async def test_provider_config_list_all_merges_defaults_and_rows(repository) -> 
 
     assert {config.provider_name for config in configs} == set(KNOWN_PROVIDERS)
     assert next(config for config in configs if config.provider_name == "finnhub").enabled is False
+
+
+async def test_history_store_intervals_default_update_and_validation(repository) -> None:
+    assert (await repository.get("polygon")).history_store_intervals == ["1d"]
+    saved = await repository.save("polygon", {"history_store_intervals": ["1w", "1h"]})
+    assert saved.history_store_intervals == ["1w", "1h"]
+    assert (await repository.get("polygon")).history_store_intervals == ["1h", "1w"]
+    assert (await repository.save("polygon", {"history_store_intervals": []})).history_store_intervals == []
+    with pytest.raises(ValueError):
+        await repository.save("polygon", {"history_store_intervals": ["5m"]})
+    assert (await repository.get("polygon")).history_store_intervals == []
+    assert (await repository.get("ibkr")).history_store_intervals == ["1d"]
+
+
+async def test_existing_database_gets_the_new_column(tmp_path) -> None:
+    import sqlite3
+
+    from app.admin.provider_config_repository import ProviderConfigRepository
+
+    path = str(tmp_path / "old.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE provider_config (provider_name TEXT PRIMARY KEY, enabled INTEGER NOT NULL,"
+            " timeout_seconds REAL NOT NULL, retry_count INTEGER NOT NULL, retry_backoff_seconds REAL NOT NULL,"
+            " rate_limit_per_sec REAL NOT NULL, circuit_breaker_enabled INTEGER NOT NULL,"
+            " circuit_breaker_failure_threshold INTEGER NOT NULL, circuit_breaker_reset_seconds REAL NOT NULL,"
+            " connection_config_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO provider_config VALUES ('polygon',1,10,3,0.5,0,0,5,60,'{}','2026-01-01')"
+        )
+    repo = ProviderConfigRepository(path)
+    assert (await repo.get("polygon")).history_store_intervals == ["1d"]

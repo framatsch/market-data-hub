@@ -98,6 +98,7 @@ class IBKRProvider(
     ``_INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
     price, ``ContFuture`` for history). Option underlyings stay stock/ETF.
     """
+    native_intervals = frozenset({"1m", "2m", "5m", "15m", "30m", "1h", "1d", "1w"})
 
     price_sec_types = frozenset({"stock", "etf", "index", "future"})
     price_history_sec_types = frozenset({"stock", "etf", "index", "future"})

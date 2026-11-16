@@ -29,7 +29,7 @@ When enabled, the MCP server is exposed on the identical port (default `8000`) a
 The MCP server currently exposes the following tools to clients:
 
 - `get_last_price`: Retrieve the latest price for a given ticker symbol.
-- `get_historical_prices`: Fetch historical price data (candles) for a specific symbol.
+- `get_historical_prices`: Fetch historical price data (candles). Intervals: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w` at every provider; missing intervals are derived from smaller bars (`source_interval` marks them; `4h` buckets are clock-aligned in New York, weeks are ISO weeks, provider lookback and bar limits apply to the source bars).
 - `get_option_chain`: Retrieve the available options chain (strikes and expirations) for a symbol.
 - `get_option_quote`: Get a real-time quote for a specific option contract.
 - `get_company_profile`: Fetch fundamental profile information for a company.

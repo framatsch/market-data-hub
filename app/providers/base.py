@@ -38,6 +38,9 @@ class BasePriceProvider(ABC):
     # code, never the user's subscription (see PROVIDER_NOT_ENTITLED for that).
     price_sec_types: frozenset[str] = frozenset({"stock", "etf"})
     price_history_sec_types: frozenset[str] = frozenset({"stock", "etf"})
+    # Bar intervals (canonical notation) requested from the provider at exactly that
+    # length. Every other canonical interval is derived by PriceService.
+    native_intervals: frozenset[str] = frozenset({"1m", "5m", "1d"})
 
     def configure(self, config: Any) -> None:
         """Apply runtime configuration from the admin repository."""

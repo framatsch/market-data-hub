@@ -1136,3 +1136,14 @@ Use `.ocr/skills/SKILL.md` to learn:
 
 Keep this managed block so `ocr init` can refresh the instructions.
 <!-- OCR:END -->
+
+
+## Price intervals and history store
+
+- Providers declare `native_intervals` (canonical notation); `PriceService` derives every other
+  canonical interval (`1m 5m 15m 1h 4h 1d 1w`) from the largest dividing native interval and
+  rejects the rest with 422. Never map an interval to bars of another length in a provider.
+- `PriceService`/`VolatilityService` route closed-bar history through `app/store/` when
+  `DATABASE_URL` is set and the interval is in the provider's `history_store_intervals`.
+  Services record `meta.data_as_of`/stale state through `app/response_meta.py`; routes call
+  `response_meta.envelope(...)`.

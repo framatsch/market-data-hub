@@ -87,6 +87,8 @@ curl "http://localhost:8000/options/IWM/chain?expiry=2026-01-13&min_strike=227&m
 curl "http://localhost:8000/companies/AAPL?provider=lseg"
 curl "http://localhost:8000/prices/I:SPX/last?provider=ibkr"
 curl "http://localhost:8000/prices/F:ES/history?provider=lseg&interval=1d"
+# Intervals: 1m 5m 15m 1h 4h 1d 1w at every provider (missing ones are derived from smaller
+# bars and marked with source_interval). Responses carry meta.data_as_of.
 ```
 
 WebSocket: connect to `ws://localhost:8000/ws/prices` and send `{"type":"subscribe","symbols":["AAPL"],"provider":"ibkr"}`.

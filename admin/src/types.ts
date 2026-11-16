@@ -7,6 +7,8 @@ export interface Provider {
   price_support?: {
     price_sec_types: string[];
     price_history_sec_types: string[];
+    native_intervals?: string[];
+    derived_intervals?: string[];
   } | null;
   options_support?: {
     option_underlying_sec_types: string[];
@@ -58,6 +60,7 @@ export interface ProviderConfig {
   circuit_breaker_reset_seconds: number;
   connection_config_json: string;
   connection_config?: Record<string, unknown>;
+  history_store_intervals?: string[];
 }
 
 /**
@@ -124,4 +127,28 @@ export interface CacheClearResult {
   deleted: number;
   scope: CacheScope;
   provider: string | null;
+}
+
+export type StoredInterval = '1h' | '4h' | '1d' | '1w';
+
+export interface HistoryStoreDatasetStatus {
+  series: number;
+  rows: number;
+  oldest: string | null;
+  newest: string | null;
+  newest_synced_at: string | null;
+  intervals?: Record<string, HistoryStoreDatasetStatus>;
+}
+
+export interface HistoryStoreStatus {
+  state: 'disabled' | 'connected' | 'unavailable';
+  database_url: string;
+  settings: { resync_seconds: number; overlap_bars: number; migrate_on_startup: boolean };
+  prices: HistoryStoreDatasetStatus | null;
+  iv: HistoryStoreDatasetStatus | null;
+}
+
+export interface HistoryStoreClearResult {
+  deleted_series: number;
+  deleted_rows: number;
 }
