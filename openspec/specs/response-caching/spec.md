@@ -487,3 +487,40 @@ The following SHALL NOT be cached and SHALL NOT carry a cache-derived `Cache-Con
 - **WHEN** the default provider is changed in the Admin UI
 - **THEN** the next `GET /providers` immediately shows the new default
 
+### Requirement: Day-granular keys for daily-or-longer history
+For `GET /prices/{symbol}/history` with a daily-or-longer interval (`1d`, `1w`, `1wk`, `1mo`, or no interval), the cache key SHALL contain `start` and `end` reduced to their UTC calendar date (`YYYY-MM-DD`); naive values SHALL be interpreted as UTC. Keys of intraday intervals SHALL keep the full values.
+
+#### Scenario: Moving start time
+- **WHEN** `GET /prices/AAPL/history?interval=1d&start=2025-03-06T08:55:01.137706+00:00&provider=schwab` and the same request with `start=2025-03-06T12:22:29.566314+00:00` are sent
+- **THEN** both resolve to `mdh:prices:history:AAPL:interval=1d&provider=schwab&start=2025-03-06` and the second is a cache hit
+
+#### Scenario: Next day
+- **WHEN** the same request is sent with a `start` on 2025-03-07
+- **THEN** it resolves to a different key
+
+#### Scenario: Intraday unchanged
+- **WHEN** `interval=5m&start=2026-11-16T14:30:00Z` is requested
+- **THEN** the key contains the full `start` value
+
+### Requirement: Stale responses are never cached
+A response that carries `meta.stale` `true` SHALL NOT be written to the cache and SHALL be sent with `Cache-Control: no-store`.
+
+#### Scenario: Provider recovers
+- **WHEN** a daily-history request is answered with stored bars because the provider timed out, and the provider works again for the next identical request
+- **THEN** the second request calls the provider and returns a response without `meta.stale`
+
+### Requirement: Normalized interval in price history keys
+For `GET /prices/{symbol}/history` and the MCP tool for historical prices, the cache key SHALL contain the interval in its normalized form as defined by `derived-price-intervals` (lower case, `60m` as `1h`, `1wk` as `1w`). The rules that depend on the interval, namely the day-granular `start` and `end` of daily-or-longer history and the bar-state-aware lifetime, SHALL be applied to the normalized interval. An interval that cannot be normalized SHALL keep its given value in the key.
+
+#### Scenario: Alias shares the entry
+- **WHEN** `GET /prices/AAPL/history?interval=1wk&start=2025-03-06&provider=ibkr` and the same request with `interval=1w` are sent
+- **THEN** both resolve to `mdh:prices:history:AAPL:interval=1w&provider=ibkr&start=2025-03-06` and the second is a cache hit
+
+#### Scenario: Upper-case weekly interval is day-granular
+- **WHEN** `interval=1W&start=2025-03-06T08:55:01+00:00` is requested
+- **THEN** the key contains `interval=1w` and `start=2025-03-06`
+
+#### Scenario: Derived interval
+- **WHEN** `interval=4h` is requested from Schwab and derived from `30m`
+- **THEN** the key contains `interval=4h`, not the source interval
+
