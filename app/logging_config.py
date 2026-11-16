@@ -43,6 +43,20 @@ class HealthCheckFilter(logging.Filter):
         return True
 
 
+class WebsocketGoingAwayFilter(logging.Filter):
+    """Drop websocket-client's ERROR log for a normal 1001 ("Going Away") close.
+
+    refinitiv-data fetches real-time FIDs via a short-lived streaming snapshot:
+    connect, subscribe, receive refresh, close. The LSEG server acknowledges the
+    close with status 1001, which websocket-client logs as ``close status: 1001``
+    at ERROR level even though the connection ended normally. Other close codes
+    (e.g. 1008, 4xxx auth errors) are still logged.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().strip() != "close status: 1001"
+
+
 class RequestContextFilter(logging.Filter):
     """Attach request contextvars to standard logging records."""
 
@@ -138,6 +152,11 @@ def setup_logging() -> None:
 
     # Suppress ib_async.wrapper ERROR logs for subscription errors (10089/10091)
     logging.getLogger("ib_async.wrapper").setLevel(logging.CRITICAL)
+
+    # Suppress benign websocket "close status: 1001" errors from LSEG snapshots
+    websocket_logger = logging.getLogger("websocket")
+    if not any(isinstance(f, WebsocketGoingAwayFilter) for f in websocket_logger.filters):
+        websocket_logger.addFilter(WebsocketGoingAwayFilter())
 
 
 def get_uvicorn_log_config(log_level: str = "info") -> dict[str, Any]:

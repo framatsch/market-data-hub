@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records. A missing market is now accepted when the exact `<SYMBOL>ATMIV.U` record and its
   underlying (`AAPL.O`, `SPY`) match the requested symbol, as already done for indices; futures
   records and an explicitly conflicting market remain errors.
+- The benign websocket "close status: 1001" ERROR log that LSEG snapshot requests produce on a normal close is
+  suppressed; other close codes are still logged.
 - History store: naive bar timestamps (for example IBKR daily bars) were stored in the system
   time zone instead of UTC.
 
