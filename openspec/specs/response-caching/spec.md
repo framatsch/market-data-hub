@@ -205,7 +205,7 @@ Naive `end` datetimes SHALL be interpreted as UTC. `1m` means minute and `1mo` m
 - **THEN** the intraday rules apply, while `interval=1mo` follows the daily-or-longer rules
 
 ### Requirement: Runtime-configurable cache policy
-The cache policy SHALL be adjustable at runtime via the Admin API/UI without restart and SHALL be persisted in `system_settings`. The stored keys are `cache_ttl_option_chain_seconds`, `cache_ttl_historical_closed_seconds`, `cache_ttl_historical_open_bar_seconds`, `cache_ttl_historical_intraday_seconds`, `cache_ttl_company_profile_seconds`, `cache_ttl_company_search_seconds`, `cache_ttl_company_news_seconds`, `cache_ttl_market_status_seconds`, `cache_ttl_volatility_seconds` and `cache_extend_when_market_closed`. Environment values serve as defaults when no stored value exists. TTLs SHALL be integers from 0 to 2592000 (30 days). `0` disables caching for that policy, including its market-closed extension. Changes SHALL apply to entries written after the change; existing entries keep their remaining lifetime. Each replica SHALL pick up stored changes within 30 s. The same policy SHALL govern HTTP and MCP entries.
+The cache policy SHALL be adjustable at runtime via the Admin API/UI without restart and SHALL be persisted in `system_settings`. The stored keys are `cache_ttl_option_chain_seconds`, `cache_ttl_historical_closed_seconds`, `cache_ttl_historical_open_bar_seconds`, `cache_ttl_historical_intraday_seconds`, `cache_ttl_company_profile_seconds`, `cache_ttl_company_search_seconds`, `cache_ttl_company_news_seconds`, `cache_ttl_market_status_seconds`, `cache_ttl_volatility_seconds`, `cache_ttl_earnings_seconds` and `cache_extend_when_market_closed`. Environment values serve as defaults when no stored value exists. TTLs SHALL be integers from 0 to 2592000 (30 days). `0` disables caching for that policy, including its market-closed extension. Changes SHALL apply to entries written after the change; existing entries keep their remaining lifetime. Each replica SHALL pick up stored changes within 30 s. The same policy SHALL govern HTTP and MCP entries.
 
 #### Scenario: Change TTL in Admin UI
 - **WHEN** an admin sets the option-chain TTL to 300 s
@@ -230,6 +230,10 @@ The cache policy SHALL be adjustable at runtime via the Admin API/UI without res
 #### Scenario: Env default
 - **WHEN** no value is stored in `system_settings`
 - **THEN** the corresponding `CACHE_*` environment value is used
+
+#### Scenario: Earnings TTL zero
+- **WHEN** the earnings TTL is set to 0
+- **THEN** earnings calendar, next-earnings and company-earnings responses and the earnings MCP tools are not written to Redis
 
 ### Requirement: Accurate Cache-Control header
 On a cache MISS the `Cache-Control: max-age` header SHALL equal the effective TTL used for the Redis write (not a static decorator value). On a HIT it SHALL equal the remaining TTL. When the effective TTL is 0, the response SHALL carry `Cache-Control: no-store`.
@@ -257,11 +261,11 @@ Clients SHALL be able to bypass the cache: `Cache-Control: no-cache` forces a li
 - **THEN** the provider is called and the cache entry is overwritten with the fresh result
 
 ### Requirement: Admin cache status endpoint
-`GET /api/admin/cache` SHALL require admin authentication and return the cache state (`disabled` | `connected` | `unavailable`), the redacted Redis URL (no password), the effective cache policy (with its env defaults), the current market state (`session` | `settle_grace` | `settled`) with the next open timestamp, Redis memory usage (`used_memory`, `maxmemory`), and the number of keys per cached endpoint group (`options_chain`, `historical_prices`, `company_profile`, `company_search`, `company_news`, `market_status`, `volatility`, each including MCP entries) counted via non-blocking `SCAN`.
+`GET /api/admin/cache` SHALL require admin authentication and return the cache state (`disabled` | `connected` | `unavailable`), the redacted Redis URL (no password), the effective cache policy (with its env defaults), the current market state (`session` | `settle_grace` | `settled`) with the next open timestamp, Redis memory usage (`used_memory`, `maxmemory`), and the number of keys per cached endpoint group (`options_chain`, `historical_prices`, `company_profile`, `company_search`, `company_news`, `market_status`, `volatility`, `earnings`, each including MCP entries) counted via non-blocking `SCAN`.
 
 #### Scenario: Status with Redis connected
 - **WHEN** an admin requests `GET /api/admin/cache` and Redis is reachable
-- **THEN** the response contains `state: "connected"` and key counts for all seven cached endpoint groups
+- **THEN** the response contains `state: "connected"` and key counts for all eight cached endpoint groups
 
 #### Scenario: Status without Redis
 - **WHEN** Redis is unreachable
@@ -272,7 +276,7 @@ Clients SHALL be able to bypass the cache: `Cache-Control: no-cache` forces a li
 - **THEN** the API responds with 401
 
 ### Requirement: Admin cache clear endpoint
-`POST /api/admin/cache/clear` SHALL require admin authentication and a body with `confirm: true`. It SHALL accept an optional `scope` (`all` default, `options_chain`, `historical_prices`, `company_profile`, `company_search`, `company_news`, `market_status` or `volatility`) and an optional `provider` filter. Each scope SHALL match both HTTP and MCP entries of its endpoints. The `volatility` scope SHALL match `mdh:volatility:*`, covering snapshot, history and stats. It SHALL delete only matching `mdh:*` keys using `SCAN` + `UNLINK` (never `KEYS`/`FLUSHDB`), return the number of deleted keys, and write an audit log entry with the admin principal, scope, provider and count.
+`POST /api/admin/cache/clear` SHALL require admin authentication and a body with `confirm: true`. It SHALL accept an optional `scope` (`all` default, `options_chain`, `historical_prices`, `company_profile`, `company_search`, `company_news`, `market_status`, `volatility` or `earnings`) and an optional `provider` filter. Each scope SHALL match both HTTP and MCP entries of its endpoints. The `volatility` scope SHALL match `mdh:volatility:*`, covering snapshot, history and stats. The `earnings` scope SHALL match `mdh:earnings:*` (including the provider calendar entries) and `mdh:companies:earnings:*`. It SHALL delete only matching `mdh:*` keys using `SCAN` + `UNLINK` (never `KEYS`/`FLUSHDB`), return the number of deleted keys, and write an audit log entry with the admin principal, scope, provider and count.
 
 #### Scenario: Clear everything
 - **WHEN** an admin posts `{"confirm": true}`
@@ -289,6 +293,10 @@ Clients SHALL be able to bypass the cache: `Cache-Control: no-cache` forces a li
 #### Scenario: Clear implied volatility
 - **WHEN** an admin posts `{"confirm": true, "scope": "volatility", "provider": "lseg"}`
 - **THEN** only `mdh:volatility:*` keys whose provider is `lseg` are removed, including MCP entries
+
+#### Scenario: Clear earnings
+- **WHEN** an admin posts `{"confirm": true, "scope": "earnings"}`
+- **THEN** only `mdh:earnings:*` and `mdh:companies:earnings:*` keys are removed, including MCP entries, and company profile entries stay
 
 #### Scenario: Missing confirmation
 - **WHEN** the body lacks `confirm: true`
@@ -523,4 +531,15 @@ For `GET /prices/{symbol}/history` and the MCP tool for historical prices, the c
 #### Scenario: Derived interval
 - **WHEN** `interval=4h` is requested from Schwab and derived from `30m`
 - **THEN** the key contains `interval=4h`, not the source interval
+
+### Requirement: Earnings caching
+`GET /earnings/calendar`, `GET /earnings/next` and `GET /companies/{symbol}/earnings` SHALL be cached for JSON and CSV with the earnings TTL (default 21600 s = 6 h). Their key route segments SHALL be `earnings:calendar`, `earnings:next` and `companies:earnings`. The `symbols` parameter SHALL be normalised in the key (upper case, de-duplicated, sorted); `from` and `to` SHALL be day-granular. `GET /earnings/next` SHALL return its rows in the request order also on a cache hit. The market-closed extension SHALL NOT apply. Responses with `meta.stale = true` SHALL NOT be cached.
+
+#### Scenario: Symbol order does not split the cache
+- **WHEN** `GET /earnings/next?symbols=MSFT,AAPL` and then `GET /earnings/next?symbols=AAPL,MSFT` are requested within 6 h
+- **THEN** the second request is a cache hit and its rows are in the order AAPL, MSFT
+
+#### Scenario: Earnings key does not collide with the profile
+- **WHEN** the admin clears scope `company_profile`
+- **THEN** cached company earnings entries are not deleted
 
