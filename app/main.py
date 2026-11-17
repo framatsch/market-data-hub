@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.api import (
     routes_admin,
     routes_companies,
+    routes_earnings,
     routes_meta,
     routes_options,
     routes_prices,
@@ -150,6 +151,7 @@ app.add_middleware(CacheControlMiddleware)
 app.include_router(routes_meta.router)
 app.include_router(routes_prices.router)
 app.include_router(routes_companies.router)
+app.include_router(routes_earnings.router)
 app.include_router(routes_options.router)
 app.include_router(routes_volatility.router)
 app.include_router(routes_ws.router)
@@ -250,7 +252,11 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
     elif exc.code == "PROVIDER_NOT_ENTITLED":
         status_code = 403
     elif exc.code == "CAPABILITY_NOT_SUPPORTED":
-        status_code = 501
+        # A request-level refusal (e.g. earnings of an ETF) is a 422, a missing
+        # provider implementation a 501.
+        status_code = 422 if exc.details.get("http_status") == 422 else 501
+    elif exc.code == "PROVIDER_QUOTA_EXHAUSTED":
+        status_code = 429
     elif exc.code in (
         "PROVIDER_NOT_AVAILABLE",
         "PROVIDER_TIMEOUT",

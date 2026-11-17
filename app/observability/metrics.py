@@ -2,7 +2,7 @@ from prometheus_client import CollectorRegistry, Counter, Histogram, generate_la
 
 REGISTRY = CollectorRegistry()
 
-PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none"})
+PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets"})
 ENDPOINTS = frozenset(
     {
         "prices",
@@ -30,6 +30,13 @@ REQUEST_DURATION = Histogram(
     "HTTP request duration in seconds for Market Data Hub.",
     ("provider", "endpoint", "status_class"),
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    registry=REGISTRY,
+)
+
+UPSTREAM_REQUESTS = Counter(
+    "mdh_provider_upstream_requests_total",
+    "Actual upstream attempts sent to metered providers, across all capabilities.",
+    ("provider",),
     registry=REGISTRY,
 )
 

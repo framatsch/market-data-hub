@@ -27,8 +27,27 @@ export interface Provider {
     timeout_seconds?: number;
     retry_count?: number;
     rate_limit_per_sec?: number;
+    connection_config?: Record<string, unknown>;
   };
   connection_config?: Record<string, unknown>;
+  /** How the provider's price bars are adjusted: `none` (raw) or `unknown`. */
+  price_adjustment?: 'none' | 'unknown' | null;
+}
+
+export interface UsagePeriod {
+  used: number;
+  budget: number;
+  resets_at: string;
+}
+
+/** GET /api/admin/providers/{name}/usage (metered providers only). */
+export interface ProviderUsage {
+  provider: string;
+  day: UsagePeriod;
+  month: UsagePeriod;
+  /** False when the counters are process-local (Redis unavailable). */
+  shared: boolean;
+  day_exhausted: boolean;
 }
 
 export interface SchwabAuthStatus {
@@ -96,6 +115,7 @@ export interface SystemDefaults {
   default_options_provider?: string;
   default_news_provider?: string;
   default_volatility_provider?: string;
+  default_earnings_provider?: string;
 }
 
 export interface CachePolicy {
@@ -108,6 +128,7 @@ export interface CachePolicy {
   company_news_seconds: number;
   market_status_seconds: number;
   volatility_seconds: number;
+  earnings_seconds: number;
   extend_when_market_closed: boolean;
 }
 
@@ -121,7 +142,7 @@ export interface CacheStatus {
   key_counts: Record<Exclude<CacheScope, 'all'>, number> | null;
 }
 
-export type CacheScope = 'all' | 'options_chain' | 'historical_prices' | 'company_profile' | 'company_search' | 'company_news' | 'market_status' | 'volatility';
+export type CacheScope = 'all' | 'options_chain' | 'historical_prices' | 'company_profile' | 'company_search' | 'company_news' | 'market_status' | 'volatility' | 'earnings';
 
 export interface CacheClearResult {
   deleted: number;

@@ -36,10 +36,10 @@ services:
     volumes:
       - keys-db:/app/data
       # Dev: bind app/ from host so Python changes take effect after docker-compose restart (no --build).
-      - ./app:/app/app
+      #- ./app:/app/app
       # Dev: bind built admin bundle from host.
       # Run `cd admin && npm run build:watch` once; browser reload picks up changes without docker rebuild.
-      - ./admin/dist:/app/static/admin
+      #- ./admin/dist:/app/static/admin
     # command is inherited from Dockerfile (uv run python -m app.main)
     healthcheck:
       test: [

@@ -44,6 +44,7 @@ from app.market_hours import (
     next_open,
     next_transition,
 )
+from app.models.earnings import earnings_today
 from app.providers.registry import registry
 from app.utils.intervals import normalize_interval
 from app.utils.symbols import ParsedSymbol, parse_symbol
@@ -60,6 +61,7 @@ CacheScope = Literal[
     "company_news",
     "market_status",
     "volatility",
+    "earnings",
 ]
 Ttl = Annotated[StrictInt, Field(ge=0, le=2592000)]
 _request: ContextVar[Request | None] = ContextVar("mdh_cache_request", default=None)
@@ -72,7 +74,12 @@ _PATTERNS = {
     "company_news": "mdh:companies:news:*",
     "market_status": "mdh:market-status:*",
     "volatility": "mdh:volatility:*",
+    "earnings": "mdh:earnings:*",
 }
+# Scopes that also own keys under another prefix (company earnings sit beside the
+# company profile keys but must not be cleared with them).
+_EXTRA_PATTERNS: dict[str, tuple[str, ...]] = {"earnings": ("mdh:companies:earnings:*",)}
+_EARNINGS_ROUTES = frozenset({"earnings:calendar", "earnings:next", "companies:earnings"})
 
 
 class CachePolicyValues(BaseModel):
@@ -86,6 +93,7 @@ class CachePolicyValues(BaseModel):
     company_news_seconds: Ttl
     market_status_seconds: Ttl
     volatility_seconds: Ttl
+    earnings_seconds: Ttl
     extend_when_market_closed: StrictBool
 
 
@@ -100,6 +108,7 @@ class CachePolicyUpdate(BaseModel):
     company_news_seconds: Ttl | None = None
     market_status_seconds: Ttl | None = None
     volatility_seconds: Ttl | None = None
+    earnings_seconds: Ttl | None = None
     extend_when_market_closed: StrictBool | None = None
 
     @field_validator("*")
@@ -121,6 +130,7 @@ def policy_defaults() -> CachePolicyValues:
         company_news_seconds=settings.CACHE_TTL_COMPANY_NEWS_SECONDS,
         market_status_seconds=settings.CACHE_TTL_MARKET_STATUS_SECONDS,
         volatility_seconds=settings.CACHE_TTL_VOLATILITY_SECONDS,
+        earnings_seconds=settings.CACHE_TTL_EARNINGS_SECONDS,
         extend_when_market_closed=settings.CACHE_EXTEND_WHEN_MARKET_CLOSED,
     )
 
@@ -190,6 +200,9 @@ class CachePolicy:
             "/volatility/{symbol}": "volatility:snapshot",
             "/volatility/{symbol}/history": "volatility:history",
             "/volatility/{symbol}/stats": "volatility:stats",
+            "/earnings/calendar": "earnings:calendar",
+            "/earnings/next": "earnings:next",
+            "/companies/{symbol}/earnings": "companies:earnings",
         }.get(route, route)
         company_ttls = {
             "companies:profile": values.company_profile_seconds,
@@ -198,6 +211,8 @@ class CachePolicy:
         }
         if route in company_ttls:
             return company_ttls[route]
+        if route in _EARNINGS_ROUTES:
+            return values.earnings_seconds  # no market-closed extension
         if route == "market-status":
             until_transition = int((as_utc(next_transition(now)) - now).total_seconds())
             return min(values.market_status_seconds, until_transition)
@@ -273,6 +288,9 @@ policy = CachePolicy()
 def _key_parts(key: str | bytes) -> tuple[str, dict[str, str]]:
     text = key.decode() if isinstance(key, bytes) else key
     segments = text.split(":")
+    if text.startswith("mdh:earnings:provider-calendar:"):
+        # mdh:earnings:provider-calendar:<provider>:<horizon>
+        return "earnings:provider-calendar", {"provider": segments[3]}
     route = ":".join(segments[1:-2])
     return route, dict(parse_qsl(segments[-1]))
 
@@ -316,6 +334,15 @@ def _compose_key(
             params[name] = params[name].lower()
     if route_key == "companies:search" and "q" in params:
         params["q"] = " ".join(params["q"].split()).lower()
+    if route_key in _EARNINGS_ROUTES:
+        if "symbols" in params:
+            names = {name.strip().upper() for name in params["symbols"].split(",")}
+            params["symbols"] = ",".join(sorted(name for name in names if name))
+        for name in ("from", "to", "from_date", "to_date"):
+            if name in params:
+                params[name] = params[name][:10]
+        # Defaults and days_until move with the New York date.
+        params["asof"] = earnings_today().isoformat()
     if route_key == "prices:history":
         if "interval" in params:
             params["interval"] = normalize_interval(params["interval"])
@@ -331,6 +358,9 @@ def _compose_key(
             "volatility:snapshot": registry.default_volatility_provider,
             "volatility:history": registry.default_volatility_provider,
             "volatility:stats": registry.default_volatility_provider,
+            "earnings:calendar": registry.default_earnings_provider,
+            "earnings:next": registry.default_earnings_provider,
+            "companies:earnings": registry.default_earnings_provider,
         }.get(route_key)
         if default:
             params["provider"] = default.lower()
@@ -399,9 +429,16 @@ class MdhJsonCoder(JsonCoder):
 
 
 def cache(
-    *, expire: int, key: str = ""
+    *,
+    expire: int,
+    key: str = "",
+    post: Callable[[Any, Request | None], Any] | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R | Response]]]:
-    """Delegate to fastapi-cache2, preserving its headers on concrete CSV Responses."""
+    """Delegate to fastapi-cache2, preserving its headers on concrete CSV Responses.
+
+    `post` adapts hit and miss results alike (e.g. restoring the request order of a
+    list that is cached in a canonical order).
+    """
 
     def decorate(
         func: Callable[P, Awaitable[R]],
@@ -418,6 +455,8 @@ def cache(
             meta_token = response_meta.begin(no_cache=no_cache)
             try:
                 result = await cached(*args, **kwargs)
+                if post is not None and not isinstance(result, Response):
+                    result = post(result, request if isinstance(request, Request) else None)
                 injected = kwargs.get("__fastapi_cache_response")
                 if response_meta.current().stale and isinstance(injected, Response):
                     injected.headers["Cache-Control"] = "no-store"
@@ -641,8 +680,9 @@ async def cache_status() -> dict[str, Any]:
             if name == "all":
                 continue
             counts[name] = 0
-            async for _ in _backend.redis.scan_iter(match=pattern, count=500):
-                counts[name] += 1
+            for match in (pattern, *_EXTRA_PATTERNS.get(name, ())):
+                async for _ in _backend.redis.scan_iter(match=match, count=500):
+                    counts[name] += 1
         _backend.recovered()
         result.update(
             state="connected",
@@ -663,13 +703,14 @@ async def clear_cache(scope: CacheScope = "all", provider: str | None = None) ->
     deleted = 0
     batch = []
     try:
-        async for key in _backend.redis.scan_iter(match=_PATTERNS[scope], count=500):
-            if provider and _key_parts(key)[1].get("provider") != provider.lower():
-                continue
-            batch.append(key)
-            if len(batch) == 500:
-                deleted += int(await _backend.redis.unlink(*batch))
-                batch.clear()
+        for match in (_PATTERNS[scope], *_EXTRA_PATTERNS.get(scope, ())):
+            async for key in _backend.redis.scan_iter(match=match, count=500):
+                if provider and _key_parts(key)[1].get("provider") != provider.lower():
+                    continue
+                batch.append(key)
+                if len(batch) == 500:
+                    deleted += int(await _backend.redis.unlink(*batch))
+                    batch.clear()
         if batch:
             deleted += int(await _backend.redis.unlink(*batch))
         _backend.recovered()

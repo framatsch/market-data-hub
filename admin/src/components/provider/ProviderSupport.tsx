@@ -39,6 +39,9 @@ export function ProviderSupport({ provider }: { provider: Provider }) {
           {price_support.derived_intervals && (
             <Row label="Derived intervals" types={price_support.derived_intervals} />
           )}
+          {provider.price_adjustment && (
+            <Row label="Price adjustment" types={[provider.price_adjustment]} />
+          )}
         </>
       )}
       {options_support && (

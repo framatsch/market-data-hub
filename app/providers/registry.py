@@ -27,13 +27,16 @@ from app.admin.provider_config_repository import (
 )
 from app.admin.settings_repository import SettingsRepository
 from app.config import settings
+from app.providers.alphavantage import AlphaVantageProvider
 from app.providers.base import (
     BaseCompanyProvider,
+    BaseEarningsProvider,
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
     BaseVolatilityProvider,
 )
+from app.providers.financialdatasets import FinancialDatasetsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.providers.ibkr import IBKRProvider
 from app.providers.lseg import LSEGProvider
@@ -51,6 +54,7 @@ DEFAULT_PROVIDER_FALLBACKS = {
     "default_options_provider": None,
     "default_news_provider": None,
     "default_volatility_provider": None,
+    "default_earnings_provider": None,
 }
 
 
@@ -63,6 +67,8 @@ class ProviderRegistry:
         "finnhub": FinnhubProvider,
         "polygon": PolygonProvider,
         "prixe": PrixeProvider,
+        "alphavantage": AlphaVantageProvider,
+        "financialdatasets": FinancialDatasetsProvider,
     }
 
     def __init__(self) -> None:
@@ -76,6 +82,7 @@ class ProviderRegistry:
         self.default_options_provider: str | None = None
         self.default_news_provider: str | None = None
         self.default_volatility_provider: str | None = None
+        self.default_earnings_provider: str | None = None
         self._initialize_providers()
 
     def _get_reload_lock(self) -> asyncio.Lock:
@@ -127,6 +134,11 @@ class ProviderRegistry:
             "default_volatility_provider",
             BaseVolatilityProvider,
         )
+        self.default_earnings_provider = self._resolve_default(
+            values["default_earnings_provider"],
+            "default_earnings_provider",
+            BaseEarningsProvider,
+        )
 
     def _initialize_providers(self) -> None:
         # Parse enabled providers from config
@@ -141,7 +153,8 @@ class ProviderRegistry:
             }
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
-            to_load = self.provider_classes
+            to_load = {name: cls for name, cls in self.provider_classes.items()
+                       if name not in {"alphavantage", "financialdatasets"}}
 
         for name, cls in to_load.items():
             try:
@@ -200,6 +213,7 @@ class ProviderRegistry:
                     "default_options_provider",
                     "default_news_provider",
                     "default_volatility_provider",
+                    "default_earnings_provider",
                 )
                 for key in default_setting_keys:
                     if key not in system_settings:
@@ -338,6 +352,7 @@ class ProviderRegistry:
             "options": BaseOptionsProvider,
             "news": BaseNewsProvider,
             "volatility": BaseVolatilityProvider,
+            "earnings": BaseEarningsProvider,
         }
         return {
             capability: [
@@ -417,6 +432,34 @@ class ProviderRegistry:
         if not provider or not isinstance(provider, BaseVolatilityProvider):
             raise InvalidProviderError(provider_name)
         return provider
+
+    def get_earnings_provider(self, name: str | None = None) -> BaseEarningsProvider:
+        provider_name = name or self.default_earnings_provider
+        if provider_name is None:
+            raise AppError(
+                "No earnings provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = self._providers.get(provider_name)
+        if not isinstance(provider, BaseEarningsProvider):
+            raise InvalidProviderError(provider_name)
+        return provider
+
+    @asynccontextmanager
+    async def use_earnings_provider(
+        self, name: str | None = None
+    ) -> AsyncIterator[BaseEarningsProvider]:
+        provider_name = name or self.default_earnings_provider
+        if provider_name is None:
+            raise AppError(
+                "No earnings provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        provider = await self._acquire_provider(provider_name, BaseEarningsProvider)
+        try:
+            yield provider
+        finally:
+            self._release_provider(provider)
 
     def get_news_provider(self, name: str | None = None) -> BaseNewsProvider:
         if name is None and self.default_news_provider is None:
@@ -580,5 +623,7 @@ def get_provider(provider_type: str, name: str | None = None) -> Any:
         return reg.get_news_provider(name)
     elif provider_type == "volatility":
         return reg.get_volatility_provider(name)
+    elif provider_type == "earnings":
+        return reg.get_earnings_provider(name)
     else:
         raise InvalidProviderError(f"Unknown provider type: {provider_type}")

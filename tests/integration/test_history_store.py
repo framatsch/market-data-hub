@@ -35,7 +35,8 @@ async def _drop_all(eng):
     async with eng.begin() as conn:
         await conn.execute(
             text(
-                "DROP TABLE IF EXISTS iv_points_daily, price_bars, "
+                "DROP TABLE IF EXISTS earnings_events, earnings_sync, "
+                "iv_points_daily, price_bars, "
                 "history_series, alembic_version CASCADE"
             )
         )

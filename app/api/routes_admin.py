@@ -26,6 +26,7 @@ from app.models.connection import ConnectionTestResult
 from app.observability.audit import audit_log
 from app.providers.base import (
     BaseCompanyProvider,
+    BaseEarningsProvider,
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
@@ -79,6 +80,8 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
     "polygon": {"api_key"},
     "lseg": {"app_key", "username", "password"},
     "prixe": {"api_key"},
+    "alphavantage": {"api_key"},
+    "financialdatasets": {"api_key"},
 }
 
 PROVIDER_CAPABILITIES: dict[str, list[str]] = {
@@ -89,6 +92,8 @@ PROVIDER_CAPABILITIES: dict[str, list[str]] = {
     "polygon": ["prices", "companies"],
     "mock": ["news"],
     "prixe": ["prices"],
+    "alphavantage": ["prices", "earnings"],
+    "financialdatasets": ["prices", "companies", "earnings"],
 }
 
 
@@ -117,6 +122,7 @@ class SystemDefaultsUpdate(BaseModel):
     default_options_provider: str | None = None
     default_news_provider: str | None = None
     default_volatility_provider: str | None = None
+    default_earnings_provider: str | None = None
 
 
 class CacheClearRequest(BaseModel):
@@ -386,6 +392,8 @@ def _provider_capabilities(name: str, provider: object | None) -> list[str]:
         capabilities.append("news")
     if isinstance(provider, BaseVolatilityProvider):
         capabilities.append("volatility")
+    if isinstance(provider, BaseEarningsProvider):
+        capabilities.append("earnings")
     return capabilities
 
 
@@ -475,6 +483,7 @@ def _system_defaults() -> dict[str, str]:
         "default_options_provider": registry.default_options_provider or "",
         "default_news_provider": registry.default_news_provider or "",
         "default_volatility_provider": registry.default_volatility_provider or "",
+        "default_earnings_provider": registry.default_earnings_provider or "",
     }
 
 
@@ -612,6 +621,7 @@ async def get_admin_settings_capabilities(
         "companies": [],
         "news": [],
         "volatility": [],
+        "earnings": [],
     }
     for config in await get_provider_config_repository().list_all():
         if not config.enabled:
@@ -629,6 +639,7 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
         {
             **_provider_status(name, configs[name]),
             "price_support": _provider_price_support(name),
+            "price_adjustment": getattr(_provider_for_support(name, BasePriceProvider), "price_adjustment", None),
             "options_support": _provider_options_support(name),
             "volatility_support": _provider_volatility_support(name),
             "config": configs[name].model_dump(),
@@ -676,6 +687,20 @@ async def get_admin_provider_config(
         return (await get_provider_config_repository().get(provider_name)).model_dump()
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/providers/{provider_name}/usage")
+async def get_admin_provider_usage(
+    provider_name: str, _principal: PrincipalDep,
+) -> dict[str, Any]:
+    from app.providers.request_budget import BUDGET_DEFAULTS, RequestBudget
+
+    if provider_name not in BUDGET_DEFAULTS:
+        raise HTTPException(status_code=404, detail="Provider has no metered request budget")
+    config = await get_provider_config_repository().get(provider_name)
+    budget = RequestBudget(provider_name)
+    budget.configure(config.connection_config)
+    return await budget.usage()
 
 
 @router.put("/providers/{provider_name}/config")

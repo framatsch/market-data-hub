@@ -43,6 +43,7 @@ def test_status_states(client, cache_redis, monkeypatch):
     assert body["key_counts"] == {
         "options_chain": 1, "historical_prices": 1, "company_profile": 0,
         "company_search": 0, "company_news": 0, "market_status": 0, "volatility": 0,
+        "earnings": 0,
     }
     assert body["memory"]["used_memory"] == 1024
     assert body["market"]["state"] in {"session", "settle_grace", "settled"}
@@ -187,11 +188,11 @@ def test_new_scopes_count_and_clear_http_mcp(client, cache_redis, scope, route):
     assert "mdh:options:chain:AAPL:provider=finnhub" in cache_redis.entries
 
 
-@pytest.mark.parametrize("field", ["company_profile_seconds", "company_search_seconds", "company_news_seconds", "market_status_seconds", "volatility_seconds"])
+@pytest.mark.parametrize("field", ["company_profile_seconds", "company_search_seconds", "company_news_seconds", "market_status_seconds", "volatility_seconds", "earnings_seconds"])
 def test_new_policy_update_and_validation(client, field):
     result = client.put("/api/admin/cache/policy", json={field: 123})
     assert result.status_code == 200 and result.json()[field] == 123
-    assert len(result.json()) == 10
+    assert len(result.json()) == 11
     for invalid in (-1, 2592001, 1.5, True, None):
         assert client.put("/api/admin/cache/policy", json={field: invalid}).status_code == 422
         assert client.get("/api/admin/cache").json()["policy"][field] == 123
@@ -206,3 +207,32 @@ def test_volatility_scope_covers_all_operations(client, cache_redis):
     response = client.post("/api/admin/cache/clear", json={"confirm": True, "scope": "volatility", "provider": "LSEG"})
     assert response.status_code == 200 and response.json()["deleted"] == 6
     assert cache_redis.entries == {"mdh:volatility:snapshot:AAPL:provider=ibkr": b"other provider"}
+
+
+def test_earnings_scope_covers_company_earnings_but_not_profile(client, cache_redis):
+    cache_redis.entries.update({
+        "mdh:earnings:calendar::asof=2026-11-17&provider=alphavantage&symbols=AAPL": b"calendar",
+        "mdh:earnings:next::asof=2026-11-17&provider=alphavantage&symbols=AAPL": b"next",
+        "mdh:earnings:next::channel=mcp&provider=alphavantage&symbols=AAPL": b"mcp",
+        "mdh:earnings:provider-calendar:alphavantage:12month": b"parsed calendar",
+        "mdh:companies:earnings:AAPL:provider=alphavantage": b"company",
+        "mdh:companies:earnings:AAPL:provider=financialdatasets": b"other provider",
+        "mdh:companies:profile:AAPL:provider=ibkr": b"profile",
+    })
+    assert client.get("/api/admin/cache").json()["key_counts"]["earnings"] == 6
+    assert client.get("/api/admin/cache").json()["key_counts"]["company_profile"] == 1
+    result = client.post("/api/admin/cache/clear", json={"confirm": True, "scope": "earnings"})
+    assert result.status_code == 200 and result.json()["deleted"] == 6
+    assert cache_redis.entries == {"mdh:companies:profile:AAPL:provider=ibkr": b"profile"}
+    cache_redis.entries["mdh:earnings:provider-calendar:alphavantage:12month"] = b"c"
+    cache_redis.entries["mdh:earnings:provider-calendar:financialdatasets:12month"] = b"o"
+    provider_clear = client.post(
+        "/api/admin/cache/clear",
+        json={"confirm": True, "scope": "earnings", "provider": "AlphaVantage"},
+    )
+    assert provider_clear.json()["deleted"] == 1
+    assert "mdh:earnings:provider-calendar:financialdatasets:12month" in cache_redis.entries
+    del cache_redis.entries["mdh:earnings:provider-calendar:financialdatasets:12month"]
+    cache_redis.entries["mdh:companies:earnings:AAPL:provider=a"] = b"x"
+    cleared = client.post("/api/admin/cache/clear", json={"confirm": True, "scope": "company_profile"})
+    assert cleared.json()["deleted"] == 1 and "mdh:companies:earnings:AAPL:provider=a" in cache_redis.entries

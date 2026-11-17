@@ -22,6 +22,7 @@ from fastapi import Depends, Query
 
 from app.providers.registry import get_provider as _get_provider
 from app.services.company_service import CompanyService
+from app.services.earnings_service import EarningsService, earnings_service
 from app.services.news_service import NewsService, news_service
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
@@ -54,11 +55,17 @@ def get_volatility_service() -> VolatilityService:
     return VolatilityService()
 
 
+@lru_cache
+def get_earnings_service() -> EarningsService:
+    return earnings_service
+
+
 PriceServiceDep = Annotated[PriceService, Depends(get_price_service)]
 CompanyServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 OptionsServiceDep = Annotated[OptionsService, Depends(get_options_service)]
 NewsServiceDep = Annotated[NewsService, Depends(get_news_service)]
 VolatilityServiceDep = Annotated[VolatilityService, Depends(get_volatility_service)]
+EarningsServiceDep = Annotated[EarningsService, Depends(get_earnings_service)]
 
 
 def symbol_param(allowed: frozenset[SecType]) -> Callable[..., ParsedSymbol]:

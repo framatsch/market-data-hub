@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     CACHE_TTL_VOLATILITY_SECONDS: int = (
         900  # no market-closed extension (IV publishes after close)
     )
+    CACHE_TTL_EARNINGS_SECONDS: int = 21600  # no market-closed extension
     # Outside the US session (after close + settle grace, weekends) keep entries until next open.
     CACHE_EXTEND_WHEN_MARKET_CLOSED: bool = True
 
@@ -154,6 +155,11 @@ class Settings(BaseSettings):
     HISTORY_STORE_RESYNC_SECONDS: int = Field(default=300, ge=0)
     HISTORY_STORE_OVERLAP_BARS: int = Field(default=5, ge=2, le=30)
     HISTORY_STORE_MIGRATE_ON_STARTUP: bool = True
+
+    # Earnings calendar refresh policy (request-driven; see add-earnings-calendar).
+    EARNINGS_CALENDAR_RESYNC_HOURS: int = Field(default=24, ge=1)
+    EARNINGS_ACTUALS_WINDOW_DAYS: int = Field(default=10, ge=1)
+    EARNINGS_RETRY_MINUTES: int = Field(default=30, ge=0)
 
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0

@@ -56,6 +56,37 @@ def test_keys_and_credentials_metadata_only(client) -> None:
     assert "value" not in slot
 
 
+@pytest.mark.parametrize("provider", ["alphavantage", "financialdatasets"])
+@pytest.mark.parametrize("budget", ["request_budget_per_day", "request_budget_per_month"])
+def test_metered_budget_settings_validate(client, provider, budget):
+    path = f"/api/admin/providers/{provider}/config"
+    response = client.put(path, json={"connection_config": {budget: -1}})
+    assert response.status_code == 422
+    assert "non-negative integer" in response.json()["detail"]
+    response = client.put(path, json={"connection_config": {budget: 0}})
+    assert response.status_code == 200
+    assert response.json()["connection_config"][budget] == 0
+
+
+def test_metered_provider_usage_and_defaults(client, monkeypatch):
+    from app.providers import request_budget
+
+    request_budget._local.clear()
+    monkeypatch.setattr(request_budget, "budget_redis", lambda: None)
+    response = client.get("/api/admin/providers/alphavantage/usage")
+    assert response.status_code == 200
+    assert response.json()["day"]["budget"] == 25
+    assert response.json()["shared"] is False
+    response = client.get("/api/admin/providers/financialdatasets/usage")
+    assert response.json()["month"]["budget"] == 1000
+    assert client.get("/api/admin/providers/ibkr/usage").status_code == 404
+
+
+def test_metered_usage_requires_auth(client, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", True)
+    assert client.get("/api/admin/providers/alphavantage/usage").status_code == 401
+
+
 def test_reveal_admin_credential_returns_plaintext_value(client) -> None:
     response = client.post(
         "/api/admin/keys",
@@ -138,6 +169,35 @@ def test_provider_config_update_and_ibkr_gateway(client) -> None:
     assert cc["port"] == 4001
 
 
+@pytest.mark.parametrize("key", ["request_budget_per_day", "request_budget_per_month"])
+@pytest.mark.parametrize("value", [-1, 1.5, True, "25"])
+def test_metered_budget_validation(client, key, value):
+    response = client.put("/api/admin/providers/alphavantage/config", json={
+        "connection_config": {key: value},
+    })
+    assert response.status_code == 422
+
+
+def test_metered_budget_defaults_usage_and_credentials(client):
+    for provider, day, month in (("alphavantage", 25, 0), ("financialdatasets", 0, 1000)):
+        config = client.get(f"/api/admin/providers/{provider}/config").json()
+        assert config["enabled"] is False
+        assert config["connection_config"] == {"request_budget_per_day": day, "request_budget_per_month": month}
+        usage = client.get(f"/api/admin/providers/{provider}/usage")
+        assert usage.status_code == 200
+        assert usage.json()["day"]["budget"] == day
+        assert usage.json()["month"]["budget"] == month
+        assert "resets_at" in usage.json()["day"]
+        saved = client.put(f"/api/admin/credentials/{provider}", json={"api_key": "fixture-key"})
+        assert saved.status_code == 200
+    assert client.get("/api/admin/providers/ibkr/usage").status_code == 404
+
+
+def test_metered_usage_requires_admin_auth(client, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", True)
+    assert client.get("/api/admin/providers/alphavantage/usage").status_code == 401
+
+
 def test_provider_config_validation(client) -> None:
     response = client.put("/api/admin/providers/schwab/config", json={"timeout_seconds": -1})
 
@@ -151,6 +211,7 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
     monkeypatch.setattr(registry, "default_options_provider", None)
     monkeypatch.setattr(registry, "default_news_provider", None)
     monkeypatch.setattr(registry, "default_volatility_provider", None)
+    monkeypatch.setattr(registry, "default_earnings_provider", None)
 
     response = client.get("/api/admin/settings/defaults")
 
@@ -161,6 +222,7 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
         "default_options_provider": "",
         "default_news_provider": "",
         "default_volatility_provider": "",
+        "default_earnings_provider": "",
     }
 
     async def fake_reload(config_repo, settings_repo):
@@ -194,7 +256,31 @@ def test_admin_settings_capabilities(client) -> None:
         "companies": ["ibkr", "lseg"],
         "news": ["finnhub"],
         "volatility": ["ibkr", "lseg"],
+        "earnings": [],
     }
+
+
+def test_admin_earnings_capability_and_default(client, monkeypatch) -> None:
+    config_repo = get_provider_config_repository()
+    asyncio.run(config_repo.save("alphavantage", {"enabled": True}))
+    asyncio.run(config_repo.save("financialdatasets", {"enabled": True}))
+    capabilities = client.get("/api/admin/settings/capabilities").json()
+    assert capabilities["earnings"] == ["alphavantage", "financialdatasets"]
+
+    from app.api.routes_admin import registry
+
+    async def fake_reload(config_repo, settings_repo):
+        registry.default_earnings_provider = await settings_repo.get(
+            "default_earnings_provider"
+        )
+
+    monkeypatch.setattr(registry, "default_earnings_provider", None)
+    monkeypatch.setattr(registry, "reload_from_config", fake_reload)
+    response = client.put(
+        "/api/admin/settings/defaults",
+        json={"default_earnings_provider": "AlphaVantage"},
+    )
+    assert response.json()["default_earnings_provider"] == "alphavantage"
 
 
 def test_admin_volatility_default_round_trip(client, monkeypatch) -> None:
@@ -496,3 +582,14 @@ def test_list_admin_providers(client) -> None:
         assert "timeout_seconds" in p["config_summary"]
         assert "retry_count" in p["config_summary"]
         assert "rate_limit_per_sec" in p["config_summary"]
+
+
+def test_provider_details_state_price_adjustment_and_earnings_capability(client) -> None:
+    providers = {item["name"]: item for item in client.get("/api/admin/providers").json()}
+    assert providers["alphavantage"]["price_adjustment"] == "none"
+    assert providers["financialdatasets"]["price_adjustment"] == "unknown"
+    assert providers["ibkr"]["price_adjustment"] is None
+    assert providers["alphavantage"]["capabilities"] == ["prices", "earnings"]
+    assert providers["financialdatasets"]["capabilities"] == ["prices", "companies", "earnings"]
+    assert providers["alphavantage"]["price_support"]["native_intervals"] == ["1d", "1w"]
+    assert providers["alphavantage"]["enabled"] is False

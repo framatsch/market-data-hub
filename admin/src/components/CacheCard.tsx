@@ -18,6 +18,7 @@ const ttlFields = [
   ['company_news_seconds', 'Company news'],
   ['market_status_seconds', 'Market status'],
   ['volatility_seconds', 'Implied volatility'],
+  ['earnings_seconds', 'Earnings'],
 ] as const;
 
 const cacheScopes = [
@@ -28,6 +29,7 @@ const cacheScopes = [
   ['company_news', 'Company news'],
   ['market_status', 'Market status'],
   ['volatility', 'Implied volatility'],
+  ['earnings', 'Earnings'],
 ] as const;
 
 function duration(seconds: number): string {
@@ -63,7 +65,7 @@ function PolicyForm({ initial, onSaved }: { initial: CachePolicy; onSaved: () =>
       </Box>
       <FormControlLabel sx={{ mt: 2 }} control={<Switch checked={extend} disabled={save.isPending} onChange={e => setExtend(e.target.checked)} />}
         label="Keep entries until next market open while the market is closed" />
-      <Typography variant="body2" color="text.secondary">The extension applies only to option chains and historical prices, not implied volatility (daily IV is published after the close). US session model: 09:30–16:00 ET, with 30 min settle grace (extended hours: 04:00–20:00). Holidays count as weekdays. Disable the extension for non-US symbols. Market status TTL is capped at the next session transition.</Typography>
+      <Typography variant="body2" color="text.secondary">The extension applies only to option chains and historical prices, not implied volatility (daily IV is published after the close) or earnings (announced dates change independently of the session). US session model: 09:30–16:00 ET, with 30 min settle grace (extended hours: 04:00–20:00). Holidays count as weekdays. Disable the extension for non-US symbols. Market status TTL is capped at the next session transition.</Typography>
       <Alert severity="info" sx={{ my: 2 }}>Changes apply to new entries only. Existing entries keep their TTL; use Clear cache to apply a change immediately.</Alert>
       {save.error && <Alert severity="error" sx={{ mb: 2 }}>{save.error.message}</Alert>}
       <Button type="submit" variant="contained" disabled={invalid || save.isPending}>{save.isPending ? 'Saving…' : 'Save cache policy'}</Button>

@@ -27,6 +27,7 @@ interface SettingsProviderCapabilities {
   companies: string[];
   news: string[];
   volatility: string[];
+  earnings: string[];
 }
 
 type SettingsTab = 'providers' | 'cache';
@@ -60,6 +61,7 @@ export default function SettingsPage() {
     default_company_provider: currentDefaults?.default_company_provider || '',
     default_news_provider: currentDefaults?.default_news_provider || '',
     default_volatility_provider: currentDefaults?.default_volatility_provider || '',
+    default_earnings_provider: currentDefaults?.default_earnings_provider || '',
   };
 
   const updateDefaultsMutation = useMutation({
@@ -191,6 +193,21 @@ export default function SettingsPage() {
                 >
                   <MenuItem value=""><em>None</em></MenuItem>
                   {capabilities?.volatility?.map(p => (
+                    <MenuItem key={p} value={p}>{p}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth margin="normal">
+                <InputLabel id="earnings-provider-label">Default Earnings Provider</InputLabel>
+                <Select
+                  labelId="earnings-provider-label"
+                  value={defaults.default_earnings_provider || ''}
+                  label="Default Earnings Provider"
+                  onChange={(e) => setDefaults({ ...defaults, default_earnings_provider: e.target.value })}
+                >
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {capabilities?.earnings?.map(p => (
                     <MenuItem key={p} value={p}>{p}</MenuItem>
                   ))}
                 </Select>

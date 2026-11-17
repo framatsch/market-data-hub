@@ -98,6 +98,47 @@ class PriceBarRow(Base):
     volume: Mapped[int] = mapped_column(BigInteger)
 
 
+class EarningsSync(Base):
+    """Synchronisation state per provider and scope (`calendar` or a symbol)."""
+
+    __tablename__ = "earnings_sync"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    covered_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    covered_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_failed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class EarningsEventRow(Base):
+    __tablename__ = "earnings_events"
+    __table_args__ = (
+        Index("ix_earnings_events_provider_date", "provider", "report_date"),
+        Index("ix_earnings_events_period", "provider", "symbol", "fiscal_period_end"),
+    )
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(64), primary_key=True)
+    report_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    source: Mapped[str] = mapped_column(String(8))  # calendar | history
+    report_time: Mapped[str] = mapped_column(String(8))
+    date_status: Mapped[str] = mapped_column(String(10))
+    reported: Mapped[bool] = mapped_column(Boolean, default=False)
+    fiscal_period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    eps_estimate: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    eps_actual: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    eps_surprise: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    eps_surprise_pct: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class IvPointRow(Base):
     __tablename__ = "iv_points_daily"
 

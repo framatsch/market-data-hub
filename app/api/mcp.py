@@ -36,10 +36,17 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app import response_meta
 from app.cache import cached_call
 from app.config import APP_VERSION
+from app.models.earnings import earnings_today
 from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
+from app.services.earnings_service import (
+    EarningsService,
+    earnings_service,
+    parse_symbol_list,
+)
 from app.services.news_service import NewsService
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
@@ -585,6 +592,82 @@ async def _tool_get_implied_volatility_stats(args: dict[str, Any]) -> dict[str, 
     return _text_content(stats)
 
 
+def _earnings_service() -> EarningsService:
+    return earnings_service
+
+
+def _earnings_date(args: dict[str, Any], name: str, default: date) -> date:
+    try:
+        return date.fromisoformat(args[name]) if args.get(name) else default
+    except (TypeError, ValueError) as exc:
+        raise DataValidationError(f"{name} must use YYYY-MM-DD") from exc
+
+
+async def _earnings_call(
+    route_key: str, args: dict[str, Any], params: dict[str, Any], load: Any
+) -> dict[str, Any]:
+    # A bound ResponseMeta lets the cache backend skip stale answers.
+    token = response_meta.begin()
+    try:
+        result = await cached_call(
+            route_key, None, params, load, refresh=args.get("refresh", False)
+        )
+    finally:
+        response_meta.end(token)
+    return _text_content(result)
+
+
+async def _tool_get_earnings_calendar(args: dict[str, Any]) -> dict[str, Any]:
+    from app.api.routes_earnings import earnings_envelope
+
+    symbols = parse_symbol_list(args.get("symbols") or [])
+    today = earnings_today()
+    start = _earnings_date(args, "from_date", today - timedelta(days=30))
+    end = _earnings_date(args, "to_date", today + timedelta(days=90))
+    provider = (args.get("provider") or "").lower() or None
+
+    async def load() -> Any:
+        result = await _earnings_service().calendar(symbols, start, end, provider)
+        return earnings_envelope(result.events, result).model_dump(mode="json")
+
+    return await _earnings_call(
+        "earnings:calendar",
+        args,
+        {
+            "symbols": ",".join(symbol.canonical for symbol in symbols),
+            "from_date": args.get("from_date"),
+            "to_date": args.get("to_date"),
+            "provider": provider,
+        },
+        load,
+    )
+
+
+async def _tool_get_next_earnings(args: dict[str, Any]) -> dict[str, Any]:
+    from app.api.routes_earnings import earnings_envelope, order_by_request
+
+    symbols = parse_symbol_list(args.get("symbols") or [])
+    provider = (args.get("provider") or "").lower() or None
+
+    async def load() -> Any:
+        result = await _earnings_service().next(symbols, provider)
+        result.rows.sort(key=lambda row: row.symbol)  # canonical, cache-safe order
+        return earnings_envelope(result.rows, result).model_dump(mode="json")
+
+    response = await _earnings_call(
+        "earnings:next",
+        args,
+        {
+            "symbols": ",".join(symbol.canonical for symbol in symbols),
+            "provider": provider,
+        },
+        load,
+    )
+    envelope = json.loads(response["content"][0]["text"])
+    ordered = order_by_request(envelope, [symbol.canonical for symbol in symbols])
+    return _text_content(ordered)
+
+
 _SYMBOL_HELP = (
     "Symbol: AAPL (stock/ETF), I:SPX or ^SPX (index), F:ES or /ES (front-month "
     "future). Provider-native forms (.SPX, $SPX, ESc1) are rejected. Errors: "
@@ -906,6 +989,68 @@ TOOL_REGISTRY.extend(
 )
 
 
+_EARNINGS_SYMBOLS = {
+    "type": "array",
+    "items": {"type": "string"},
+    "minItems": 1,
+    "maxItems": 50,
+    "description": "Stock symbols, e.g. [\"AAPL\", \"MSFT\"]. ETFs are answered as "
+    "not_applicable; index, future and option symbols are rejected.",
+}
+_REFRESH = {
+    "type": "boolean",
+    "default": False,
+    "description": "Fetch live data and overwrite the cache.",
+}
+
+TOOL_REGISTRY.extend(
+    [
+        {
+            "name": "get_earnings_calendar",
+            "description": "Earnings events (past and upcoming) of up to 50 stocks in a date range, oldest first, with release time (bmo/amc/during/unknown), date_status as stated by the provider, EPS estimate/actual/surprise and per-symbol status in meta.symbols. Upcoming dates are announced dates only; MDH never estimates. meta.stale is true when stored events were served because the provider failed or its request budget is exhausted.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["symbols"],
+                "properties": {
+                    "refresh": _REFRESH,
+                    "symbols": _EARNINGS_SYMBOLS,
+                    "from_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "First report date (default: today - 30 days).",
+                    },
+                    "to_date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "Last report date (default: today + 90 days; max range 800 days).",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Earnings provider override (e.g. alphavantage).",
+                    },
+                },
+            },
+        },
+        {
+            "name": "get_next_earnings",
+            "description": "Next announced earnings event per symbol, in request order: event or null, days_until (New York calendar days), last_reported (latest stored reported event) and status (ok, none_scheduled when no date is announced yet, not_applicable for ETFs). Answered from the provider's market-wide calendar with at most one provider request.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["symbols"],
+                "properties": {
+                    "refresh": _REFRESH,
+                    "symbols": _EARNINGS_SYMBOLS,
+                    "provider": {
+                        "type": "string",
+                        "description": "Earnings provider override (e.g. alphavantage).",
+                    },
+                },
+            },
+        },
+    ]
+)
+
+
 TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
     "get_last_price": _tool_get_last_price,
     "get_historical_prices": _tool_get_historical_prices,
@@ -918,4 +1063,6 @@ TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] 
     "get_implied_volatility": _tool_get_implied_volatility,
     "get_implied_volatility_history": _tool_get_implied_volatility_history,
     "get_implied_volatility_stats": _tool_get_implied_volatility_stats,
+    "get_earnings_calendar": _tool_get_earnings_calendar,
+    "get_next_earnings": _tool_get_next_earnings,
 }

@@ -91,4 +91,5 @@ class TestAvailableProviders:
             "options": [],
             "news": [],
             "volatility": [],
+            "earnings": [],
         }

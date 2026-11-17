@@ -25,6 +25,7 @@ MCP is mounted in the same FastAPI app (same port)
 | Company data | LSEG | Finnhub | |
 | News | Finnhub | IBKR | LSEG news is not exposed (`provider=lseg` → `INVALID_PROVIDER`). Mock provider for development. |
 | Underlying IV | LSEG, IBKR | – | See [Implied Volatility](#underlying-implied-volatility). Polygon/Schwab are not underlying-IV providers. |
+| Earnings (stocks) | Alpha Vantage (free key) | Financial Datasets (pay per request) | Announced dates only, never estimated. See [Earnings Calendar](#earnings-calendar). |
 
 Historical REST/MCP dates are normalized to UTC: naive means UTC, omitted `end` = now, omitted `start` = `end` − 30 days.
 
@@ -118,6 +119,7 @@ Settings come from environment variables (see `.env.example`). **Provider creden
 | `FINNHUB_RATE_LIMIT_PER_MIN`, `FINNHUB_FALLBACK_ON_RATE_LIMIT` | `60`, `true` | Falls back to mock when rate limited |
 | `SCHWAB_CALLBACK_URL` | `http://localhost:8000/api/admin/schwab/callback` | Must match the Schwab app |
 | `PROVIDER_REQUEST_TIMEOUT` / `PROVIDER_MAX_RETRIES` | `10.0` / `3` | |
+| `EARNINGS_CALENDAR_RESYNC_HOURS`, `EARNINGS_ACTUALS_WINDOW_DAYS`, `EARNINGS_RETRY_MINUTES` | `24`, `10`, `30` | See [Earnings Calendar](#earnings-calendar) |
 
 Further provider base-URL/Schwab tuning variables are listed in `.env.example`.
 
@@ -135,6 +137,8 @@ python -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).dec
 | `finnhub` | `api_key` | [finnhub.io](https://finnhub.io/) (free tier: 60 calls/min) |
 | `polygon` | `api_key` | |
 | `prixe` | `api_key` | |
+| `alphavantage` | `api_key` | [alphavantage.co](https://www.alphavantage.co/support/#api-key) (free key, about 25 requests per day) |
+| `financialdatasets` | `api_key` | [financialdatasets.ai](https://www.financialdatasets.ai/) (USD 0.02 per request) |
 | `schwab` | `api_key`, `app_secret`, `token_json`, optional `alert_webhook_url` | See below |
 
 ### Schwab setup
@@ -180,9 +184,30 @@ curl 'http://localhost:8000/volatility/AAPL/history?provider=lseg&tenor_days=30&
 
 Error codes: 400 not a volatility provider · 422 invalid input/market · 501 unsupported operation/tenor · 404 no data · 403 `PROVIDER_NOT_ENTITLED` (subscription does not cover the instrument) · 503 connectivity/config (also when no default provider is set).
 
+## Earnings Calendar
+
+Earnings dates and results of stocks from Alpha Vantage (free key) or Financial Datasets (pay per request); choose via **Admin → Settings → Default Earnings Provider** or `provider=`.
+
+| Endpoint | Result |
+|---|---|
+| `GET /earnings/next?symbols=AAPL,MSFT,SPY` | Next announced event per symbol (request order), `days_until`, `last_reported`, `status` (`ok`, `none_scheduled`, `not_applicable` for ETFs). One provider request for all symbols, no history requests. |
+| `GET /earnings/calendar?symbols=…&from=…&to=…` | Events of up to 50 symbols in a range (default today − 30 … + 90 days), `format=csv` |
+| `GET /companies/{symbol}/earnings` | Past and upcoming events of one stock |
+
+```bash
+curl 'http://localhost:8000/earnings/next?symbols=AAPL,MSFT,SPY'
+```
+
+- The calendar holds **announced dates only**: a company that has not announced yet has no event (`none_scheduled`); MDH never estimates a date. `date_status` is what the provider states (`unknown` for Alpha Vantage).
+- Events are stored in the history store (`DATABASE_URL`) and refreshed on request: one market-wide calendar request per 24 h, per-symbol history only when missing or after a report. Provider failure or an exhausted budget serves stored events with `meta.stale = true`.
+- Metered providers have a **request budget** (`request_budget_per_day` / `request_budget_per_month`, shared by all capabilities of a provider, atomic across replicas via Redis). Alpha Vantage defaults to 25 per day. A request over the budget is refused before it is sent (429 `PROVIDER_QUOTA_EXHAUSTED`); usage is shown in the provider details and at `GET /api/admin/providers/{name}/usage`.
+- Alpha Vantage price bars are **not adjusted** for splits or dividends (`price_adjustment: none`).
+
+Full reference: [doc/earnings.md](doc/earnings.md).
+
 ## Redis Response Cache
 
-Option chains, price history, company profile/search/news, market status and all `/volatility/*` endpoints (HTTP and their MCP counterparts) are cached in Redis for every provider. Never cached: `/prices/{symbol}/last`, option quotes, health/metrics/providers/admin, WebSockets. Redis is optional: on outage MDH serves live data and retries after 30 s. `CACHE_ENABLED=false` disables it.
+Option chains, price history, company profile/search/news, market status, `/earnings/*`, `/companies/{symbol}/earnings` and all `/volatility/*` endpoints (HTTP and their MCP counterparts) are cached in Redis for every provider. Never cached: `/prices/{symbol}/last`, option quotes, health/metrics/providers/admin, WebSockets. Redis is optional: on outage MDH serves live data and retries after 30 s. `CACHE_ENABLED=false` disables it.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -195,6 +220,7 @@ Option chains, price history, company profile/search/news, market status and all
 | `CACHE_TTL_COMPANY_PROFILE_SECONDS` / `…_SEARCH_…` / `…_NEWS_…` | `86400` / `3600` / `600` | |
 | `CACHE_TTL_MARKET_STATUS_SECONDS` | `60` | |
 | `CACHE_TTL_VOLATILITY_SECONDS` | `900` | Never extended overnight |
+| `CACHE_TTL_EARNINGS_SECONDS` | `21600` | Earnings endpoints and tools; never extended overnight |
 | `CACHE_EXTEND_WHEN_MARKET_CLOSED` | `true` | Extend chains/history to next US open; **disable for non-US symbols** |
 | `REDIS_MAXMEMORY` | `256mb` | Compose Redis bound |
 
@@ -225,7 +251,7 @@ With `MCP_ENABLED=true` MCP runs on the same port:
 | `POST /mcp` (and `GET /mcp`) | Streamable HTTP, e.g. Claude remote MCP: `http://localhost:8000/mcp` |
 | `GET /mcp/sse` + `POST /mcp/messages?session_id=<id>` | Legacy SSE |
 
-Tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`, `get_market_status`, `get_implied_volatility`, `get_implied_volatility_history`, `get_implied_volatility_stats`. See the [MCP Guide](doc/mcp-guide.md).
+Tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_option_quote`, `get_company_profile`, `search_companies`, `get_company_news`, `get_market_status`, `get_implied_volatility`, `get_implied_volatility_history`, `get_implied_volatility_stats`, `get_earnings_calendar`, `get_next_earnings`. See the [MCP Guide](doc/mcp-guide.md).
 
 ## Observability
 

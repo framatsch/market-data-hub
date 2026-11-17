@@ -14,6 +14,8 @@ import {
   Alert,
 } from '@mui/material';
 import { fetcher, getErrorMessage } from '../../lib/api';
+import { BUDGET_KEYS, isMetered, parseBudget, type BudgetKey } from '../../lib/budget';
+import { ProviderBudgetSection } from './ProviderBudgetSection';
 import type { HistoryStoreStatus, Provider, ProviderConfig } from '../../types';
 
 export function ProviderConfigSection({
@@ -60,6 +62,13 @@ export function ProviderConfigSection({
     ? JSON.stringify(configQuery.data.connection_config, null, 2) : '');
   const [isSaving, setIsSaving] = useState(false);
 
+  const metered = isMetered(configQuery.data?.connection_config);
+  const [budgetEdit, setBudgetEdit] = useState<Partial<Record<BudgetKey, string>>>({});
+  const budgetValues = Object.fromEntries(
+    BUDGET_KEYS.map((key) => [key, budgetEdit[key] ?? String(configQuery.data?.connection_config?.[key] ?? 0)]),
+  ) as Record<BudgetKey, string>;
+  const budgetInvalid = metered && BUDGET_KEYS.some((key) => parseBudget(budgetValues[key]) === null);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
     setFormData((prev) => ({
@@ -86,7 +95,13 @@ export function ProviderConfigSection({
         payload.history_store_intervals = storedEdit;
       }
 
-      if (!hideConnectionJson) {
+      if (metered) {
+        // The budgets replace the raw JSON editor, which would otherwise race them.
+        payload.connection_config = {
+          ...configQuery.data?.connection_config,
+          ...Object.fromEntries(BUDGET_KEYS.map((key) => [key, parseBudget(budgetValues[key])])),
+        };
+      } else if (!hideConnectionJson) {
         if (connectionConfigText.trim()) {
           try {
             payload.connection_config = JSON.parse(connectionConfigText);
@@ -156,7 +171,7 @@ export function ProviderConfigSection({
             onChange={handleChange}
             size="small"
             required
-            slotProps={{ htmlInput: { min: 0 } }}
+            slotProps={{ htmlInput: { min: 0, step: 'any' } }}
           />
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
@@ -217,6 +232,18 @@ export function ProviderConfigSection({
           />
         </Grid>
 
+        {metered && (
+          <Grid size={{ xs: 12 }}>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" gutterBottom>Request budget</Typography>
+            <ProviderBudgetSection
+              providerName={providerName}
+              values={budgetValues}
+              onChange={(key, value) => setBudgetEdit((prev) => ({ ...prev, [key]: value }))}
+            />
+          </Grid>
+        )}
+
         {priceSupport && (
           <Grid size={{ xs: 12 }}>
             <Divider sx={{ my: 1 }} />
@@ -250,7 +277,7 @@ export function ProviderConfigSection({
           </Grid>
         )}
 
-        {!hideConnectionJson && (
+        {!hideConnectionJson && !metered && (
           <Grid size={{ xs: 12 }}>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" gutterBottom>Connection Config (JSON)</Typography>
@@ -271,7 +298,7 @@ export function ProviderConfigSection({
           <Button
             type="submit"
             variant="contained"
-            disabled={isSaving}
+            disabled={isSaving || budgetInvalid}
           >
             {isSaving ? 'Saving...' : 'Save Configuration'}
           </Button>

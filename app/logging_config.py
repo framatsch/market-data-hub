@@ -150,6 +150,11 @@ def setup_logging() -> None:
     formatter = JsonRequestFormatter()
     _apply_formatter_to_all_handlers(formatter, context_filter)
 
+    # httpx logs every request URL at INFO. Alpha Vantage authenticates through the
+    # query string (`apikey=`), so INFO would write the credential to the logs.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
     # Suppress ib_async.wrapper ERROR logs for subscription errors (10089/10091)
     logging.getLogger("ib_async.wrapper").setLevel(logging.CRITICAL)
 

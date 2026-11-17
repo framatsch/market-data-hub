@@ -21,6 +21,7 @@ from typing import Any, Literal
 
 from app.models.common import MarketStatus
 from app.models.company import CompanyProfile, CompanySummary
+from app.models.earnings import EarningsEvent
 from app.models.news import NewsArticle
 from app.models.options import OptionChain, OptionQuote
 from app.models.price import PriceBar, PriceQuote
@@ -171,6 +172,31 @@ class BaseNewsProvider(ABC):
     @abstractmethod
     async def test_connection(self) -> dict[str, Any]:
         """Test provider connectivity and return status_code/success/message/details."""
+
+
+class BaseEarningsProvider(ABC):
+    """Market-wide upcoming calendar and per-symbol reported earnings."""
+
+    name = "none"
+    earnings_upcoming = True
+
+    def configure(self, config: Any) -> None:
+        self._runtime_config = config
+        _apply_runtime_config_defaults(self, config)
+
+    @abstractmethod
+    async def get_upcoming_earnings(
+        self, start: date, end: date, roots: list[str] | None
+    ) -> list[EarningsEvent]:
+        """Fetch the calendar once for the range; None roots requests all symbols."""
+
+    @abstractmethod
+    async def get_earnings_history(self, root: str) -> list[EarningsEvent]:
+        """Fetch reported events for one stock."""
+
+    @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test connectivity using the provider's shared request budget."""
 
 
 class BaseVolatilityProvider(ABC):

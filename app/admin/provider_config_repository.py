@@ -9,7 +9,7 @@ from typing import Any
 from app.config import settings
 
 STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
-KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe")
+KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets")
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
@@ -24,6 +24,8 @@ CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "polygon": set(),
     "prixe": set(),
     "mock": set(),
+    "alphavantage": {"request_budget_per_day", "request_budget_per_month"},
+    "financialdatasets": {"request_budget_per_day", "request_budget_per_month"},
 }
 
 
@@ -251,13 +253,16 @@ class ProviderConfigRepository:
     def _default_enabled(self, provider_name: str) -> bool:
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if not enabled_str:
-            return True
+            # Metered providers need a key and a budget decision: opt-in only.
+            return provider_name not in {"alphavantage", "financialdatasets"}
         enabled = {
             name.strip().lower() for name in enabled_str.split(",") if name.strip()
         }
         return provider_name in enabled
 
     def _default_rate_limit(self, provider_name: str) -> float:
+        if provider_name == "alphavantage":
+            return 1.0
         if provider_name == "schwab":
             return float(settings.SCHWAB_RATE_LIMIT_PER_SEC)
         if provider_name == "lseg":
@@ -267,6 +272,10 @@ class ProviderConfigRepository:
         return 0.0
 
     def _default_connection_config(self, provider_name: str) -> dict[str, Any]:
+        if provider_name == "alphavantage":
+            return {"request_budget_per_day": 25, "request_budget_per_month": 0}
+        if provider_name == "financialdatasets":
+            return {"request_budget_per_day": 0, "request_budget_per_month": 1000}
         if provider_name == "ibkr":
             return {
                 "host": settings.IBKR_HOST,
@@ -314,6 +323,11 @@ class ProviderConfigRepository:
                 + ", ".join(STORABLE_INTERVALS)
             )
         allowed_connection_keys = CONNECTION_CONFIG_ALLOWLIST[config.provider_name]
+        for key in ("request_budget_per_day", "request_budget_per_month"):
+            if key in config.connection_config:
+                value = config.connection_config[key]
+                if type(value) is not int or value < 0:
+                    raise ValueError(f"{key} must be a non-negative integer")
         unknown_keys = set(config.connection_config) - allowed_connection_keys
         if unknown_keys:
             unknown = ", ".join(sorted(unknown_keys))

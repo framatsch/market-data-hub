@@ -17,7 +17,8 @@ async def _drop_all(eng):
     async with eng.begin() as conn:
         await conn.execute(
             text(
-                "DROP TABLE IF EXISTS iv_points_daily, price_bars, "
+                "DROP TABLE IF EXISTS earnings_events, earnings_sync, "
+                "iv_points_daily, price_bars, "
                 "history_series, alembic_version CASCADE"
             )
         )
@@ -37,7 +38,10 @@ async def db():
             pytest.skip("no PostgreSQL available for the history store tests")
     async with eng.begin() as conn:
         await conn.execute(
-            text("TRUNCATE history_series, price_bars, iv_points_daily CASCADE")
+            text(
+                "TRUNCATE history_series, price_bars, iv_points_daily, "
+                "earnings_events, earnings_sync CASCADE"
+            )
         )
     engine.set_session_factory(async_sessionmaker(eng, expire_on_commit=False))
     yield eng

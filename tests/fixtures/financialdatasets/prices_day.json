@@ -1,0 +1,1 @@
+{"ticker":"AAPL","prices":[{"open":220.1,"high":224.2,"low":219.5,"close":223.4,"volume":1000000,"time":"2026-11-16T21:00:00Z"}],"next_page_url":"https://api.financialdatasets.ai/prices?cursor=prices-page-2"}

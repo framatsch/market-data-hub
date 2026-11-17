@@ -15,16 +15,23 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import date, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote as url_quote
 
 from fastapi import APIRouter, Depends, Query, Response
 
+from app.api.routes_earnings import csv_response, earnings_envelope
 from app.cache import cache
 from app.config import settings
-from app.dependencies import CompanyServiceDep, NewsServiceDep, symbol_param
+from app.dependencies import (
+    CompanyServiceDep,
+    EarningsServiceDep,
+    NewsServiceDep,
+    symbol_param,
+)
 from app.models.common import ResponseEnvelope
 from app.models.company import CompanyProfile, CompanySummary
+from app.models.earnings import EarningsEvent, earnings_today
 from app.models.news import NewsMetadata, NewsResponse
 from app.utils.csv_export import to_csv
 from app.utils.symbols import COMPANY_TYPES, ParsedSymbol
@@ -43,6 +50,43 @@ async def search_companies(
     provider = provider.lower() if provider else None
     results = await service.search_companies(q, provider)
     return ResponseEnvelope(data=results)
+
+
+@router.get(
+    "/{symbol}/earnings", response_model=ResponseEnvelope[list[EarningsEvent]]
+)
+@cache(expire=settings.CACHE_TTL_EARNINGS_SECONDS, key="companies:earnings")
+async def get_company_earnings(
+    symbol: CompanySymbol,
+    service: EarningsServiceDep,
+    from_date: date | None = Query(
+        None, alias="from", description="First report date (default: today - 1095 days)."
+    ),
+    to_date: date | None = Query(
+        None, alias="to", description="Last report date (default: today + 400 days)."
+    ),
+    provider: str | None = Query(
+        None, description="Earnings provider (defaults to the configured default)."
+    ),
+    format: Literal["json", "csv"] = Query("json", description="`json` or `csv`."),
+) -> Any:
+    """Past and upcoming earnings events of one stock, oldest first.
+
+    Past events carry EPS estimate, actual and surprise where the provider has them;
+    upcoming events are announced dates only. ETFs are answered with 422
+    `CAPABILITY_NOT_SUPPORTED`, a symbol the provider does not know with 404.
+    `meta.stale` is true when stored events were served because the provider failed.
+    """
+    today = earnings_today()
+    result = await service.company(
+        symbol,
+        from_date or today - timedelta(days=1095),
+        to_date or today + timedelta(days=400),
+        provider.lower() if provider else None,
+    )
+    if format == "csv":
+        return csv_response(result.events, f"{symbol.canonical}_earnings")
+    return earnings_envelope(result.events, result)
 
 
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])

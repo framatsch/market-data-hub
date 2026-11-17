@@ -35,6 +35,8 @@ The MCP server currently exposes the following tools to clients:
 - `get_company_profile`: Fetch fundamental profile information for a company.
 - `search_companies`: Search for companies by name or ticker.
 - `get_company_news`: Retrieve the latest news articles related to a company.
+- `get_next_earnings`: Next announced earnings event per symbol (`symbols` array, optional `provider`), in request order with `days_until`, `last_reported` and a per-symbol `status`. See [Earnings Calendar](earnings.md).
+- `get_earnings_calendar`: Past and upcoming earnings events of up to 50 stocks in a date range (`symbols`, optional `from_date`, `to_date`, `provider`); `meta.symbols` states per symbol whether history is `pending` because the provider budget ran out.
 
 ### Symbol notation
 
