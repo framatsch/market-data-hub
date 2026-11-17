@@ -7,8 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-17
+
+### Added
+
+- Earnings calendar: new provider capability `earnings` with the endpoints
+  `GET /earnings/next`, `GET /earnings/calendar` and `GET /companies/{symbol}/earnings`
+  (CSV export) and the MCP tools `get_next_earnings` and `get_earnings_calendar`. Events carry
+  report date, release time (`bmo`/`amc`/`during`/`unknown`), the date status as stated by the
+  provider, EPS estimate/actual/surprise and provenance (`meta.provider`, `meta.data_as_of`,
+  `meta.stale`, per-symbol `meta.symbols`). Only announced dates are delivered; MDH never
+  estimates a date. Events are stored in the history store and refreshed on request (one
+  market-wide calendar request per 24 h); provider failures serve stored events as stale.
+  New settings `EARNINGS_CALENDAR_RESYNC_HOURS`, `EARNINGS_ACTUALS_WINDOW_DAYS`,
+  `EARNINGS_RETRY_MINUTES`, `CACHE_TTL_EARNINGS_SECONDS`; new admin cache scope `earnings`,
+  system default `default_earnings_provider` and Alembic migration `0003`.
+- Providers `alphavantage` (free key: announced calendar, quarterly history, `1d`/`1w` bars of
+  the latest 100 trading days, end-of-day quote; bars are **not split-adjusted**) and
+  `financialdatasets` (pay per request: filing-based earnings history, prices, company
+  profile; implemented against its pinned OpenAPI schema with contract tests). Both are
+  disabled by default.
+- Request budgets for metered providers: `request_budget_per_day` / `request_budget_per_month`
+  shared by all capabilities of a provider, counted atomically in Redis (process-local
+  fallback), refusing requests over the budget before they are sent with 429
+  `PROVIDER_QUOTA_EXHAUSTED`. `GET /api/admin/providers/{name}/usage`, a usage display in the
+  Admin UI and the metric `mdh_provider_upstream_requests_total`.
+- Admin UI: Earnings capability chip, Default Earnings Provider, earnings cache TTL, budget
+  settings and usage, price adjustment in the provider details. UI tests with Vitest
+  (`npm test` in `admin/`).
+
 ### Fixed
 
+- Admin provider configuration: the default `Retry Backoff` of `0.5` s made browsers refuse to
+  submit the form (step mismatch).
 - LSEG resolved US ETF tickers to foreign listings (e.g. `SPY` → `SPYm.BA` in ARS, `QQQ` →
   `QQQ.CD`), so LSEG ETF quotes and history were wrong. Ticker lookup now prefers the US
   primary listing (`SPY`, `QQQ.O`, `GLD`), then the active US main-issue quote (`GOOG.O`), and
