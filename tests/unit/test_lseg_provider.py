@@ -105,7 +105,7 @@ class TestRICCaching:
             get_session_calls.append(True)
 
         with patch('refinitiv.data.content.search.Definition') as mock_search:
-            mock_search.return_value.get_data.side_effect = [empty_response, empty_response, success_response]
+            mock_search.return_value.get_data.side_effect = [empty_response] * 4 + [success_response]
 
             with patch.object(provider, '_get_session', side_effect=mock_get_session):
                 with patch.object(provider, '_throttle'):

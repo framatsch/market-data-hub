@@ -17,6 +17,8 @@
 import asyncio
 import io
 import logging
+import math
+import re
 import time
 from collections import deque
 from collections.abc import Callable
@@ -48,6 +50,7 @@ from app.providers.base import (
 )
 from app.providers.credentials import get_provider_credential_sync
 from app.utils.errors import (
+    AppError,
     DataNotFoundError,
     DataValidationError,
     ProviderConnectionError,
@@ -91,6 +94,49 @@ _FUTURES_ROOT_OVERRIDES = {
     "ZN": "TY",
     "ZB": "US",
 }
+
+
+COMPANY_SEARCH_FIELDS = (
+    "RIC,TickerSymbol,CommonName,IssuerCommonName,ExchangeName,ExchangeCode,"
+    "Currency,RCSTRBC2012Name,RCSTRBC2012Leaf,NumberOfEmployees"
+)
+US_PRIMARY_FILTER = "ExchangeCountry eq 'USA' and IsPrimaryRIC eq true"
+# Some US lines (GOOG, BRK B) carry no primary RIC; take the active main-issue quote.
+US_ACTIVE_ISSUE_FILTER = (
+    "ExchangeCountry eq 'USA' and AssetState eq 'AC' and IsPrimaryIssueRIC eq true"
+)
+_SHARE_CLASS_SUFFIX = re.compile(r"^([A-Z0-9]+)[./-]([A-Z])$")
+
+
+def _lseg_ticker_symbol(ticker: str) -> str:
+    """LSEG's TickerSymbol writes share classes with a space: BRK.B -> 'BRK B'."""
+    return _SHARE_CLASS_SUFFIX.sub(r"\1 \2", ticker.upper())
+
+
+def _search_text(row: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _search_int(value: Any) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if math.isfinite(number) and number >= 0 else None
+
+
+def _trbc_sector_industry(row: dict[str, Any]) -> tuple[str | None, str | None]:
+    """TRBC path is economic sector / business sector / group / industry / activity."""
+    path = _search_text(row, "RCSTRBC2012Name")
+    if not path:
+        return None, _search_text(row, "RCSTRBC2012Leaf")
+    levels = [part for part in path.split("\\") if part]
+    industry = levels[3] if len(levels) >= 4 else levels[-1]
+    return levels[0], industry
 
 
 def _is_permission_error(error: BaseException) -> bool:
@@ -465,8 +511,23 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
                 logger.debug(f"RIC cache hit for {ticker}: {ric}")
                 return ric
 
+        lseg_ticker = _lseg_ticker_symbol(ticker)
         # Try multiple search views/filters
         search_strategies = [
+            # Strategy 0: US primary listing across all quote types. EQUITY_QUOTES has
+            # no US ETF quotes, so without this SPY resolved to SPYm.BA (ARS).
+            {
+                "name": "US_PRIMARY_QUOTE",
+                "view": search.Views.QUOTES,
+                "filter": f"TickerSymbol eq '{lseg_ticker}' and {US_PRIMARY_FILTER}",
+                "select": "RIC, TickerSymbol, ExchangeCode",
+            },
+            {
+                "name": "US_ACTIVE_ISSUE_QUOTE",
+                "view": search.Views.QUOTES,
+                "filter": f"TickerSymbol eq '{lseg_ticker}' and {US_ACTIVE_ISSUE_FILTER}",
+                "select": "RIC, TickerSymbol, ExchangeCode",
+            },
             # Strategy 1: EQUITY_QUOTES with TickerSymbol filter (may return futures/options)
             {
                 "name": "EQUITY_QUOTES_WITH_FILTER",
@@ -1293,42 +1354,90 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
         return mapping[interval]
 
     # ========================================================================
-    # Company Provider Methods (BaseCompanyProvider) - Stub for now
+    # Company Provider Methods (BaseCompanyProvider) - Search API
     # ========================================================================
+    # The platform session has no DataGrid scope (TR.* fields), so profiles come
+    # from the Search API's quote records. It carries no website/description.
 
     async def get_company_profile(self, symbol: str) -> CompanyProfile:
-        # TODO: Replace with real API call
-        if symbol.upper() == "UNKNOWN":
-            raise DataNotFoundError("Company", symbol)
+        return await asyncio.to_thread(self._get_company_profile_sync, symbol)
 
+    def _get_company_profile_sync(self, symbol: str) -> CompanyProfile:
+        ric = self._ticker_to_ric(symbol)
+        rows = self._search_quotes(filter=f"RIC eq '{ric}'", top=1)
+        if not rows:
+            raise DataNotFoundError(
+                "Company", symbol, details={"ric": ric, "reason": "No search record"}
+            )
+        row = rows[0]
+        sector, industry = _trbc_sector_industry(row)
         return CompanyProfile(
             symbol=symbol,
-            name=f"{symbol} Corp",
-            description="A leading technology company.",
-            exchange="NASDAQ",
-            currency="USD",
-            website=cast(Any, "https://example.com"),
-            sector="Technology",
-            industry="Consumer Electronics",
-            employees=150000,
+            name=_search_text(row, "IssuerCommonName", "CommonName") or symbol,
+            exchange=_search_text(row, "ExchangeName", "ExchangeCode") or "UNKNOWN",
+            currency=_search_text(row, "Currency") or "USD",
+            sector=sector,
+            industry=industry,
+            employees=_search_int(row.get("NumberOfEmployees")),
             provider="lseg",
         )
 
     async def search_companies(self, query: str) -> list[CompanySummary]:
-        # TODO: Replace with real API call
-        return [
-            CompanySummary(
-                symbol=query.upper(),
-                name=f"{query.capitalize()} Inc.",
-                exchange="NASDAQ",
-                sector="Technology",
-                provider="lseg",
-            ),
-            CompanySummary(
-                symbol=f"{query.upper()}B",
-                name=f"{query.capitalize()} Class B",
-                exchange="NYSE",
-                sector="Technology",
-                provider="lseg",
-            ),
-        ]
+        return await asyncio.to_thread(self._search_companies_sync, query)
+
+    def _search_companies_sync(self, query: str) -> list[CompanySummary]:
+        # Tickers resolve to US primary listings, so search those first.
+        rows = self._search_quotes(query=query, filter=US_PRIMARY_FILTER, top=10)
+        if not rows:
+            rows = self._search_quotes(query=query, top=10)
+        results: list[CompanySummary] = []
+        for row in rows:
+            ticker = _search_text(row, "TickerSymbol")
+            if not ticker:
+                continue
+            results.append(
+                CompanySummary(
+                    symbol=ticker,
+                    name=_search_text(row, "IssuerCommonName", "CommonName") or ticker,
+                    exchange=_search_text(row, "ExchangeName", "ExchangeCode")
+                    or "UNKNOWN",
+                    sector=_trbc_sector_industry(row)[0],
+                    provider="lseg",
+                )
+            )
+        return results
+
+    def _search_quotes(
+        self, query: str | None = None, filter: str | None = None, top: int = 10
+    ) -> list[dict[str, Any]]:
+        # QUOTES, not EQUITY_QUOTES: the latter has no US ETF quotes (e.g. SPY).
+        params: dict[str, Any] = {
+            "view": search.Views.QUOTES,
+            "select": COMPANY_SEARCH_FIELDS,
+            "top": top,
+        }
+        if query is not None:
+            params["query"] = query
+        if filter is not None:
+            params["filter"] = filter
+
+        def fetch() -> Any:
+            self._get_session()
+            self._throttle()
+            return search.Definition(**params).get_data().data.df
+
+        try:
+            df = self._retry_with_backoff(fetch)
+        except Exception as exc:
+            if _is_permission_error(exc):
+                raise not_entitled(
+                    "lseg", query or filter or "", "stock", message=exc
+                ) from exc
+            if isinstance(exc, AppError):
+                raise
+            raise ProviderError(
+                "LSEG company search failed", details={"error": str(exc)}
+            ) from exc
+        if df is None or df.empty:
+            return []
+        return cast(list[dict[str, Any]], df.to_dict(orient="records"))

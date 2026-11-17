@@ -707,7 +707,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "name": "get_company_profile",
-        "description": "Get fundamental company data (name, sector, market cap, etc.).",
+        "description": "Get a company profile (name, exchange, currency, sector, industry, employees).",
         "inputSchema": {
             "type": "object",
             "required": ["symbol"],

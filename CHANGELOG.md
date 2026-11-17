@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- LSEG resolved US ETF tickers to foreign listings (e.g. `SPY` → `SPYm.BA` in ARS, `QQQ` →
+  `QQQ.CD`), so LSEG ETF quotes and history were wrong. Ticker lookup now prefers the US
+  primary listing (`SPY`, `QQQ.O`, `GLD`), then the active US main-issue quote (`GOOG.O`), and
+  falls back to the previous search. Share classes map to LSEG's spaced ticker
+  (`BRK.B` → `BRK B` → `BRKb`). Already stored LSEG ETF series are not reloaded automatically.
+- LSEG company profile and search returned hard-coded placeholder data. They now come from
+  the LSEG Search API (name, exchange, currency, TRBC sector/industry, employees; stocks and
+  ETFs). Website and description stay empty: the account has no DataGrid scope.
+
 ## [1.4.0] - 2026-11-16
 
 ### Added
