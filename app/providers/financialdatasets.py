@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -25,6 +25,11 @@ from app.utils.errors import (
     ProviderError,
 )
 
+# Even late SEC filers report within 90 days of period end; anything later is a comparative.
+MAX_FILING_LAG = timedelta(days=120)
+# Annual-minus-quarters EPS arrives unrounded (e.g. 0.9712633647579039).
+EPS_PRECISION = Decimal("0.01")
+
 
 def _filing_time(row: dict[str, Any]) -> datetime:
     raw = row.get("filing_datetime")
@@ -32,6 +37,13 @@ def _filing_time(row: dict[str, Any]) -> datetime:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         return parsed.replace(tzinfo=ET) if parsed.tzinfo is None else parsed.astimezone(ET)
     return datetime.combine(date.fromisoformat(row["filing_date"]), time(), ET)
+
+
+def _price_day(raw: str) -> date:
+    # The live API sends bare trading dates although the schema documents UTC timestamps.
+    if "T" not in raw:
+        return date.fromisoformat(raw)
+    return as_utc(datetime.fromisoformat(raw.replace("Z", "+00:00"))).astimezone(ET).date()
 
 
 def _report_time(row: dict[str, Any]) -> str:
@@ -89,11 +101,13 @@ class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseComp
     async def get_earnings_history(self, root: str) -> list[EarningsEvent]:
         root = root.upper()
         rows = await self._pages("/earnings", {"ticker": root, "limit": 40}, root, "earnings")
-        if not rows:
-            raise DataNotFoundError("Earnings", root)
         by_period = defaultdict(list)
         for row in rows:
-            by_period[row["report_period"]].append(row)
+            # Later filings repeat prior-year periods as comparatives; they are not the release.
+            if _filing_time(row).date() - date.fromisoformat(row["report_period"]) <= MAX_FILING_LAG:
+                by_period[row["report_period"]].append(row)
+        if not by_period:
+            raise DataNotFoundError("Earnings", root)
         received = datetime.now(UTC)
         result = []
         for period, filings in by_period.items():
@@ -103,7 +117,8 @@ class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseComp
             result.append(EarningsEvent(
                 symbol=root, provider=self.name, report_date=date.fromisoformat(row["filing_date"]),
                 fiscal_period_end=date.fromisoformat(period), reported=True,
-                report_time=_report_time(row), eps_actual=Decimal(str(actual)) if actual is not None else None,
+                report_time=_report_time(row),
+                eps_actual=Decimal(str(actual)).quantize(EPS_PRECISION, ROUND_HALF_UP) if actual is not None else None,
                 currency=row.get("currency"), updated_at=received,
             ))
         return sorted(result, key=lambda event: event.report_date)
@@ -120,8 +135,7 @@ class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseComp
             raise DataNotFoundError("Prices", symbol)
         result = []
         for row in rows:
-            instant = datetime.fromisoformat(row["time"].replace("Z", "+00:00"))
-            day = as_utc(instant).astimezone(ET).date()
+            day = _price_day(row["time"])
             timestamp = datetime.combine(day, time(), ET)
             if interval == "1w":
                 timestamp = datetime.combine(week_monday(day), time(), UTC)

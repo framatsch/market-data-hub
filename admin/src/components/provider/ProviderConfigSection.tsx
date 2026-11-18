@@ -255,7 +255,11 @@ export function ProviderConfigSection({
             )}
             <Box data-testid="stored-intervals">
               {['1h', '4h', '1d', '1w'].map((interval) => {
-                const native = priceSupport.native_intervals?.includes(interval);
+                const kind = priceSupport.native_intervals?.includes(interval)
+                  ? 'native'
+                  : priceSupport.derived_intervals?.includes(interval)
+                    ? 'derived'
+                    : 'not available';
                 return (
                   <FormControlLabel
                     key={interval}
@@ -266,13 +270,13 @@ export function ProviderConfigSection({
                         disabled={storeDisabled}
                       />
                     }
-                    label={`${interval} (${native ? 'native' : 'derived'})`}
+                    label={`${interval} (${kind})`}
                   />
                 );
               })}
             </Box>
             <Typography variant="caption" color="text.secondary">
-              Closed bars of the selected intervals are kept in the history store. Derived intervals are aggregated from smaller bars.
+              Closed bars of the selected intervals are kept in the history store. Derived intervals are aggregated from smaller bars. Intervals marked not available cannot be built from this provider's bars.
             </Typography>
           </Grid>
         )}

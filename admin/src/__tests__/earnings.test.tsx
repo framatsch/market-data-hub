@@ -212,6 +212,36 @@ describe('Provider budget settings and usage', () => {
   });
 });
 
+describe('stored history interval labels', () => {
+  const renderLabels = async (name: string, price_support: Provider['price_support']) => {
+    state.routes[`/api/admin/providers/${name}/config`] = providerConfig({});
+    state.routes['/api/admin/history-store'] = { state: 'enabled' };
+    state.routes['/api/admin/providers'] = [provider({ name, price_support })];
+    renderWithProviders(<ProviderConfigSection providerName={name} onSuccess={vi.fn()} onError={vi.fn()} />);
+    return within(await screen.findByTestId('stored-intervals'));
+  };
+
+  it('marks intervals without a smaller native source as not available but keeps them selectable', async () => {
+    const labels = await renderLabels('financialdatasets', {
+      price_sec_types: ['stock'], price_history_sec_types: ['stock'],
+      native_intervals: ['1d', '1w'], derived_intervals: [],
+    });
+    expect(labels.getByLabelText('1h (not available)')).toBeTruthy();
+    expect((labels.getByLabelText('4h (not available)') as HTMLInputElement).disabled).toBe(false);
+    expect(labels.getByLabelText('1d (native)')).toBeTruthy();
+    expect(labels.getByLabelText('1w (native)')).toBeTruthy();
+  });
+
+  it('marks aggregatable intervals as derived', async () => {
+    const labels = await renderLabels('schwab', {
+      price_sec_types: ['stock'], price_history_sec_types: ['stock'],
+      native_intervals: ['30m', '1d', '1w'], derived_intervals: ['1h', '4h'],
+    });
+    expect(labels.getByLabelText('1h (derived)')).toBeTruthy();
+    expect(labels.getByLabelText('4h (derived)')).toBeTruthy();
+  });
+});
+
 describe('price adjustment in the provider details', () => {
   const support = { price_sec_types: ['stock'], price_history_sec_types: ['stock'], native_intervals: ['1d', '1w'] };
 

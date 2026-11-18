@@ -10,7 +10,7 @@ from financialdatasets_contract import validate_request
 
 from app.providers import request_budget
 from app.providers.alphavantage import AlphaVantageProvider, calendar_horizon
-from app.providers.financialdatasets import FinancialDatasetsProvider
+from app.providers.financialdatasets import FinancialDatasetsProvider, _price_day
 from app.utils.errors import AppError, DataValidationError
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -197,6 +197,10 @@ async def test_financialdatasets_history_filings_windows_pagination():
     assert by_period[date(2026, 6, 30)].report_time == "bmo"
     assert by_period[date(2026, 3, 31)].report_time == "during"
     assert by_period[date(2025, 12, 31)].report_time == "unknown"
+    # Prior-year comparatives in later 8-Ks neither move nor create events.
+    assert by_period[date(2025, 9, 30)].report_date == date(2025, 10, 30)
+    assert date(2024, 9, 30) not in by_period
+    assert by_period[date(2026, 3, 31)].eps_actual == Decimal("1.65")
     assert all(event.eps_estimate is None and event.reported for event in events)
     assert (await provider.budget.usage())["month"]["used"] == 2
     await provider.close()
@@ -206,9 +210,10 @@ async def test_financialdatasets_prices_profile_snapshot_and_no_search():
     provider = provider_with_transport(FinancialDatasetsProvider, fd_handler)
     daily = await provider.get_historical_prices("AAPL", "1d", START, END)
     assert len(daily) == 2 and daily[1].volume == 0
-    assert daily[0].start.date() == date(2026, 11, 16)
+    assert [bar.start.date() for bar in daily] == [date(2026, 11, 16), date(2026, 11, 17)]
     weekly = await provider.get_historical_prices("AAPL", "1w", START, END)
-    assert all(bar.start.weekday() == 0 for bar in weekly)
+    # Weeks are labelled by their closing Sunday upstream.
+    assert [bar.start.date() for bar in weekly] == [date(2026, 11, 9), date(2026, 11, 16)]
     quote = await provider.get_last_price("AAPL")
     assert quote.price == Decimal("224.4")
     profile = await provider.get_company_profile("AAPL")
@@ -217,6 +222,15 @@ async def test_financialdatasets_prices_profile_snapshot_and_no_search():
         await provider.search_companies("apple")
     assert error.value.code == "CAPABILITY_NOT_SUPPORTED"
     await provider.close()
+
+
+@pytest.mark.parametrize("raw,day", [
+    ("2026-11-02", date(2026, 11, 2)),  # live API: bare trading date
+    ("2026-11-02T21:00:00Z", date(2026, 11, 2)),  # documented schema: UTC timestamp
+    ("2026-11-03T02:00:00Z", date(2026, 11, 2)),
+])
+def test_financialdatasets_price_day(raw, day):
+    assert _price_day(raw) == day
 
 
 @pytest.mark.parametrize("status,code", [(401, "PROVIDER_NOT_AVAILABLE"), (402, "PROVIDER_NOT_AVAILABLE"), (404, "DATA_NOT_FOUND")])

@@ -184,7 +184,7 @@ When the requested interval is neither in the provider's `native_intervals` nor 
 - **THEN** the provider is called with that interval as before
 
 ### Requirement: Intervals in the admin API
-`GET /api/admin/providers` SHALL include `native_intervals` and `derived_intervals` in `price_support` for every price provider. `derived_intervals` SHALL be the canonical intervals that are not native. The Admin UI SHALL display both lists in the provider details. The selection of `history_store_intervals` in the provider details SHALL mark each storable interval as native or derived for that provider, and SHALL no longer state that an interval may be unavailable, because every storable interval is canonical.
+`GET /api/admin/providers` SHALL include `native_intervals` and `derived_intervals` in `price_support` for every price provider. `derived_intervals` SHALL be the canonical intervals that are not native and can be aggregated from a smaller native interval of that provider. The Admin UI SHALL display both lists in the provider details. The selection of `history_store_intervals` in the provider details SHALL mark each storable interval as native, derived or not available for that provider, and SHALL leave every storable interval selectable; the choice of what to store remains with the user.
 
 #### Scenario: Admin shows Polygon intervals
 - **WHEN** an admin opens the provider details for Polygon
