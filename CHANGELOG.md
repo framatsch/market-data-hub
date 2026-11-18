@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-18
+
+### Fixed
+
+- Financial Datasets: daily and weekly bars were shifted back by one day because the live API
+  sends bare trading dates (`2026-11-17`) although its schema documents UTC timestamps. Bare
+  dates are now taken as the trading day.
+- Financial Datasets: later 8-K filings repeat prior-year periods as comparatives and were
+  reported as the earnings release of that period. Filings more than 120 days after the period
+  end are ignored, so earnings keep their real report date.
+- Financial Datasets: EPS derived as annual minus quarters arrived unrounded
+  (e.g. `0.9712633647579039`); it is now rounded to cents.
+- Admin UI: stored history intervals are labelled `native`, `derived` or `not available`.
+  Before, every interval that was not native was shown as `derived`, even when the provider
+  has no smaller bars to aggregate it from (e.g. `1h`/`4h` for Financial Datasets).
+
+### Changed
+
+- Dockerfile: the Admin UI is built with Node 22 (was Node 20).
+
 ## [1.5.0] - 2026-11-17
 
 ### Added
