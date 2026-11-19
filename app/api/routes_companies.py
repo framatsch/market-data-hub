@@ -20,7 +20,12 @@ from urllib.parse import quote as url_quote
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.api.routes_earnings import csv_response, earnings_envelope
+from app.api.routes_earnings import (
+    EventKind,
+    KindQuery,
+    csv_response,
+    earnings_envelope,
+)
 from app.cache import cache
 from app.config import settings
 from app.dependencies import (
@@ -65,12 +70,21 @@ async def get_company_earnings(
     to_date: date | None = Query(
         None, alias="to", description="Last report date (default: today + 400 days)."
     ),
+    kind: EventKind = KindQuery,
     provider: str | None = Query(
-        None, description="Earnings provider (defaults to the configured default)."
+        None,
+        description=(
+            "Earnings provider. Without it the upcoming default serves upcoming events "
+            "and the history default reported events."
+        ),
     ),
     format: Literal["json", "csv"] = Query("json", description="`json` or `csv`."),
 ) -> Any:
     """Past and upcoming earnings events of one stock, oldest first.
+
+    `kind` selects `upcoming` (announced, not yet reported), `reported` or `all`
+    (default). Revenue fields (`revenue_estimate`, `revenue_actual`) are filled by
+    providers that deliver them (`earningsapi`).
 
     Past events carry EPS estimate, actual and surprise where the provider has them;
     upcoming events are announced dates only. ETFs are answered with 422
@@ -83,6 +97,7 @@ async def get_company_earnings(
         from_date or today - timedelta(days=1095),
         to_date or today + timedelta(days=400),
         provider.lower() if provider else None,
+        kind,
     )
     if format == "csv":
         return csv_response(result.events, f"{symbol.canonical}_earnings")

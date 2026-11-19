@@ -1,0 +1,249 @@
+{
+ "date": "2026-11-18",
+ "pre": [
+  {
+   "symbol": "BFRIW",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 8250000
+  },
+  {
+   "symbol": "BLSH",
+   "name": "Bullish",
+   "epsEstimate": 0.081867,
+   "eps": 0.12,
+   "revenue": 84353000,
+   "revenueEstimate": 80335873
+  },
+  {
+   "symbol": "BNAIW",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1900000
+  },
+  {
+   "symbol": "CSHR",
+   "name": "CoinShares PLC",
+   "epsEstimate": 0.135,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 23822000
+  },
+  {
+   "symbol": "DTST",
+   "name": "Data Storage Corporation",
+   "epsEstimate": -0.002079,
+   "eps": -0.36,
+   "revenue": null,
+   "revenueEstimate": 500000
+  },
+  {
+   "symbol": "DY",
+   "name": "Dycom Industries, Inc.",
+   "epsEstimate": 4.503169,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1946302788
+  },
+  {
+   "symbol": "ENRD",
+   "name": "Einride AB",
+   "epsEstimate": -1.36,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 183816000
+  },
+  {
+   "symbol": "FLX",
+   "name": "BingEx Limited",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "GDS",
+   "name": "GDS Holdings Limited",
+   "epsEstimate": -1.270412,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 3176745701
+  },
+  {
+   "symbol": "GFF",
+   "name": "Griffon Corporation",
+   "epsEstimate": 1.587826,
+   "eps": 1.61,
+   "revenue": 490888000,
+   "revenueEstimate": 481797307
+  }
+ ],
+ "after": [
+  {
+   "symbol": "API",
+   "name": "Agora, Inc.",
+   "epsEstimate": null,
+   "eps": 0.03,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "BV",
+   "name": "BrightView Holdings, Inc.",
+   "epsEstimate": 0.251693,
+   "eps": 0.14,
+   "revenue": null,
+   "revenueEstimate": 720108910
+  },
+  {
+   "symbol": "BZAIW",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 12923777
+  },
+  {
+   "symbol": "CCIF",
+   "name": "Carlyle Credit Income Fund",
+   "epsEstimate": 0.070954,
+   "eps": 0.05,
+   "revenue": null,
+   "revenueEstimate": 4304510
+  },
+  {
+   "symbol": "CPA",
+   "name": "Copa Holdings, S.A.",
+   "epsEstimate": 3.798629,
+   "eps": 4.29,
+   "revenue": 1204440000,
+   "revenueEstimate": 1175808485
+  },
+  {
+   "symbol": "EARN",
+   "name": "Ellington Credit Company",
+   "epsEstimate": 0.191837,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 9358149
+  },
+  {
+   "symbol": "FINV",
+   "name": "FinVolution Group",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "HP",
+   "name": "Helmerich & Payne, Inc.",
+   "epsEstimate": 0.224661,
+   "eps": 0.36,
+   "revenue": 1091829000,
+   "revenueEstimate": 1070190644
+  },
+  {
+   "symbol": "JOYY",
+   "name": "JOYY Inc.",
+   "epsEstimate": 1.315886,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 613422480
+  },
+  {
+   "symbol": "KLIC",
+   "name": "Kulicke and Soffa Industries, Inc.",
+   "epsEstimate": 1.413158,
+   "eps": 1.52,
+   "revenue": 410281000,
+   "revenueEstimate": 376800000
+  }
+ ],
+ "notSupplied": [
+  {
+   "symbol": "ADVB",
+   "name": "Advanced Biomed Inc.",
+   "epsEstimate": null,
+   "eps": -0.6,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "AGIG",
+   "name": "Abundia Global Impact Group Inc.",
+   "epsEstimate": -0.07,
+   "eps": -0.08,
+   "revenue": null,
+   "revenueEstimate": 2100000
+  },
+  {
+   "symbol": "AIFA",
+   "name": "All In FutureTech Alliance, Inc.",
+   "epsEstimate": null,
+   "eps": -0.27,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "ALUR",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "ANEB",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "AREBW",
+   "name": null,
+   "epsEstimate": null,
+   "eps": -0.28,
+   "revenue": 1200346,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "ASPI",
+   "name": "ASP Isotopes Inc.",
+   "epsEstimate": -0.135143,
+   "eps": -0.22,
+   "revenue": null,
+   "revenueEstimate": 4536521
+  },
+  {
+   "symbol": "AVAT",
+   "name": "Avalanche Treasury Corporation",
+   "epsEstimate": null,
+   "eps": 1.53,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "AZIO",
+   "name": "Azio AI Holdings, Inc.",
+   "epsEstimate": null,
+   "eps": -0.34,
+   "revenue": 1872271,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "BNKK",
+   "name": "Bonk, Inc.",
+   "epsEstimate": null,
+   "eps": -0.35,
+   "revenue": null,
+   "revenueEstimate": null
+  }
+ ]
+}

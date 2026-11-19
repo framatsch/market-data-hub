@@ -26,7 +26,8 @@ from app.models.connection import ConnectionTestResult
 from app.observability.audit import audit_log
 from app.providers.base import (
     BaseCompanyProvider,
-    BaseEarningsProvider,
+    BaseEarningsHistoryProvider,
+    BaseEarningsUpcomingProvider,
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
@@ -82,6 +83,7 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
     "prixe": {"api_key"},
     "alphavantage": {"api_key"},
     "financialdatasets": {"api_key"},
+    "earningsapi": {"api_key"},
 }
 
 PROVIDER_CAPABILITIES: dict[str, list[str]] = {
@@ -92,8 +94,9 @@ PROVIDER_CAPABILITIES: dict[str, list[str]] = {
     "polygon": ["prices", "companies"],
     "mock": ["news"],
     "prixe": ["prices"],
-    "alphavantage": ["prices", "earnings"],
-    "financialdatasets": ["prices", "companies", "earnings"],
+    "alphavantage": ["prices", "earnings_upcoming", "earnings_history"],
+    "financialdatasets": ["prices", "companies", "earnings_history"],
+    "earningsapi": ["earnings_upcoming", "earnings_history"],
 }
 
 
@@ -122,7 +125,9 @@ class SystemDefaultsUpdate(BaseModel):
     default_options_provider: str | None = None
     default_news_provider: str | None = None
     default_volatility_provider: str | None = None
-    default_earnings_provider: str | None = None
+    default_earnings_provider: str | None = None  # shorthand for both role defaults
+    default_earnings_upcoming_provider: str | None = None
+    default_earnings_history_provider: str | None = None
 
 
 class CacheClearRequest(BaseModel):
@@ -392,8 +397,10 @@ def _provider_capabilities(name: str, provider: object | None) -> list[str]:
         capabilities.append("news")
     if isinstance(provider, BaseVolatilityProvider):
         capabilities.append("volatility")
-    if isinstance(provider, BaseEarningsProvider):
-        capabilities.append("earnings")
+    if isinstance(provider, BaseEarningsUpcomingProvider):
+        capabilities.append("earnings_upcoming")
+    if isinstance(provider, BaseEarningsHistoryProvider):
+        capabilities.append("earnings_history")
     return capabilities
 
 
@@ -484,6 +491,8 @@ def _system_defaults() -> dict[str, str]:
         "default_news_provider": registry.default_news_provider or "",
         "default_volatility_provider": registry.default_volatility_provider or "",
         "default_earnings_provider": registry.default_earnings_provider or "",
+        "default_earnings_upcoming_provider": registry.default_earnings_upcoming_provider or "",
+        "default_earnings_history_provider": registry.default_earnings_history_provider or "",
     }
 
 
@@ -602,6 +611,11 @@ async def update_admin_settings_defaults(
     payload: SystemDefaultsUpdate, _principal: PrincipalDep
 ) -> dict[str, str]:
     values = payload.model_dump(exclude_unset=True)
+    shorthand = values.pop("default_earnings_provider", None)
+    if shorthand is not None:
+        # The shorthand sets the roles the provider implements; an explicit role value wins.
+        for key in registry.earnings_role_settings(shorthand.lower()):
+            values.setdefault(key, shorthand)
     settings_repo = get_settings_repository()
     for key, value in values.items():
         if value is not None:
@@ -621,6 +635,8 @@ async def get_admin_settings_capabilities(
         "companies": [],
         "news": [],
         "volatility": [],
+        "earnings_upcoming": [],
+        "earnings_history": [],
         "earnings": [],
     }
     for config in await get_provider_config_repository().list_all():
@@ -628,6 +644,8 @@ async def get_admin_settings_capabilities(
             continue
         for capability in PROVIDER_CAPABILITIES.get(config.provider_name, []):
             capabilities[capability].append(config.provider_name)
+            if capability.startswith("earnings_") and config.provider_name not in capabilities["earnings"]:
+                capabilities["earnings"].append(config.provider_name)
     return capabilities
 
 

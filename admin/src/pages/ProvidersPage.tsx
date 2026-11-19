@@ -67,7 +67,8 @@ function statusColor(status: string): 'success' | 'warning' | 'error' | 'default
 }
 
 function capabilityLabel(capability: string) {
-  return capability.charAt(0).toUpperCase() + capability.slice(1);
+  const label = capability.replace(/_/g, ' ');
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function renderAuthSection(provider: Provider) {

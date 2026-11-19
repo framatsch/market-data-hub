@@ -45,7 +45,19 @@ SymbolsQuery = Query(
     examples=["AAPL,MSFT,SPY"],
 )
 ProviderQuery = Query(
-    None, description="Earnings provider (defaults to the configured default provider)."
+    None,
+    description=(
+        "Earnings provider (`alphavantage`, `earningsapi`, `financialdatasets`). Without it "
+        "the upcoming default serves upcoming events and the history default reported ones."
+    ),
+)
+EventKind = Literal["all", "upcoming", "reported"]
+KindQuery = Query(
+    "all",
+    description=(
+        "`all` (default), `upcoming` (announced, `reported: false`) or `reported` "
+        "(`reported: true`). `upcoming` requests no history, `reported` no calendar."
+    ),
 )
 
 
@@ -53,7 +65,11 @@ def earnings_envelope(data: Any, result: EarningsResult | NextResult) -> Any:
     """Envelope with provenance: provider, data age, stale flag, per-symbol status."""
     meta = response_meta.current().to_meta()
     meta.setdefault("stale", False)
-    meta["provider"] = result.provider
+    if result.provider is not None:
+        meta["provider"] = result.provider
+    providers = getattr(result, "providers", None)
+    if providers:
+        meta["providers"] = providers
     if isinstance(result, EarningsResult):
         meta["symbols"] = [
             item.model_dump(mode="json", exclude_none=True) for item in result.symbols
@@ -117,13 +133,17 @@ async def get_earnings_calendar(
     to_date: date | None = Query(
         None, alias="to", description="Last report date (default: today + 90 days)."
     ),
+    kind: EventKind = KindQuery,
     provider: str | None = ProviderQuery,
     format: Literal["json", "csv"] = Query("json", description="`json` or `csv`."),
 ) -> Any:
     """Earnings events of up to 50 stocks in a date range, oldest first.
 
-    Upcoming events come from the provider's announced calendar, requested once for
-    all symbols; past events come from each symbol's history. The calendar lists
+    Upcoming events come from the upcoming provider, past events from the history
+    provider (`kind` selects `upcoming`, `reported` or `all`). Providers with a
+    market-wide calendar request it once for all symbols; per-symbol providers
+    (`earningsapi`) use a day-calendar window plus per-symbol requests within their
+    request budget. Revenue fields are filled where the provider delivers them. The calendar lists
     **announced dates only**: a company that has not announced yet has no event,
     and MDH never estimates a date. `meta.symbols` holds per symbol `status`
     (`ok`, `not_applicable`, `not_found`, `error`) and `history` (`complete`,
@@ -140,6 +160,7 @@ async def get_earnings_calendar(
         from_date or today - timedelta(days=30),
         to_date or today + timedelta(days=90),
         provider.lower() if provider else None,
+        kind,
     )
     if format == "csv":
         return csv_response(result.events, "earnings_calendar")

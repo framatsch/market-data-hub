@@ -14,7 +14,7 @@ from app.models.earnings import EarningsEvent
 from app.models.price import PriceBar, PriceQuote
 from app.providers.base import (
     BaseCompanyProvider,
-    BaseEarningsProvider,
+    BaseEarningsHistoryProvider,
     BasePriceProvider,
 )
 from app.providers.metered import MeteredHttpProvider
@@ -61,10 +61,9 @@ def _report_time(row: dict[str, Any]) -> str:
     return "unknown"
 
 
-class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseCompanyProvider, BaseEarningsProvider):
+class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseCompanyProvider, BaseEarningsHistoryProvider):
     name = "financialdatasets"
     base_url = "https://api.financialdatasets.ai"
-    earnings_upcoming = False
     native_intervals = frozenset({"1d", "1w"})
     price_adjustment = "unknown"
 
@@ -94,9 +93,6 @@ class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseComp
             seen.add(next_page)
             # Follow the opaque cursor as-is; don't reconstruct its original filters.
             params = dict(httpx.QueryParams(parsed.query))
-
-    async def get_upcoming_earnings(self, start: date, end: date, roots: list[str] | None):
-        raise CapabilityNotSupportedError(self.name, "upcoming earnings", sec_type="stock", supported=[])
 
     async def get_earnings_history(self, root: str) -> list[EarningsEvent]:
         root = root.upper()

@@ -18,10 +18,11 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, delete, exists, select, text
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -30,6 +31,8 @@ from app.models.earnings import EarningsEvent
 from app.store.models import EarningsEventRow, EarningsSync
 
 CALENDAR_SCOPE = "calendar"
+DAY_SCOPE_PREFIX = "calendar-day:"
+DAY_REPLACE_WINDOW_DAYS = 60
 _LOCK_NAMESPACE = 7205
 
 
@@ -41,6 +44,7 @@ class SyncState:
     covered_to: date | None
     synced_at: datetime | None
     sync_failed_at: datetime | None
+    invalidated_at: datetime | None = None
 
 
 async def lock_scope(session: AsyncSession, provider: str, scope: str) -> None:
@@ -63,6 +67,8 @@ def _event(row: EarningsEventRow) -> EarningsEvent:
         eps_actual=row.eps_actual,
         eps_surprise=row.eps_surprise,
         eps_surprise_pct=row.eps_surprise_pct,
+        revenue_estimate=row.revenue_estimate,
+        revenue_actual=row.revenue_actual,
         currency=row.currency,
         provider=row.provider,
         updated_at=row.updated_at,
@@ -83,6 +89,8 @@ def _values(provider: str, event: EarningsEvent, source: str, now: datetime) -> 
         "eps_actual": event.eps_actual,
         "eps_surprise": event.eps_surprise,
         "eps_surprise_pct": event.eps_surprise_pct,
+        "revenue_estimate": event.revenue_estimate,
+        "revenue_actual": event.revenue_actual,
         "currency": event.currency,
         "first_seen_at": now,
         "updated_at": now,
@@ -133,7 +141,7 @@ async def get_sync(
         return None
     return SyncState(
         provider, scope, row.covered_from, row.covered_to, row.synced_at,
-        row.sync_failed_at,
+        row.sync_failed_at, row.invalidated_at,
     )
 
 
@@ -148,7 +156,7 @@ async def get_syncs(
     return {
         row.scope: SyncState(
             provider, row.scope, row.covered_from, row.covered_to, row.synced_at,
-            row.sync_failed_at,
+            row.sync_failed_at, row.invalidated_at,
         )
         for row in rows.scalars()
     }
@@ -254,14 +262,90 @@ async def replace_calendar(
     )
 
 
+def day_scope(day: date) -> str:
+    return f"{DAY_SCOPE_PREFIX}{day.isoformat()}"
+
+
+async def replace_day(
+    session: AsyncSession,
+    provider: str,
+    day: date,
+    events: list[EarningsEvent],
+    today: date,
+    now: datetime | None = None,
+) -> None:
+    """Replace everything a provider stored for one date (one transaction).
+
+    The day calendar is authoritative for its date: all of the provider's events of
+    the day go, the delivered ones are inserted. Another upcoming event of a listed
+    symbol within 60 days is a moved date and goes too. A symbol that was listed
+    before but is gone now has its symbol synchronisation invalidated.
+    """
+    now = now or datetime.now(UTC)
+    scope = day_scope(day)
+    await lock_scope(session, provider, scope)
+    before = set(
+        (
+            await session.execute(
+                select(EarningsEventRow.symbol).where(
+                    EarningsEventRow.provider == provider,
+                    EarningsEventRow.report_date == day,
+                )
+            )
+        ).scalars()
+    )
+    await session.execute(
+        delete(EarningsEventRow).where(
+            EarningsEventRow.provider == provider, EarningsEventRow.report_date == day
+        )
+    )
+    unique = {e.symbol: e for e in events}
+    rows = [_values(provider, e, "calendar", now) for e in unique.values()]
+    for offset in range(0, len(rows), 1000):
+        await session.execute(
+            insert(EarningsEventRow)
+            .values(rows[offset : offset + 1000])
+            .on_conflict_do_nothing(index_elements=["provider", "symbol", "report_date"])
+        )
+    window = timedelta(days=DAY_REPLACE_WINDOW_DAYS)
+    for offset in range(0, len(unique), 500):
+        listed = list(unique)[offset : offset + 500]
+        await session.execute(
+            delete(EarningsEventRow).where(
+                EarningsEventRow.provider == provider,
+                EarningsEventRow.symbol.in_(listed),
+                EarningsEventRow.reported.is_(False),
+                EarningsEventRow.report_date >= today,
+                EarningsEventRow.report_date != day,
+                EarningsEventRow.report_date >= day - window,
+                EarningsEventRow.report_date <= day + window,
+            )
+        )
+    gone = sorted(before - set(unique))
+    if gone:
+        await session.execute(
+            sql_update(EarningsSync)
+            .where(EarningsSync.provider == provider, EarningsSync.scope.in_(gone))
+            .values(invalidated_at=now)
+        )
+    await _mark_synced(session, provider, scope, now, day, day)
+
+
 async def upsert_history(
     session: AsyncSession,
     provider: str,
     symbol: str,
     events: list[EarningsEvent],
     now: datetime | None = None,
+    prune_upcoming_from: date | None = None,
 ) -> None:
-    """Insert or update a symbol's reported events; first_seen_at is preserved."""
+    """Insert or update a symbol's events; first_seen_at is preserved.
+
+    With `prune_upcoming_from` (providers answering per symbol) the response is
+    authoritative for the future: the provider's stored events of the symbol on or
+    after that date which are not in the response are deleted, and an earlier
+    invalidation by a day calendar is cleared.
+    """
     now = now or datetime.now(UTC)
     await lock_scope(session, provider, symbol)
     for event in events:
@@ -278,8 +362,24 @@ async def upsert_history(
                 index_elements=["provider", "symbol", "report_date"], set_=update
             )
         )
+    if prune_upcoming_from is not None:
+        keep = {event.report_date for event in events}
+        await session.execute(
+            delete(EarningsEventRow).where(
+                EarningsEventRow.provider == provider,
+                EarningsEventRow.symbol == symbol,
+                EarningsEventRow.report_date >= prune_upcoming_from,
+                EarningsEventRow.report_date.not_in(keep) if keep else True,
+            )
+        )
     await drop_reconciled_calendar_rows(session, provider, symbol)
     await _mark_synced(session, provider, symbol, now, None, None)
+    if prune_upcoming_from is not None:
+        await session.execute(
+            sql_update(EarningsSync)
+            .where(EarningsSync.provider == provider, EarningsSync.scope == symbol)
+            .values(invalidated_at=None)
+        )
 
 
 async def clear(session: AsyncSession, provider: str | None = None) -> int:

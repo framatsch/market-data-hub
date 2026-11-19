@@ -81,7 +81,7 @@ async def list_providers() -> Any:
 
     `available` is derived from the providers currently enabled in the Admin UI;
     a provider is listed under every capability it implements (price, company,
-    options, news, volatility).
+    options, news, volatility, earnings_upcoming, earnings_history, earnings).
 
     Note: IBKR company data is limited to contract details. For detailed fundamentals, use LSEG.
     Note: Mock provider provides test data for development and testing.
@@ -96,6 +96,9 @@ async def list_providers() -> Any:
                 "options": reg.default_options_provider,
                 "news": reg.default_news_provider,
                 "volatility": reg.default_volatility_provider,
+                "earnings_upcoming": reg.default_earnings_upcoming_provider,
+                "earnings_history": reg.default_earnings_history_provider,
+                "earnings": reg.default_earnings_upcoming_provider,
             },
             "available": reg.list_available_providers(),
         }

@@ -12,7 +12,7 @@ from app.observability.metrics import UPSTREAM_REQUESTS
 from app.utils.errors import ProviderQuotaExhaustedError
 
 logger = logging.getLogger(__name__)
-BUDGET_DEFAULTS = {"alphavantage": (25, 0), "financialdatasets": (0, 1000)}
+BUDGET_DEFAULTS = {"alphavantage": (25, 0), "financialdatasets": (0, 1000), "earningsapi": (100, 1000)}
 
 # Check both limits before either increment. The block key also handles an
 # upstream daily notice when the administrator configured an unlimited budget.

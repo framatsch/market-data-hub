@@ -8,7 +8,7 @@ import pytest
 
 from app import response_meta
 from app.models.earnings import EarningsEvent
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.services import earnings_service as module
 from app.services.earnings_service import (
@@ -50,13 +50,12 @@ class FakeBudget:
         return {"day": {"budget": 25, "used": 25}, "month": {"budget": 0, "used": 90}, "day_exhausted": False}
 
 
-class FakeProvider(BaseEarningsProvider):
+class FakeProvider(BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "fake"
 
     def __init__(self, calendar=(), history=None, upcoming=True, budget=None):
         self.calendar = list(calendar)
         self.history = history or {}
-        self.earnings_upcoming = upcoming
         self.budget = budget
         self.calendar_calls = []
         self.history_calls = []
@@ -79,6 +78,13 @@ class FakeProvider(BaseEarningsProvider):
         return {"success": True}
 
 
+class HistoryOnlyProvider(BaseEarningsHistoryProvider):
+    name = FakeProvider.name
+    __init__ = FakeProvider.__init__
+    get_earnings_history = FakeProvider.get_earnings_history
+    test_connection = FakeProvider.test_connection
+
+
 def event(symbol, day, **kwargs):
     return EarningsEvent(symbol=symbol, report_date=day, provider="fake", **kwargs)
 
@@ -93,7 +99,10 @@ def clock(monkeypatch):
 def service(provider):
     monkey = ProviderRegistry.__new__(ProviderRegistry)
     monkey._providers = {"fake": provider}
-    monkey.default_earnings_provider = "fake"
+    monkey.default_earnings_history_provider = "fake"
+    monkey.default_earnings_upcoming_provider = (
+        "fake" if isinstance(provider, BaseEarningsUpcomingProvider) else None
+    )
     monkey._provider_locks = {}
     monkey._provider_inflight = {}
     monkey._provider_drained = {}
@@ -171,15 +180,14 @@ async def test_without_redis_every_request_calls_provider():
 
 
 async def test_history_only_provider_is_501_without_call():
-    provider = FakeProvider(upcoming=False)
+    provider = HistoryOnlyProvider()
     with pytest.raises(CapabilityNotSupportedError):
-        await service(provider).next(symbols("AAPL"))
+        await service(provider).next(symbols("AAPL"), "fake")
     assert provider.calendar_calls == []
 
 
 async def test_history_only_provider_calendar_returns_reported_events():
-    provider = FakeProvider(
-        upcoming=False,
+    provider = HistoryOnlyProvider(
         history={"AAPL": [event("AAPL", date(2026, 10, 29), eps_actual="1.85", fiscal_period_end=date(2026, 9, 30))]},
     )
     result = await service(provider).calendar(symbols("AAPL"), date(2026, 1, 1), date(2027, 1, 1))

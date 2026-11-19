@@ -160,6 +160,8 @@ class Settings(BaseSettings):
     EARNINGS_CALENDAR_RESYNC_HOURS: int = Field(default=24, ge=1)
     EARNINGS_ACTUALS_WINDOW_DAYS: int = Field(default=10, ge=1)
     EARNINGS_RETRY_MINUTES: int = Field(default=30, ge=0)
+    EARNINGS_DAY_CALENDAR_WEEKDAYS: int = Field(default=7, ge=1, le=15)
+    EARNINGS_SYMBOL_RESYNC_DAYS: int = Field(default=7, ge=1)
 
     # Timeouts & Retries
     PROVIDER_REQUEST_TIMEOUT: float = 10.0

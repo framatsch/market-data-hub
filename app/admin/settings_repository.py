@@ -10,7 +10,9 @@ SETTINGS_ALLOWLIST = frozenset(
         "default_options_provider",
         "default_news_provider",
         "default_volatility_provider",
-        "default_earnings_provider",
+        "default_earnings_provider",  # legacy: migrated to the two role defaults
+        "default_earnings_upcoming_provider",
+        "default_earnings_history_provider",
         "cache_ttl_option_chain_seconds",
         "cache_ttl_historical_closed_seconds",
         "cache_ttl_historical_open_bar_seconds",

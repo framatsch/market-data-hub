@@ -15,6 +15,7 @@ from app.utils.errors import (
     AppError,
     ProviderConnectionError,
     ProviderError,
+    ProviderQuotaExhaustedError,
     ProviderTimeoutError,
     map_httpx_http_error,
 )
@@ -86,7 +87,9 @@ class MeteredHttpProvider:
                 return await self._decode(response, symbol)
             except httpx.HTTPStatusError as exc:
                 error = self._http_error(exc, symbol)
-                retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
+                retryable = (exc.response.status_code == 429 or exc.response.status_code >= 500) and not (
+                    isinstance(error, ProviderQuotaExhaustedError)
+                )
             except httpx.TimeoutException:
                 error = ProviderTimeoutError(self.name)
                 retryable = True
@@ -105,7 +108,11 @@ class MeteredHttpProvider:
                 "Retrying %s request after %s (attempt %s/%s)",
                 self.name, error.code, attempt + 1, self.retry_count,
             )
-            await asyncio.sleep(max(self.minimum_spacing, self.retry_backoff_seconds * 2 ** attempt))
+            retry_after = getattr(error, "retry_after", None)
+            if retry_after is not None:
+                await asyncio.sleep(min(float(retry_after), 30.0))
+            else:
+                await asyncio.sleep(max(self.minimum_spacing, self.retry_backoff_seconds * 2 ** attempt))
         raise ProviderError(f"Request to '{self.name}' failed")  # unreachable
 
     async def test_connection(self) -> dict[str, Any]:

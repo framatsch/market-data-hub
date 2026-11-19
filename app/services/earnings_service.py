@@ -21,6 +21,7 @@ import json
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
@@ -35,15 +36,23 @@ from app.models.earnings import (
     NextEarnings,
     earnings_today,
 )
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import (
+    BaseEarningsHistoryProvider,
+    BaseEarningsProvider,
+    BaseEarningsUpcomingProvider,
+)
 from app.providers.registry import ProviderRegistry, get_registry
 from app.providers.request_budget import budget_redis
 from app.services.earnings_planner import (
     CALENDAR_HORIZON_DAYS,
     HistoryInput,
+    SymbolInput,
     SyncInfo,
     calendar_due,
+    plan_days,
     plan_refresh,
+    plan_symbols,
+    window_days,
 )
 from app.store import earnings_repository as repo
 from app.store import engine
@@ -63,6 +72,10 @@ MAX_RANGE_DAYS = 800
 HISTORY_LOOKBACK_DAYS = 1095
 EARNINGS_TYPES = frozenset({"stock", "etf"})
 CALENDAR_KEY = "mdh:earnings:provider-calendar:{provider}:12month"
+DAY_KEY = "mdh:earnings:provider-day:{provider}:{day}"
+SYMBOL_KEY = "mdh:earnings:provider-symbol:{provider}:{root}"
+DAY_KEY_TTL = 7 * 86400
+PLANNER_SPAN_DAYS = 400
 
 # The hub only knows an instrument as ETF from an explicit sec_type. Well-known
 # ETF tickers are therefore answered as not applicable without a provider call;
@@ -117,21 +130,37 @@ def reconcile_events(events: list[EarningsEvent]) -> list[EarningsEvent]:
     for group in groups.values():
         actual = [event for event in group if event.eps_actual is not None]
         pool = actual or group
-        result.append(max(pool, key=lambda e: (e.updated_at, e.report_date)))
+        winner = max(pool, key=lambda e: (e.updated_at, e.report_date))
+        if winner.revenue_actual is None:
+            # Reported revenue is kept even when another source won on EPS.
+            donor = next((e for e in group if e.revenue_actual is not None), None)
+            if donor is not None:
+                winner = winner.model_copy(update={"revenue_actual": donor.revenue_actual})
+        result.append(winner)
     return sorted(result, key=lambda e: (e.report_date, e.symbol))
 
 
 @dataclass
 class EarningsResult:
-    provider: str
+    provider: str | None
     events: list[EarningsEvent]
     symbols: list[EarningsSymbolStatus]
+    # Set for a composed response: {"upcoming": name, "history": name}.
+    providers: dict[str, str] | None = None
 
 
 @dataclass
 class NextResult:
-    provider: str
+    provider: str | None
     rows: list[NextEarnings]
+    providers: dict[str, str] | None = None
+
+
+@dataclass
+class _Roles:
+    upcoming: BaseEarningsProvider | None
+    history: BaseEarningsProvider | None
+    missing: dict[str, str]  # role -> message for symbols
 
 
 @dataclass
@@ -157,10 +186,53 @@ class _Gathered:
     calendar_available: bool = True
 
 
+@dataclass
+class _SymState:
+    store: bool
+    events: list[EarningsEvent] = field(default_factory=list)
+    day_syncs: dict[date, SyncInfo] = field(default_factory=dict)
+    symbol_syncs: dict[str, SyncInfo] = field(default_factory=dict)
+    known: set[str] = field(default_factory=set)
+    eph_days: dict[date, list[EarningsEvent]] = field(default_factory=dict)
+    eph_symbols: dict[str, list[EarningsEvent]] = field(default_factory=dict)
+
+
 def _sync_info(state: repo.SyncState | None) -> SyncInfo | None:
     if state is None:
         return None
-    return SyncInfo(state.synced_at, state.sync_failed_at, state.covered_to)
+    return SyncInfo(state.synced_at, state.sync_failed_at, state.covered_to, state.invalidated_at)
+
+
+def _is_symbol_provider(provider: BaseEarningsProvider) -> bool:
+    return isinstance(provider, BaseEarningsUpcomingProvider) and provider.upcoming_mode == "symbol"
+
+
+def merge_ephemeral(
+    days: dict[date, list[EarningsEvent]],
+    symbols: dict[str, list[EarningsEvent]],
+    today: date,
+) -> list[EarningsEvent]:
+    """Store-less counterpart of the replacement rules: a day calendar wins for its date."""
+    listed = {event.symbol: day for day, events in days.items() for event in events}
+    result = [event for events in days.values() for event in events]
+    for root, events in symbols.items():
+        for event in events:
+            if event.report_date in days:
+                continue
+            day = listed.get(root)
+            if (
+                day is not None
+                and not event.reported
+                and event.report_date >= today
+                and abs((event.report_date - day).days) <= repo.DAY_REPLACE_WINDOW_DAYS
+            ):
+                continue
+            result.append(event)
+    return result
+
+
+def _is_calendar_provider(provider: BaseEarningsProvider) -> bool:
+    return isinstance(provider, BaseEarningsUpcomingProvider) and provider.upcoming_mode == "calendar"
 
 
 class EarningsService:
@@ -282,13 +354,15 @@ class EarningsService:
         fetch_history: bool,
         read_start: date,
         read_end: date,
+        fetch_upcoming: bool = True,
     ) -> _Gathered:
         if not roots:
             return _Gathered([], {}, set())
         lock = self._locks.setdefault(provider.name, asyncio.Lock())
         async with lock:
             return await self._gather_locked(
-                provider, roots, start, end, fetch_history, read_start, read_end
+                provider, roots, start, end, fetch_history, read_start, read_end,
+                fetch_upcoming,
             )
 
     async def _gather_locked(
@@ -300,11 +374,16 @@ class EarningsService:
         fetch_history: bool,
         read_start: date,
         read_end: date,
+        fetch_upcoming: bool = True,
     ) -> _Gathered:
+        if _is_symbol_provider(provider):
+            return await self._gather_symbol_mode(
+                provider, roots, start, end, fetch_history, fetch_upcoming, read_start, read_end
+            )
         name = provider.name
         today = earnings_today()
         now = datetime.now(UTC)
-        needs_calendar = provider.earnings_upcoming and read_end >= today
+        needs_calendar = fetch_upcoming and _is_calendar_provider(provider) and read_end >= today
         needs_history = fetch_history and start < today
         snapshot = await self._read_snapshot(name, roots, read_start, read_end, today)
         cached = None
@@ -461,6 +540,297 @@ class EarningsService:
                 meta.mark_stale(code)
         return result
 
+    # --------------------------------------------- per-symbol providers (D2-D4)
+
+    async def _load_symbol_state(
+        self,
+        name: str,
+        roots: list[str],
+        days: list[date],
+        span: tuple[date, date],
+        use_store: bool,
+    ) -> _SymState:
+        if use_store:
+            async def load() -> _SymState:
+                async with engine.session_scope() as session:
+                    events = await repo.read_events(session, name, roots, *span)
+                    syncs = await repo.get_syncs(
+                        session, name, [*roots, *(repo.day_scope(d) for d in days)]
+                    )
+                    known = await repo.known_symbols(session, name, roots)
+                day_syncs = {}
+                for day in days:
+                    info = _sync_info(syncs.get(repo.day_scope(day)))
+                    if info is not None:
+                        day_syncs[day] = info
+                return _SymState(
+                    True, events, day_syncs,
+                    {r: info for r in roots if (info := _sync_info(syncs.get(r)))},
+                    known,
+                )
+
+            state = await engine.guarded(load, None)
+            if state is not None:
+                return state
+        return await self._load_ephemeral(name, roots, days)
+
+    async def _load_ephemeral(self, name: str, roots: list[str], days: list[date]) -> _SymState:
+        state = _SymState(False)
+        redis = budget_redis()
+        if redis is None:
+            return state
+
+        async def read(key: str) -> tuple[list[EarningsEvent], datetime] | None:
+            try:
+                raw = await redis.get(key)
+                if not raw:
+                    return None
+                payload = json.loads(raw)
+                return (
+                    [EarningsEvent.model_validate(item) for item in payload["events"]],
+                    datetime.fromisoformat(payload["fetched_at"]),
+                )
+            except Exception:
+                logger.debug("Earnings cache unavailable", exc_info=True)
+                return None
+
+        for day in days:
+            hit = await read(DAY_KEY.format(provider=name, day=day.isoformat()))
+            if hit:
+                state.eph_days[day] = hit[0]
+                state.day_syncs[day] = SyncInfo(synced_at=hit[1])
+        for root in roots:
+            hit = await read(SYMBOL_KEY.format(provider=name, root=root))
+            if hit:
+                state.eph_symbols[root] = hit[0]
+                state.symbol_syncs[root] = SyncInfo(synced_at=hit[1])
+        return state
+
+    async def _cache_ephemeral(
+        self, key: str, events: list[EarningsEvent], fetched_at: datetime, ttl: int
+    ) -> None:
+        redis = budget_redis()
+        if redis is None:
+            return
+        try:
+            payload = {
+                "fetched_at": fetched_at.isoformat(),
+                "events": [event.model_dump(mode="json") for event in events],
+            }
+            await redis.set(key, json.dumps(payload), ex=ttl)
+        except Exception:
+            logger.debug("Earnings cache write failed", exc_info=True)
+
+    @staticmethod
+    def _symbol_inputs(
+        roots: list[str], state: _SymState, today: date, window_end: date
+    ) -> list[SymbolInput]:
+        events = state.events
+        if not state.store:
+            events = merge_ephemeral(state.eph_days, state.eph_symbols, today)
+        actuals_from = today - timedelta(days=settings.EARNINGS_ACTUALS_WINDOW_DAYS)
+        by_root: dict[str, list[EarningsEvent]] = defaultdict(list)
+        for event in events:
+            by_root[event.symbol].append(event)
+        inputs = []
+        for root in roots:
+            mine = by_root.get(root, [])
+            inputs.append(
+                SymbolInput(
+                    root,
+                    state.symbol_syncs.get(root),
+                    latest_event=max((e.report_date for e in mine), default=None),
+                    has_upcoming=any(e.report_date >= today for e in mine),
+                    in_window=any(
+                        today <= e.report_date <= window_end
+                        and e.report_date in state.day_syncs
+                        for e in mine
+                    ),
+                    unreported_recent=any(
+                        e.eps_actual is None and actuals_from <= e.report_date <= today
+                        for e in mine
+                    ),
+                )
+            )
+        return inputs
+
+    async def _gather_symbol_mode(
+        self,
+        provider: BaseEarningsProvider,
+        roots: list[str],
+        start: date,
+        end: date,
+        fetch_history: bool,
+        fetch_upcoming: bool,
+        read_start: date,
+        read_end: date,
+    ) -> _Gathered:
+        assert isinstance(provider, BaseEarningsUpcomingProvider)
+        name = provider.name
+        today = earnings_today()
+        now = datetime.now(UTC)
+        days = window_days(today, settings.EARNINGS_DAY_CALENDAR_WEEKDAYS)
+        has_days = provider.earnings_day_calendar
+        needs_window = has_days and fetch_upcoming and read_end >= days[0]
+        needs_next = fetch_upcoming and read_end >= today
+        needs_past = fetch_history and start < today
+        retry = timedelta(minutes=settings.EARNINGS_RETRY_MINUTES)
+        span = (
+            min(read_start, today - timedelta(days=PLANNER_SPAN_DAYS)),
+            max(read_end, today + timedelta(days=PLANNER_SPAN_DAYS)),
+        )
+        state = await self._load_symbol_state(name, roots, days, span, True)
+        store = state.store
+        budget = getattr(provider, "budget", None)
+        result = _Gathered([], {}, set())
+        wrote = False
+        quota_hit = False
+        pending_days: tuple[date, ...] = ()
+        paused_days: tuple[date, ...] = ()
+        fetched_days: dict[date, list[EarningsEvent]] = {}
+        fetched_symbols: dict[str, list[EarningsEvent]] = {}
+
+        if needs_window:
+            remaining = await budget.remaining() if budget is not None else None
+            plan = plan_days(
+                now=now, today=today, weekdays=settings.EARNINGS_DAY_CALENDAR_WEEKDAYS,
+                syncs=state.day_syncs, retry=retry, budget_remaining=remaining,
+            )
+            pending_days, paused_days = plan.pending, plan.paused
+            for day in plan.due:
+                try:
+                    events = await provider.get_earnings_for_date(day)
+                except AppError as exc:
+                    result.calendar_error = result.calendar_error or exc
+                    if exc.code == "PROVIDER_QUOTA_EXHAUSTED":
+                        quota_hit = True
+                        break
+                    if store:
+                        await self._store_call(
+                            lambda s, d=day: repo.mark_failed(s, name, repo.day_scope(d), now)  # type: ignore[misc]
+                        )
+                    continue
+                fetched_days[day] = events
+                if store:
+                    wrote |= await self._store_call(
+                        lambda s, d=day, e=events: repo.replace_day(s, name, d, e, today, now)  # type: ignore[misc]
+                    )
+                else:
+                    await self._cache_ephemeral(
+                        DAY_KEY.format(provider=name, day=day.isoformat()), events, now, DAY_KEY_TTL
+                    )
+                    state.eph_days[day] = events
+                state.day_syncs[day] = SyncInfo(synced_at=now)
+            if store and wrote:
+                state = await self._load_symbol_state(name, roots, days, span, True)
+                store = state.store
+
+        symbol_plan = None
+        if needs_next or needs_past:
+            # After the provider signalled an exhausted quota during the window, no
+            # slot is left: due symbols become pending with the budget message.
+            if quota_hit:
+                remaining = 0
+            else:
+                remaining = await budget.remaining() if budget is not None else None
+            symbol_plan = plan_symbols(
+                now=now,
+                symbols=self._symbol_inputs(roots, state, today, days[-1]),
+                needs_past=needs_past, needs_next=needs_next,
+                # Actuals come from the day calendar only when this request uses it.
+                has_day_calendar=needs_window,
+                resync=timedelta(days=settings.EARNINGS_SYMBOL_RESYNC_DAYS),
+                retry=retry, budget_remaining=remaining,
+            )
+            attempted: list[str] = []
+            for root in symbol_plan.due:
+                attempted.append(root)
+                try:
+                    events = await provider.get_symbol_earnings(root)
+                except DataNotFoundError:
+                    events = []
+                    result.not_found.add(root)
+                except AppError as exc:
+                    result.errors[root] = exc
+                    if exc.code == "PROVIDER_QUOTA_EXHAUSTED":
+                        quota_hit = True
+                        result.pending_reason[root] = "provider request budget exhausted"
+                        break
+                    if store:
+                        await self._store_call(lambda s, r=root: repo.mark_failed(s, name, r, now))  # type: ignore[misc]
+                    continue
+                fetched_symbols[root] = events
+                if store:
+                    wrote |= await self._store_call(
+                        lambda s, r=root, e=events: repo.upsert_history(  # type: ignore[misc]
+                            s, name, r, e, now, prune_upcoming_from=today
+                        )
+                    )
+                else:
+                    await self._cache_ephemeral(
+                        SYMBOL_KEY.format(provider=name, root=root), events, now,
+                        settings.EARNINGS_SYMBOL_RESYNC_DAYS * 86400,
+                    )
+                    state.eph_symbols[root] = events
+                state.symbol_syncs[root] = SyncInfo(synced_at=now)
+            skipped = [
+                *(r for r in symbol_plan.due if quota_hit and r not in attempted),
+                *symbol_plan.pending,
+            ]
+            if skipped:
+                quota = await self._quota_error(provider)
+                for root in skipped:
+                    result.pending_reason[root] = "provider request budget exhausted"
+                    result.budget_errors[root] = quota
+
+        # ---- compose
+        if store and wrote:
+            stored = await self._read_events(name, roots, read_start, read_end)
+            events = stored if stored is not None else state.events
+        elif store:
+            events = state.events
+        else:
+            events = merge_ephemeral(state.eph_days, state.eph_symbols, today)
+        selected = set(roots)
+        result.events = reconcile_events(
+            [e for e in events if e.symbol in selected and read_start <= e.report_date <= read_end]
+        )
+        seen = {event.symbol for event in result.events}
+        result.known = seen | state.known | set(state.symbol_syncs)
+        result.calendar_available = not (result.calendar_error and not result.events)
+
+        meta = response_meta.current()
+        if needs_window:
+            for day in days:
+                info = state.day_syncs.get(day)
+                if info is not None and info.synced_at is not None:
+                    meta.record_fetch(info.synced_at)
+        for item in self._symbol_inputs(roots, state, today, days[-1]):
+            if item.sync is not None and item.sync.synced_at is not None and not (needs_window and item.in_window):
+                meta.record_fetch(item.sync.synced_at)
+        for root in roots:
+            if not needs_past:
+                result.history[root] = "not_requested"
+            elif root in state.symbol_syncs or root in fetched_symbols or root in result.not_found:
+                result.history[root] = "complete"
+            else:
+                result.history[root] = "pending"
+
+        if store:
+            code = None
+            if pending_days or any(r in result.budget_errors for r in seen):
+                code = "PROVIDER_QUOTA_EXHAUSTED"
+            elif result.calendar_error is not None and result.events:
+                code = result.calendar_error.code
+            elif paused_days:
+                code = "PROVIDER_ERROR"
+            for root, failure in result.errors.items():
+                if root in seen:
+                    code = code or failure.code
+            if code:
+                meta.mark_stale(code)
+        return result
+
     async def _compose(
         self,
         provider: str,
@@ -490,33 +860,218 @@ class EarningsService:
 
     # ----------------------------------------------------------------- public
 
+    async def _open_roles(
+        self, stack: AsyncExitStack, provider_name: str | None, kind: str
+    ) -> _Roles:
+        """Resolve the providers serving the requested roles (design D10)."""
+        registry = self.registry
+        need_up = kind in ("all", "upcoming")
+        need_hist = kind in ("all", "reported")
+        if provider_name is not None:
+            provider = await stack.enter_async_context(
+                registry.use_earnings_provider(provider_name)
+            )
+            has_up = isinstance(provider, BaseEarningsUpcomingProvider)
+            has_hist = isinstance(provider, BaseEarningsHistoryProvider)
+            if kind == "upcoming" and not has_up or kind == "reported" and not has_hist:
+                role = "upcoming" if kind == "upcoming" else "history"
+                available = registry.list_available_providers()[f"earnings_{role}"]
+                text = (
+                    f"Provider '{provider.name}' only delivers reported earnings."
+                    if role == "upcoming"
+                    else f"Provider '{provider.name}' only delivers upcoming earnings."
+                )
+                error = CapabilityNotSupportedError(
+                    provider.name, "upcoming earnings" if role == "upcoming" else "reported earnings",
+                    sec_type="stock", supported=available,
+                )
+                error.message = f"{text} Providers with {role} earnings: {', '.join(available) or 'none'}."
+                raise error
+            return _Roles(provider if has_up else None, provider if has_hist else None, {})
+        up_name = registry.default_earnings_upcoming_provider if need_up else None
+        hist_name = registry.default_earnings_history_provider if need_hist else None
+        if up_name is None and hist_name is None:
+            if (
+                registry.default_earnings_upcoming_provider is None
+                and registry.default_earnings_history_provider is None
+            ):
+                raise AppError(
+                    "No earnings provider configured — enable a provider in the admin UI",
+                    "PROVIDER_NOT_AVAILABLE",
+                )
+            role = "upcoming" if need_up else "history"
+            raise AppError(
+                f"No {role} earnings provider configured — enable a provider in the admin UI",
+                "PROVIDER_NOT_AVAILABLE",
+            )
+        missing = {
+            role: f"no {role} earnings provider configured"
+            for role, needed, name in (
+                ("upcoming", need_up, up_name),
+                ("history", need_hist, hist_name),
+            )
+            if needed and name is None
+        }
+        up: BaseEarningsProvider | None = None
+        hist: BaseEarningsProvider | None = None
+        if up_name is not None:
+            up = await stack.enter_async_context(registry.use_earnings_provider(up_name, "upcoming"))
+        if hist_name is not None:
+            if hist_name == up_name:
+                hist = up
+            else:
+                hist = await stack.enter_async_context(
+                    registry.use_earnings_provider(hist_name, "history")
+                )
+        return _Roles(up, hist, missing)
+
+    @staticmethod
+    def _compose_events(
+        up_events: list[EarningsEvent], hist_events: list[EarningsEvent]
+    ) -> list[EarningsEvent]:
+        reported = [e for e in hist_events if e.reported]
+        keep = []
+        for event in up_events:
+            if event.reported:
+                continue
+            if any(
+                r.symbol == event.symbol and abs((r.report_date - event.report_date).days) <= 7
+                for r in reported
+            ):
+                continue
+            keep.append(event)
+        return sorted([*reported, *keep], key=lambda e: (e.report_date, e.symbol))
+
+    @staticmethod
+    def _merge_statuses(
+        up: list[EarningsSymbolStatus] | None,
+        hist: list[EarningsSymbolStatus] | None,
+        missing: dict[str, str],
+        symbols: list[ParsedSymbol],
+    ) -> list[EarningsSymbolStatus]:
+        base = hist or up or []
+        if up is None or hist is None:
+            result = list(base)
+        else:
+            result = []
+            for u, h in zip(up, hist, strict=True):
+                if h.status == "not_applicable":
+                    result.append(h)
+                    continue
+                if "ok" in (u.status, h.status):
+                    status, message = "ok", h.message if h.status == "ok" else u.message
+                elif "error" in (u.status, h.status):
+                    failed = u if u.status == "error" else h
+                    status, message = "error", failed.message
+                else:
+                    status, message = "not_found", h.message or u.message
+                result.append(
+                    EarningsSymbolStatus(
+                        symbol=h.symbol, status=status, history=h.history, message=message  # type: ignore[arg-type]
+                    )
+                )
+        if missing:
+            note = "; ".join(missing.values())
+            result = [
+                s if s.status == "not_applicable" or s.message
+                else s.model_copy(update={"message": note})
+                for s in result
+            ]
+        return result
+
+    async def _serve(
+        self,
+        symbols: list[ParsedSymbol],
+        start: date,
+        end: date,
+        provider_name: str | None,
+        kind: str,
+        single: bool = False,
+    ) -> EarningsResult:
+        today = earnings_today()
+        roots = [s.root for s in symbols if not is_etf(s)]
+        async with AsyncExitStack() as stack:
+            roles = await self._open_roles(stack, provider_name, kind)
+            up, hist = roles.upcoming, roles.history
+            if up is not None and hist is not None and up.name == hist.name:
+                provider = up
+                structlog.contextvars.bind_contextvars(provider=provider.name)
+                gathered = await self._gather(
+                    provider, roots, start, end,
+                    fetch_history=kind != "upcoming", fetch_upcoming=kind != "reported",
+                    read_start=start, read_end=end,
+                )
+                events = [e for e in gathered.events if start <= e.report_date <= end]
+                statuses = self._statuses(symbols, gathered, provider, start)
+                composed = None
+                name: str | None = provider.name
+            else:
+                composed = {}
+                if up is not None:
+                    composed["upcoming"] = up.name
+                if hist is not None:
+                    composed["history"] = hist.name
+                structlog.contextvars.bind_contextvars(provider=",".join(composed.values()))
+                up_g = hist_g = None
+                if up is not None:
+                    up_g = await self._gather(
+                        up, roots, start, end, fetch_history=False,
+                        read_start=start, read_end=end,
+                    )
+                if hist is not None:
+                    hist_g = await self._gather(
+                        hist, roots, start, end, fetch_history=True, fetch_upcoming=False,
+                        read_start=start, read_end=end,
+                    )
+                in_range = lambda g: [e for e in (g.events if g else []) if start <= e.report_date <= end]
+                events = self._compose_events(in_range(up_g), in_range(hist_g))
+                statuses = self._merge_statuses(
+                    self._statuses(symbols, up_g, up, start) if up_g and up else None,
+                    self._statuses(symbols, hist_g, hist, start) if hist_g and hist else None,
+                    roles.missing, symbols,
+                )
+                gathered = hist_g or up_g  # type: ignore[assignment]
+                provider = hist or up  # type: ignore[assignment]
+                if len(composed) == 1:
+                    name, composed = next(iter(composed.values())), None
+                else:
+                    name = None
+            if kind == "upcoming":
+                events = [e for e in events if not e.reported and e.report_date >= today]
+            elif kind == "reported":
+                events = [e for e in events if e.reported]
+            applicable = [s for s in statuses if s.status != "not_applicable"]
+            if single and not events and gathered is not None:
+                root = symbols[0].root
+                if root in gathered.errors:
+                    raise gathered.errors[root]
+                if root in gathered.budget_errors:
+                    raise gathered.budget_errors[root]
+                if statuses[0].status == "error":
+                    raise self._first_error(gathered)
+                if root not in gathered.known:
+                    raise DataNotFoundError("Earnings", symbols[0].canonical)
+            if applicable and not events and all(s.status == "error" for s in applicable):
+                raise self._first_error(gathered)
+            return EarningsResult(name, events, statuses, composed)
+
     async def calendar(
         self,
         symbols: list[ParsedSymbol],
         start: date,
         end: date,
         provider_name: str | None = None,
+        kind: str = "all",
     ) -> EarningsResult:
         if start > end:
             raise DataValidationError("from must not be after to")
         if (end - start).days > MAX_RANGE_DAYS:
             raise DataValidationError(f"The range must not exceed {MAX_RANGE_DAYS} days")
-        async with self.registry.use_earnings_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
-            roots = [s.root for s in symbols if not is_etf(s)]
-            gathered = await self._gather(
-                provider, roots, start, end, fetch_history=True,
-                read_start=start, read_end=end,
-            )
-            events = [e for e in gathered.events if start <= e.report_date <= end]
-            statuses = self._statuses(symbols, gathered, provider, start)
-            applicable = [s for s in statuses if s.status != "not_applicable"]
-            if applicable and not events and all(s.status == "error" for s in applicable):
-                raise self._first_error(gathered)
-            return EarningsResult(provider.name, events, statuses)
+        return await self._serve(symbols, start, end, provider_name, kind)
 
     def _first_error(self, gathered: _Gathered) -> AppError:
-        return gathered.calendar_error or next(iter(gathered.errors.values()))
+        error = gathered.calendar_error or next(iter(gathered.errors.values()), None)
+        return error or next(iter(gathered.budget_errors.values()))
 
     def _statuses(
         self,
@@ -572,45 +1127,49 @@ class EarningsService:
         start: date,
         end: date,
         provider_name: str | None = None,
+        kind: str = "all",
     ) -> EarningsResult:
         if start > end:
             raise DataValidationError("from must not be after to")
-        async with self.registry.use_earnings_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
-            if is_etf(symbol):
-                error = CapabilityNotSupportedError(
-                    provider.name, "earnings", sec_type="etf", supported=["stock"]
-                )
-                error.details["http_status"] = 422
-                raise error
-            gathered = await self._gather(
-                provider, [symbol.root], start, end, fetch_history=True,
-                read_start=start, read_end=end,
+        if is_etf(symbol):
+            name = provider_name or self.registry.default_earnings_history_provider or (
+                self.registry.default_earnings_upcoming_provider or "earnings"
             )
-            events = [e for e in gathered.events if start <= e.report_date <= end]
-            statuses = self._statuses([symbol], gathered, provider, start)
-            if not events:
-                if symbol.root in gathered.errors:
-                    raise gathered.errors[symbol.root]
-                if symbol.root in gathered.budget_errors:
-                    raise gathered.budget_errors[symbol.root]
-                if statuses[0].status == "error":
-                    raise self._first_error(gathered)
-                if symbol.root not in gathered.known:
-                    raise DataNotFoundError("Earnings", symbol.canonical)
-            return EarningsResult(provider.name, events, statuses)
+            error = CapabilityNotSupportedError(
+                name, "earnings", sec_type="etf", supported=["stock"]
+            )
+            error.details["http_status"] = 422
+            raise error
+        return await self._serve([symbol], start, end, provider_name, kind, single=True)
+
+    async def _stored_last_reported(
+        self, name: str, roots: list[str], today: date
+    ) -> dict[str, EarningsEvent]:
+        async def load() -> list[EarningsEvent]:
+            async with engine.session_scope() as session:
+                return await repo.read_events(
+                    session, name, roots, today - timedelta(days=HISTORY_LOOKBACK_DAYS), today
+                )
+
+        events = await engine.guarded(load, None) or []
+        latest: dict[str, EarningsEvent] = {}
+        for event in events:
+            if event.reported and (
+                event.symbol not in latest or event.report_date > latest[event.symbol].report_date
+            ):
+                latest[event.symbol] = event
+        return latest
 
     async def next(
         self, symbols: list[ParsedSymbol], provider_name: str | None = None
     ) -> NextResult:
-        async with self.registry.use_earnings_provider(provider_name) as provider:
+        today = earnings_today()
+        roots = [s.root for s in symbols if not is_etf(s)]
+        async with AsyncExitStack() as stack:
+            roles = await self._open_roles(stack, provider_name, "upcoming")
+            provider = roles.upcoming
+            assert provider is not None
             structlog.contextvars.bind_contextvars(provider=provider.name)
-            if not provider.earnings_upcoming:
-                raise CapabilityNotSupportedError(
-                    provider.name, "upcoming earnings", sec_type="stock", supported=[]
-                )
-            today = earnings_today()
-            roots = [s.root for s in symbols if not is_etf(s)]
             gathered = await self._gather(
                 provider, roots, today, today + timedelta(days=CALENDAR_HORIZON_DAYS),
                 fetch_history=False,
@@ -619,6 +1178,10 @@ class EarningsService:
             )
             if roots and not gathered.calendar_available and gathered.calendar_error:
                 raise gathered.calendar_error
+            history_events: dict[str, EarningsEvent] = {}
+            hist_default = self.registry.default_earnings_history_provider
+            if provider_name is None and hist_default and hist_default != provider.name:
+                history_events = await self._stored_last_reported(hist_default, roots, today)
             by_symbol: dict[str, list[EarningsEvent]] = defaultdict(list)
             for event in gathered.events:
                 by_symbol[event.symbol].append(event)
@@ -639,11 +1202,23 @@ class EarningsService:
                     key=lambda e: e.report_date,
                     default=None,
                 )
-                reported = max(
+                reported = history_events.get(symbol.root) or max(
                     (e for e in events if e.reported and e is not upcoming),
                     key=lambda e: e.report_date,
                     default=None,
                 )
+                failure = None
+                if upcoming is None and not events:
+                    failure = gathered.errors.get(symbol.root) or gathered.budget_errors.get(symbol.root)
+                if failure is not None:
+                    message = gathered.pending_reason.get(symbol.root) or failure.message
+                    rows.append(
+                        NextEarnings(
+                            symbol=symbol.canonical, status="error", message=message,
+                            last_reported=reported,
+                        )
+                    )
+                    continue
                 rows.append(
                     NextEarnings(
                         symbol=symbol.canonical,

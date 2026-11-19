@@ -625,9 +625,12 @@ async def _tool_get_earnings_calendar(args: dict[str, Any]) -> dict[str, Any]:
     start = _earnings_date(args, "from_date", today - timedelta(days=30))
     end = _earnings_date(args, "to_date", today + timedelta(days=90))
     provider = (args.get("provider") or "").lower() or None
+    kind = args.get("kind") or "all"
+    if kind not in ("all", "upcoming", "reported"):
+        raise DataValidationError("kind must be one of all, upcoming, reported")
 
     async def load() -> Any:
-        result = await _earnings_service().calendar(symbols, start, end, provider)
+        result = await _earnings_service().calendar(symbols, start, end, provider, kind)
         return earnings_envelope(result.events, result).model_dump(mode="json")
 
     return await _earnings_call(
@@ -637,6 +640,7 @@ async def _tool_get_earnings_calendar(args: dict[str, Any]) -> dict[str, Any]:
             "symbols": ",".join(symbol.canonical for symbol in symbols),
             "from_date": args.get("from_date"),
             "to_date": args.get("to_date"),
+            "kind": kind if kind != "all" else None,
             "provider": provider,
         },
         load,
@@ -1007,7 +1011,7 @@ TOOL_REGISTRY.extend(
     [
         {
             "name": "get_earnings_calendar",
-            "description": "Earnings events (past and upcoming) of up to 50 stocks in a date range, oldest first, with release time (bmo/amc/during/unknown), date_status as stated by the provider, EPS estimate/actual/surprise and per-symbol status in meta.symbols. Upcoming dates are announced dates only; MDH never estimates. meta.stale is true when stored events were served because the provider failed or its request budget is exhausted.",
+            "description": "Earnings events of up to 50 stocks in a date range, oldest first, with release time (bmo/amc/during/unknown), date_status as stated by the provider, EPS estimate/actual/surprise, revenue estimate/actual (earningsapi) and per-symbol status in meta.symbols. `kind` selects upcoming (announced, not yet reported), reported or all (default); upcoming events come from the upcoming provider, reported ones from the history provider. Upcoming dates are announced dates only; MDH never estimates. meta.stale is true when stored events were served because the provider failed or its request budget is exhausted.",
             "inputSchema": {
                 "type": "object",
                 "required": ["symbols"],
@@ -1024,16 +1028,21 @@ TOOL_REGISTRY.extend(
                         "format": "date",
                         "description": "Last report date (default: today + 90 days; max range 800 days).",
                     },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["all", "upcoming", "reported"],
+                        "description": "Event filter: upcoming (announced, not yet reported), reported or all (default).",
+                    },
                     "provider": {
                         "type": "string",
-                        "description": "Earnings provider override (e.g. alphavantage).",
+                        "description": "Earnings provider override (e.g. earningsapi, alphavantage).",
                     },
                 },
             },
         },
         {
             "name": "get_next_earnings",
-            "description": "Next announced earnings event per symbol, in request order: event or null, days_until (New York calendar days), last_reported (latest stored reported event) and status (ok, none_scheduled when no date is announced yet, not_applicable for ETFs). Answered from the provider's market-wide calendar with at most one provider request.",
+            "description": "Next announced earnings event per symbol, in request order: event or null, days_until (New York calendar days), last_reported (latest stored reported event) and status (ok, none_scheduled when no date is announced yet, not_applicable for ETFs). Served by the upcoming provider: a market-wide calendar provider needs at most one request, a per-symbol provider (earningsapi) uses its day-calendar window and requests only stocks the store cannot answer, within its request budget.",
             "inputSchema": {
                 "type": "object",
                 "required": ["symbols"],

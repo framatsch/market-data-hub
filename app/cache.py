@@ -314,6 +314,14 @@ def _day_granular(params: dict[str, str]) -> None:
         params[name] = as_utc(moment).date().isoformat()
 
 
+def _earnings_default_key() -> str | None:
+    up = registry.default_earnings_upcoming_provider
+    history = registry.default_earnings_history_provider
+    if up == history:
+        return up
+    return f"{up or '-'}+{history or '-'}"
+
+
 def _compose_key(
     route_key: str, symbol: ParsedSymbol | None, params: dict[str, Any]
 ) -> str:
@@ -358,9 +366,9 @@ def _compose_key(
             "volatility:snapshot": registry.default_volatility_provider,
             "volatility:history": registry.default_volatility_provider,
             "volatility:stats": registry.default_volatility_provider,
-            "earnings:calendar": registry.default_earnings_provider,
-            "earnings:next": registry.default_earnings_provider,
-            "companies:earnings": registry.default_earnings_provider,
+            "earnings:calendar": _earnings_default_key(),
+            "earnings:next": registry.default_earnings_upcoming_provider,
+            "companies:earnings": _earnings_default_key(),
         }.get(route_key)
         if default:
             params["provider"] = default.lower()

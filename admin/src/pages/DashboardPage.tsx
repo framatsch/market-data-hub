@@ -56,7 +56,8 @@ function providerLabel(name: string) {
 }
 
 function capabilityLabel(capability: string) {
-  return capability.charAt(0).toUpperCase() + capability.slice(1);
+  const label = capability.replace(/_/g, ' ');
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';

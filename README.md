@@ -25,7 +25,7 @@ MCP is mounted in the same FastAPI app (same port)
 | Company data | LSEG | Finnhub | |
 | News | Finnhub | IBKR | LSEG news is not exposed (`provider=lseg` → `INVALID_PROVIDER`). Mock provider for development. |
 | Underlying IV | LSEG, IBKR | – | See [Implied Volatility](#underlying-implied-volatility). Polygon/Schwab are not underlying-IV providers. |
-| Earnings (stocks) | Alpha Vantage (free key) | Financial Datasets (pay per request) | Announced dates only, never estimated. See [Earnings Calendar](#earnings-calendar). |
+| Earnings (stocks) | EarningsAPI (free key), Alpha Vantage (free key) | Financial Datasets (pay per request) | Announced dates only, never estimated. See [Earnings Calendar](#earnings-calendar). |
 
 Historical REST/MCP dates are normalized to UTC: naive means UTC, omitted `end` = now, omitted `start` = `end` − 30 days.
 
@@ -120,6 +120,7 @@ Settings come from environment variables (see `.env.example`). **Provider creden
 | `SCHWAB_CALLBACK_URL` | `http://localhost:8000/api/admin/schwab/callback` | Must match the Schwab app |
 | `PROVIDER_REQUEST_TIMEOUT` / `PROVIDER_MAX_RETRIES` | `10.0` / `3` | |
 | `EARNINGS_CALENDAR_RESYNC_HOURS`, `EARNINGS_ACTUALS_WINDOW_DAYS`, `EARNINGS_RETRY_MINUTES` | `24`, `10`, `30` | See [Earnings Calendar](#earnings-calendar) |
+| `EARNINGS_DAY_CALENDAR_WEEKDAYS`, `EARNINGS_SYMBOL_RESYNC_DAYS` | `7`, `7` | Day-calendar window and weekly date check of per-symbol providers (EarningsAPI) |
 
 Further provider base-URL/Schwab tuning variables are listed in `.env.example`.
 
@@ -186,12 +187,14 @@ Error codes: 400 not a volatility provider · 422 invalid input/market · 501 un
 
 ## Earnings Calendar
 
-Earnings dates and results of stocks from Alpha Vantage (free key) or Financial Datasets (pay per request); choose via **Admin → Settings → Default Earnings Provider** or `provider=`.
+Earnings dates and results of stocks from EarningsAPI (free key), Alpha Vantage (free key) or Financial Datasets (pay per request). Earnings have two roles with their own default: **Default Earnings Upcoming Provider** (announced dates; `earningsapi`, `alphavantage`) and **Default Earnings History Provider** (reported quarters; also `financialdatasets`), set in **Admin → Settings**. `provider=` serves every role the provider implements; without it `/earnings/next` and `kind=upcoming` use the upcoming default, `kind=reported` the history default and `kind=all` both (`meta.providers`).
+
+**EarningsAPI setup:** create a free key at <https://www.earningsapi.com>, store it as `api_key` for `earningsapi` in the Admin UI, enable the provider, run the connection test and select it as upcoming (and history) default. Free tier: 60 requests per minute, 100 per day, 1,000 per month (budget defaults 100/1,000), 24 months of history, values updated once daily. MDH keeps a window of day calendars (previous weekday through `EARNINGS_DAY_CALENDAR_WEEKDAYS` weekdays ahead, about 110 requests per month for the whole market) and requests a single stock only when the store cannot answer: never synchronised, the next quarter after a report, a weekly check while no date is announced, or after a day calendar removed its event. For 100 symbols about 150–280 of 1,000 monthly requests are used, however often clients call MDH. EarningsAPI also delivers revenue estimate/actual (`revenue_estimate`, `revenue_actual`).
 
 | Endpoint | Result |
 |---|---|
-| `GET /earnings/next?symbols=AAPL,MSFT,SPY` | Next announced event per symbol (request order), `days_until`, `last_reported`, `status` (`ok`, `none_scheduled`, `not_applicable` for ETFs). One provider request for all symbols, no history requests. |
-| `GET /earnings/calendar?symbols=…&from=…&to=…` | Events of up to 50 symbols in a range (default today − 30 … + 90 days), `format=csv` |
+| `GET /earnings/next?symbols=AAPL,MSFT,SPY` | Next announced event per symbol (request order), `days_until`, `last_reported`, `status` (`ok`, `none_scheduled`, `not_applicable` for ETFs). Calendar providers: one request for all symbols, no history requests; per-symbol providers (`earningsapi`): day-calendar window plus a request only for stocks the store cannot answer, within the request budget. |
+| `GET /earnings/calendar?symbols=…&from=…&to=…&kind=all` | Events of up to 50 symbols in a range (default today − 30 … + 90 days), `kind` = `all` (default), `upcoming` or `reported`, `format=csv` |
 | `GET /companies/{symbol}/earnings` | Past and upcoming events of one stock |
 
 ```bash

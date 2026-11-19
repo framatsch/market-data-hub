@@ -27,6 +27,8 @@ interface SettingsProviderCapabilities {
   companies: string[];
   news: string[];
   volatility: string[];
+  earnings_upcoming: string[];
+  earnings_history: string[];
   earnings: string[];
 }
 
@@ -61,7 +63,8 @@ export default function SettingsPage() {
     default_company_provider: currentDefaults?.default_company_provider || '',
     default_news_provider: currentDefaults?.default_news_provider || '',
     default_volatility_provider: currentDefaults?.default_volatility_provider || '',
-    default_earnings_provider: currentDefaults?.default_earnings_provider || '',
+    default_earnings_upcoming_provider: currentDefaults?.default_earnings_upcoming_provider || '',
+    default_earnings_history_provider: currentDefaults?.default_earnings_history_provider || '',
   };
 
   const updateDefaultsMutation = useMutation({
@@ -199,15 +202,30 @@ export default function SettingsPage() {
               </FormControl>
 
               <FormControl fullWidth margin="normal">
-                <InputLabel id="earnings-provider-label">Default Earnings Provider</InputLabel>
+                <InputLabel id="earnings-upcoming-provider-label">Default Earnings Upcoming Provider</InputLabel>
                 <Select
-                  labelId="earnings-provider-label"
-                  value={defaults.default_earnings_provider || ''}
-                  label="Default Earnings Provider"
-                  onChange={(e) => setDefaults({ ...defaults, default_earnings_provider: e.target.value })}
+                  labelId="earnings-upcoming-provider-label"
+                  value={defaults.default_earnings_upcoming_provider || ''}
+                  label="Default Earnings Upcoming Provider"
+                  onChange={(e) => setDefaults({ ...defaults, default_earnings_upcoming_provider: e.target.value })}
                 >
                   <MenuItem value=""><em>None</em></MenuItem>
-                  {capabilities?.earnings?.map(p => (
+                  {capabilities?.earnings_upcoming?.map(p => (
+                    <MenuItem key={p} value={p}>{p}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth margin="normal">
+                <InputLabel id="earnings-history-provider-label">Default Earnings History Provider</InputLabel>
+                <Select
+                  labelId="earnings-history-provider-label"
+                  value={defaults.default_earnings_history_provider || ''}
+                  label="Default Earnings History Provider"
+                  onChange={(e) => setDefaults({ ...defaults, default_earnings_history_provider: e.target.value })}
+                >
+                  <MenuItem value=""><em>None</em></MenuItem>
+                  {capabilities?.earnings_history?.map(p => (
                     <MenuItem key={p} value={p}>{p}</MenuItem>
                   ))}
                 </Select>

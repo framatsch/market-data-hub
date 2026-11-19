@@ -1,6 +1,7 @@
 """HTTP routes of the earnings endpoints with a real service and a fake provider."""
 
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +14,7 @@ from app.api import routes_companies, routes_earnings
 from app.dependencies import get_earnings_service
 from app.main import app_error_handler
 from app.models.earnings import EarningsEvent
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.services import earnings_service as module
 from app.services.earnings_service import EarningsService
@@ -22,13 +23,12 @@ from app.utils.errors import AppError, DataNotFoundError, ProviderConnectionErro
 TODAY = date(2026, 11, 17)
 
 
-class FakeProvider(BaseEarningsProvider):
+class FakeProvider(BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "alphavantage"
 
     def __init__(self, calendar=(), history=None, upcoming=True):
         self.calendar = list(calendar)
         self.history = history or {}
-        self.earnings_upcoming = upcoming
         self.calendar_calls = 0
         self.history_calls = []
         self.error = None
@@ -47,6 +47,13 @@ class FakeProvider(BaseEarningsProvider):
 
     async def test_connection(self):
         return {"success": True}
+
+
+class HistoryOnlyProvider(BaseEarningsHistoryProvider):
+    name = FakeProvider.name
+    __init__ = FakeProvider.__init__
+    get_earnings_history = FakeProvider.get_earnings_history
+    test_connection = FakeProvider.test_connection
 
 
 def ev(symbol, day, **kwargs):
@@ -194,9 +201,10 @@ def test_provider_resolution_errors(cache_redis, provider):
     missing = make_client(provider, default=None).get("/earnings/next?symbols=AAPL")
     assert missing.status_code == 503
     assert missing.json()["error"]["message"] == "No earnings provider configured — enable a provider in the admin UI"
-    history_only = FakeProvider(upcoming=False)
-    response = make_client(history_only).get("/earnings/next?symbols=AAPL")
+    history_only = HistoryOnlyProvider()
+    response = make_client(history_only).get("/earnings/next?symbols=AAPL&provider=alphavantage")
     assert response.status_code == 501 and history_only.calendar_calls == 0
+    assert "only delivers reported earnings" in response.json()["error"]["message"]
 
 
 def test_company_earnings_route(client, provider, cache_redis):
@@ -227,3 +235,29 @@ def test_openapi_documents_earnings_endpoints(client):
     assert parameters["symbols"]["required"] is True and parameters["symbols"]["schema"]
     calendar = {p["name"] for p in paths["/earnings/calendar"]["get"]["parameters"]}
     assert {"symbols", "from", "to", "provider", "format"} <= calendar
+
+
+def test_kind_filter_and_validation(client, provider):
+    url = "/earnings/calendar?symbols=AAPL,MSFT&from=2026-10-01&to=2027-02-28"
+    upcoming = client.get(url + "&kind=upcoming").json()["data"]
+    assert upcoming and all(not e["reported"] for e in upcoming)
+    assert provider.history_calls == []  # no history request for kind=upcoming
+    reported = client.get(url + "&kind=reported").json()["data"]
+    assert reported and all(e["reported"] for e in reported)
+    assert client.get(url + "&kind=forward").status_code == 422
+    assert client.get("/companies/AAPL/earnings?kind=forward").status_code == 422
+    company = client.get("/companies/AAPL/earnings?kind=reported").json()["data"]
+    assert company and all(e["reported"] for e in company)
+
+
+def test_revenue_fields_in_json_and_csv(cache_redis):
+    event = ev("AAPL", date(2026, 10, 29), eps_actual="1.85", fiscal_period_end=date(2026, 9, 30))
+    event.revenue_actual = Decimal(114477000000)
+    event.revenue_estimate = Decimal(113347848120)
+    http = make_client(FakeProvider(history={"AAPL": [event]}))
+    body = http.get("/companies/AAPL/earnings?kind=reported").json()["data"][0]
+    assert body["revenue_actual"] == "114477000000" and body["revenue_estimate"] == "113347848120"
+    csv = http.get("/companies/AAPL/earnings?kind=reported&format=csv").text.splitlines()
+    header = csv[0].split(",")
+    assert header.index("revenue_estimate") > header.index("eps_surprise_pct")
+    assert header.index("revenue_actual") < header.index("currency")

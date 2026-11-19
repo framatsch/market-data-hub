@@ -10,7 +10,7 @@ from app import cache as response_cache
 from app import response_meta
 from app.api import mcp
 from app.models.earnings import EarningsEvent
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.services import earnings_service as module
 from app.services.earnings_service import EarningsService
@@ -19,7 +19,7 @@ from app.utils.errors import DataNotFoundError
 TODAY = date(2026, 11, 17)
 
 
-class FakeProvider(BaseEarningsProvider):
+class FakeProvider(BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "alphavantage"
 
     def __init__(self):
@@ -136,3 +136,16 @@ async def test_validation_errors_are_json_rpc_errors(provider, arguments, code):
     error = await call("get_earnings_calendar", **arguments)
     assert error["code"] == code
     assert provider.calendar_calls == 0
+
+
+async def test_calendar_kind_argument(provider, cache_redis):
+    args = {"symbols": ["AAPL", "MSFT"], "from_date": "2026-10-01", "to_date": "2027-03-01"}
+    upcoming = await call("get_earnings_calendar", kind="upcoming", **args)
+    assert upcoming["data"] and all(not e["reported"] for e in upcoming["data"])
+    assert provider.history_calls == []
+    reported = await call("get_earnings_calendar", kind="reported", **args)
+    assert reported["data"] and all(e["reported"] for e in reported["data"])
+    invalid = await call("get_earnings_calendar", kind="forward", **args)
+    assert "kind" in json.dumps(invalid)
+    schema = next(t for t in mcp.TOOL_REGISTRY if t["name"] == "get_earnings_calendar")["inputSchema"]
+    assert schema["properties"]["kind"]["enum"] == ["all", "upcoming", "reported"]

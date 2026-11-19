@@ -79,36 +79,47 @@ describe('budget helpers', () => {
 describe('Earnings capability chip', () => {
   it('is shown for providers with the earnings capability', async () => {
     state.routes['/api/admin/providers'] = [
-      provider({ name: 'alphavantage', capabilities: ['prices', 'earnings'] }),
+      provider({ name: 'alphavantage', capabilities: ['prices', 'earnings_upcoming', 'earnings_history'] }),
       provider({ name: 'ibkr', capabilities: ['prices', 'options'] }),
     ];
     state.routes['/api/admin/credentials'] = [];
     renderWithProviders(<ProvidersPage />);
     const row = (await screen.findByText('ALPHAVANTAGE')).closest('tr')!;
-    expect(within(row).getByText('Prices · Earnings')).toBeTruthy();
-    expect(within(row).getAllByText('Earnings').length).toBeGreaterThan(0);
+    expect(within(row).getByText('Prices · Earnings upcoming · Earnings history')).toBeTruthy();
+    expect(within(row).getAllByText('Earnings upcoming').length).toBeGreaterThan(0);
+    expect(within(row).getAllByText('Earnings history').length).toBeGreaterThan(0);
     const other = screen.getByText('IBKR').closest('tr')!;
-    expect(within(other).queryByText('Earnings')).toBeNull();
+    expect(within(other).queryByText('Earnings upcoming')).toBeNull();
   });
 });
 
-describe('Default Earnings Provider dropdown', () => {
-  it('lists earnings providers and saves the selection', async () => {
-    state.routes['/api/admin/settings/defaults'] = { default_earnings_provider: '' };
+describe('Default earnings provider dropdowns', () => {
+  it('lists providers per role and saves both selections', async () => {
+    state.routes['/api/admin/settings/defaults'] = {
+      default_earnings_upcoming_provider: '', default_earnings_history_provider: '',
+    };
     state.routes['/api/admin/settings/capabilities'] = {
       prices: ['alphavantage'], options: [], companies: [], news: [], volatility: [],
-      earnings: ['alphavantage', 'financialdatasets'],
+      earnings_upcoming: ['earningsapi'],
+      earnings_history: ['earningsapi', 'financialdatasets'],
+      earnings: ['earningsapi', 'financialdatasets'],
     };
     state.routes['PUT /api/admin/settings/defaults'] = {};
     const user = userEvent.setup();
     renderWithProviders(<SettingsPage />);
-    await user.click(await screen.findByRole('combobox', { name: 'Default Earnings Provider' }));
-    const options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
-    expect(options).toEqual(['None', 'alphavantage', 'financialdatasets']);
-    await user.click(screen.getByRole('option', { name: 'alphavantage' }));
+    await user.click(await screen.findByRole('combobox', { name: 'Default Earnings Upcoming Provider' }));
+    let options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toEqual(['None', 'earningsapi']);
+    await user.click(screen.getByRole('option', { name: 'earningsapi' }));
+    await user.click(screen.getByRole('combobox', { name: 'Default Earnings History Provider' }));
+    options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toEqual(['None', 'earningsapi', 'financialdatasets']);
+    await user.click(screen.getByRole('option', { name: 'financialdatasets' }));
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(lastCall('PUT', '/api/admin/settings/defaults')).toBeTruthy());
-    expect(lastCall('PUT', '/api/admin/settings/defaults')?.body?.default_earnings_provider).toBe('alphavantage');
+    const body = lastCall('PUT', '/api/admin/settings/defaults')?.body;
+    expect(body?.default_earnings_upcoming_provider).toBe('earningsapi');
+    expect(body?.default_earnings_history_provider).toBe('financialdatasets');
   });
 });
 

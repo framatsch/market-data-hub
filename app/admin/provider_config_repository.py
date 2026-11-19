@@ -9,7 +9,7 @@ from typing import Any
 from app.config import settings
 
 STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
-KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets")
+KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets", "earningsapi")
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
@@ -26,6 +26,7 @@ CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "mock": set(),
     "alphavantage": {"request_budget_per_day", "request_budget_per_month"},
     "financialdatasets": {"request_budget_per_day", "request_budget_per_month"},
+    "earningsapi": {"request_budget_per_day", "request_budget_per_month"},
 }
 
 
@@ -254,14 +255,14 @@ class ProviderConfigRepository:
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if not enabled_str:
             # Metered providers need a key and a budget decision: opt-in only.
-            return provider_name not in {"alphavantage", "financialdatasets"}
+            return provider_name not in {"alphavantage", "financialdatasets", "earningsapi"}
         enabled = {
             name.strip().lower() for name in enabled_str.split(",") if name.strip()
         }
         return provider_name in enabled
 
     def _default_rate_limit(self, provider_name: str) -> float:
-        if provider_name == "alphavantage":
+        if provider_name in {"alphavantage", "earningsapi"}:
             return 1.0
         if provider_name == "schwab":
             return float(settings.SCHWAB_RATE_LIMIT_PER_SEC)
@@ -276,6 +277,8 @@ class ProviderConfigRepository:
             return {"request_budget_per_day": 25, "request_budget_per_month": 0}
         if provider_name == "financialdatasets":
             return {"request_budget_per_day": 0, "request_budget_per_month": 1000}
+        if provider_name == "earningsapi":
+            return {"request_budget_per_day": 100, "request_budget_per_month": 1000}
         if provider_name == "ibkr":
             return {
                 "host": settings.IBKR_HOST,

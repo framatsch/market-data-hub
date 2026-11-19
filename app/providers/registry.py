@@ -30,12 +30,15 @@ from app.config import settings
 from app.providers.alphavantage import AlphaVantageProvider
 from app.providers.base import (
     BaseCompanyProvider,
+    BaseEarningsHistoryProvider,
     BaseEarningsProvider,
+    BaseEarningsUpcomingProvider,
     BaseNewsProvider,
     BaseOptionsProvider,
     BasePriceProvider,
     BaseVolatilityProvider,
 )
+from app.providers.earningsapi import EarningsApiProvider
 from app.providers.financialdatasets import FinancialDatasetsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.providers.ibkr import IBKRProvider
@@ -54,7 +57,8 @@ DEFAULT_PROVIDER_FALLBACKS = {
     "default_options_provider": None,
     "default_news_provider": None,
     "default_volatility_provider": None,
-    "default_earnings_provider": None,
+    "default_earnings_upcoming_provider": None,
+    "default_earnings_history_provider": None,
 }
 
 
@@ -69,6 +73,7 @@ class ProviderRegistry:
         "prixe": PrixeProvider,
         "alphavantage": AlphaVantageProvider,
         "financialdatasets": FinancialDatasetsProvider,
+        "earningsapi": EarningsApiProvider,
     }
 
     def __init__(self) -> None:
@@ -82,8 +87,20 @@ class ProviderRegistry:
         self.default_options_provider: str | None = None
         self.default_news_provider: str | None = None
         self.default_volatility_provider: str | None = None
-        self.default_earnings_provider: str | None = None
+        self.default_earnings_upcoming_provider: str | None = None
+        self.default_earnings_history_provider: str | None = None
         self._initialize_providers()
+
+    @property
+    def default_earnings_provider(self) -> str | None:
+        """The forward-looking default (catalog key ``defaults.earnings``)."""
+        return self.default_earnings_upcoming_provider
+
+    @default_earnings_provider.setter
+    def default_earnings_provider(self, value: str | None) -> None:
+        """Shorthand: set both role defaults."""
+        self.default_earnings_upcoming_provider = value
+        self.default_earnings_history_provider = value
 
     def _get_reload_lock(self) -> asyncio.Lock:
         return self._reload_lock
@@ -111,6 +128,10 @@ class ProviderRegistry:
         self, system_settings: dict[str, str | None] | None = None
     ) -> None:
         values = {**DEFAULT_PROVIDER_FALLBACKS, **(system_settings or {})}
+        legacy = values.get("default_earnings_provider")
+        if legacy:
+            for key in self.earnings_role_settings(legacy):
+                values[key] = values.get(key) or legacy
         self.default_price_provider = self._resolve_default(
             values["default_price_provider"],
             "default_price_provider",
@@ -134,10 +155,15 @@ class ProviderRegistry:
             "default_volatility_provider",
             BaseVolatilityProvider,
         )
-        self.default_earnings_provider = self._resolve_default(
-            values["default_earnings_provider"],
-            "default_earnings_provider",
-            BaseEarningsProvider,
+        self.default_earnings_upcoming_provider = self._resolve_default(
+            values["default_earnings_upcoming_provider"],
+            "default_earnings_upcoming_provider",
+            BaseEarningsUpcomingProvider,
+        )
+        self.default_earnings_history_provider = self._resolve_default(
+            values["default_earnings_history_provider"],
+            "default_earnings_history_provider",
+            BaseEarningsHistoryProvider,
         )
 
     def _initialize_providers(self) -> None:
@@ -154,7 +180,7 @@ class ProviderRegistry:
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
             to_load = {name: cls for name, cls in self.provider_classes.items()
-                       if name not in {"alphavantage", "financialdatasets"}}
+                       if name not in {"alphavantage", "financialdatasets", "earningsapi"}}
 
         for name, cls in to_load.items():
             try:
@@ -213,8 +239,10 @@ class ProviderRegistry:
                     "default_options_provider",
                     "default_news_provider",
                     "default_volatility_provider",
-                    "default_earnings_provider",
+                    "default_earnings_upcoming_provider",
+                    "default_earnings_history_provider",
                 )
+                await self._migrate_earnings_default(settings_repository, system_settings)
                 for key in default_setting_keys:
                     if key not in system_settings:
                         await settings_repository.set(key, None)
@@ -262,6 +290,48 @@ class ProviderRegistry:
 
         for name, provider in providers_to_close:
             await self._close_provider(name, provider)
+
+    def earnings_role_settings(self, name: str) -> tuple[str, ...]:
+        """Role default settings a provider name may fill (legacy setting, shorthand).
+
+        A provider implementing at least one earnings interface fills only the roles it
+        implements. An unknown name, or one without any earnings interface, fills both,
+        so that the default resolution rejects it with a warning as before.
+        """
+        roles = {
+            "default_earnings_upcoming_provider": BaseEarningsUpcomingProvider,
+            "default_earnings_history_provider": BaseEarningsHistoryProvider,
+        }
+        target: object | None = self._providers.get(name)
+        if target is None:
+            target = self.provider_classes.get(name)
+        if target is None:
+            return tuple(roles)
+
+        def implements(base: type) -> bool:
+            return isinstance(target, base) or (
+                isinstance(target, type) and issubclass(target, base)
+            )
+
+        matching = tuple(key for key, base in roles.items() if implements(base))
+        return matching or tuple(roles)
+
+    async def _migrate_earnings_default(
+        self,
+        settings_repository: SettingsRepository,
+        system_settings: dict[str, str | None],
+    ) -> None:
+        """One-time: the single `default_earnings_provider` seeds the role defaults
+        whose interface the provider implements, then it is removed."""
+        legacy = system_settings.get("default_earnings_provider")
+        if not legacy:
+            return
+        for key in self.earnings_role_settings(legacy):
+            if not system_settings.get(key):
+                await settings_repository.set(key, legacy)
+                system_settings[key] = legacy
+        await settings_repository.set("default_earnings_provider", None)
+        system_settings["default_earnings_provider"] = None
 
     async def _close_provider(self, name: str, provider: object) -> None:
         await self._await_provider_drained(provider)
@@ -352,6 +422,8 @@ class ProviderRegistry:
             "options": BaseOptionsProvider,
             "news": BaseNewsProvider,
             "volatility": BaseVolatilityProvider,
+            "earnings_upcoming": BaseEarningsUpcomingProvider,
+            "earnings_history": BaseEarningsHistoryProvider,
             "earnings": BaseEarningsProvider,
         }
         return {
@@ -433,29 +505,43 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
-    def get_earnings_provider(self, name: str | None = None) -> BaseEarningsProvider:
-        provider_name = name or self.default_earnings_provider
+    def _earnings_target(
+        self, name: str | None, role: str | None
+    ) -> tuple[str, type]:
+        base = {
+            "upcoming": BaseEarningsUpcomingProvider,
+            "history": BaseEarningsHistoryProvider,
+        }.get(role or "", BaseEarningsProvider)
+        provider_name = name or (
+            self.default_earnings_upcoming_provider
+            if role in (None, "upcoming")
+            else self.default_earnings_history_provider
+        )
+        if provider_name is None and role is None:
+            provider_name = self.default_earnings_history_provider
         if provider_name is None:
+            label = f"earnings {role}" if role else "earnings"
             raise AppError(
-                "No earnings provider configured — enable a provider in the admin UI",
+                f"No {label} provider configured — enable a provider in the admin UI",
                 "PROVIDER_NOT_AVAILABLE",
             )
+        return provider_name, base
+
+    def get_earnings_provider(
+        self, name: str | None = None, role: str | None = None
+    ) -> BaseEarningsProvider:
+        provider_name, base = self._earnings_target(name, role)
         provider = self._providers.get(provider_name)
-        if not isinstance(provider, BaseEarningsProvider):
+        if not isinstance(provider, base) or not isinstance(provider, BaseEarningsProvider):
             raise InvalidProviderError(provider_name)
         return provider
 
     @asynccontextmanager
     async def use_earnings_provider(
-        self, name: str | None = None
+        self, name: str | None = None, role: str | None = None
     ) -> AsyncIterator[BaseEarningsProvider]:
-        provider_name = name or self.default_earnings_provider
-        if provider_name is None:
-            raise AppError(
-                "No earnings provider configured — enable a provider in the admin UI",
-                "PROVIDER_NOT_AVAILABLE",
-            )
-        provider = await self._acquire_provider(provider_name, BaseEarningsProvider)
+        provider_name, base = self._earnings_target(name, role)
+        provider = await self._acquire_provider(provider_name, base)
         try:
             yield provider
         finally:

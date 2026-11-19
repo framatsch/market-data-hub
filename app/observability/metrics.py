@@ -2,7 +2,7 @@ from prometheus_client import CollectorRegistry, Counter, Histogram, generate_la
 
 REGISTRY = CollectorRegistry()
 
-PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets"})
+PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets", "earningsapi"})
 ENDPOINTS = frozenset(
     {
         "prices",

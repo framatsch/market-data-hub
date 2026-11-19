@@ -113,6 +113,9 @@ class EarningsSync(Base):
     sync_failed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    invalidated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class EarningsEventRow(Base):
@@ -134,6 +137,8 @@ class EarningsEventRow(Base):
     eps_actual: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
     eps_surprise: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
     eps_surprise_pct: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    revenue_estimate: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
+    revenue_actual: Mapped[Decimal | None] = mapped_column(Numeric(), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

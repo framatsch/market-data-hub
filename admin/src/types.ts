@@ -116,6 +116,8 @@ export interface SystemDefaults {
   default_news_provider?: string;
   default_volatility_provider?: string;
   default_earnings_provider?: string;
+  default_earnings_upcoming_provider?: string;
+  default_earnings_history_provider?: string;
 }
 
 export interface CachePolicy {

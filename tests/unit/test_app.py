@@ -56,3 +56,16 @@ def test_admin_route_registered(client):
     assert response.status_code in (200, 404)
     if response.status_code == 404:
         assert response.json()["detail"] == "Admin UI not built"
+
+
+def test_providers_catalog_lists_earnings_roles(client, monkeypatch):
+    from app.providers.registry import get_registry
+
+    registry = get_registry()
+    monkeypatch.setattr(registry, "default_earnings_upcoming_provider", "earningsapi")
+    monkeypatch.setattr(registry, "default_earnings_history_provider", "financialdatasets")
+    data = client.get("/providers").json()["data"]
+    assert data["defaults"]["earnings_upcoming"] == "earningsapi"
+    assert data["defaults"]["earnings_history"] == "financialdatasets"
+    assert data["defaults"]["earnings"] == "earningsapi"
+    assert {"earnings_upcoming", "earnings_history", "earnings"} <= set(data["available"])

@@ -31,6 +31,7 @@ from app.models.volatility import (
     VolatilitySnapshot,
     VolatilityTenorDays,
 )
+from app.utils.errors import CapabilityNotSupportedError
 
 
 class BasePriceProvider(ABC):
@@ -174,29 +175,56 @@ class BaseNewsProvider(ABC):
         """Test provider connectivity and return status_code/success/message/details."""
 
 
+def _upcoming_unsupported(provider: str) -> CapabilityNotSupportedError:
+    return CapabilityNotSupportedError(provider, "upcoming earnings", sec_type="stock", supported=[])
+
+
 class BaseEarningsProvider(ABC):
-    """Market-wide upcoming calendar and per-symbol reported earnings."""
+    """Common base of the two earnings interfaces (upcoming dates, reported history)."""
 
     name = "none"
-    earnings_upcoming = True
 
     def configure(self, config: Any) -> None:
         self._runtime_config = config
         _apply_runtime_config_defaults(self, config)
 
     @abstractmethod
+    async def test_connection(self) -> dict[str, Any]:
+        """Test connectivity using the provider's shared request budget."""
+
+
+class BaseEarningsUpcomingProvider(BaseEarningsProvider):
+    """Announced report dates and estimates (capability ``earnings_upcoming``).
+
+    ``upcoming_mode`` is a planner strategy, not a capability: ``calendar`` providers
+    answer one market-wide request for a date range, ``symbol`` providers answer one
+    request per stock and may offer a one-day market calendar.
+    """
+
+    upcoming_mode: Literal["calendar", "symbol"] = "calendar"
+    earnings_day_calendar = False
+
     async def get_upcoming_earnings(
         self, start: date, end: date, roots: list[str] | None
     ) -> list[EarningsEvent]:
-        """Fetch the calendar once for the range; None roots requests all symbols."""
+        """Calendar mode: fetch the calendar once for the range; None roots requests all symbols."""
+        raise _upcoming_unsupported(self.name)
+
+    async def get_symbol_earnings(self, root: str) -> list[EarningsEvent]:
+        """Symbol mode: upcoming and reported events of one stock in one request."""
+        raise _upcoming_unsupported(self.name)
+
+    async def get_earnings_for_date(self, day: date) -> list[EarningsEvent]:
+        """Day calendar: all events of the market on one date."""
+        raise _upcoming_unsupported(self.name)
+
+
+class BaseEarningsHistoryProvider(BaseEarningsProvider):
+    """Reported quarters of one stock (capability ``earnings_history``)."""
 
     @abstractmethod
     async def get_earnings_history(self, root: str) -> list[EarningsEvent]:
         """Fetch reported events for one stock."""
-
-    @abstractmethod
-    async def test_connection(self) -> dict[str, Any]:
-        """Test connectivity using the provider's shared request budget."""
 
 
 class BaseVolatilityProvider(ABC):

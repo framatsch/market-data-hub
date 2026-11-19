@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from app import response_meta
 from app.models.earnings import EarningsEvent
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.services import earnings_service as module
 from app.services.earnings_service import EarningsService, parse_symbol_list
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 TODAY = date(2026, 11, 17)
 
 
-class Fake(BaseEarningsProvider):
+class Fake(BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "fake"
 
     def __init__(self, calendar=(), history=None):

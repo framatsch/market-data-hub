@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.market_hours import ET
 from app.models.common import EnvelopeMeta
@@ -29,9 +29,17 @@ class EarningsEvent(BaseModel):
     eps_actual: Decimal | None = Field(default=None, allow_inf_nan=False)
     eps_surprise: Decimal | None = Field(default=None, allow_inf_nan=False)
     eps_surprise_pct: Decimal | None = Field(default=None, allow_inf_nan=False)
+    revenue_estimate: Decimal | None = Field(default=None, allow_inf_nan=False)
+    revenue_actual: Decimal | None = Field(default=None, allow_inf_nan=False)
     currency: str | None = None
     provider: str
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("revenue_estimate", "revenue_actual", mode="after")
+    @classmethod
+    def plain_revenue(cls, value: Decimal | None) -> Decimal | None:
+        """Whole-number revenue without exponent notation (NUMERIC returns `1.14E+11`)."""
+        return Decimal(format(value, "f")) if value is not None and value.is_finite() else value
 
     @model_validator(mode="after")
     def reporting_state(self) -> "EarningsEvent":

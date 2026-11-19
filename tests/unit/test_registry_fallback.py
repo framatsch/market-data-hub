@@ -91,5 +91,7 @@ class TestAvailableProviders:
             "options": [],
             "news": [],
             "volatility": [],
+            "earnings_upcoming": [],
+            "earnings_history": [],
             "earnings": [],
         }

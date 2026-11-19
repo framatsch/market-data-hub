@@ -1,0 +1,249 @@
+{
+ "date": "2026-11-24",
+ "pre": [
+  {
+   "symbol": "ADI",
+   "name": "Analog Devices, Inc.",
+   "epsEstimate": 3.883769,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 4319898951
+  },
+  {
+   "symbol": "ANF",
+   "name": "Abercrombie & Fitch Company",
+   "epsEstimate": 3.162565,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1368642315
+  },
+  {
+   "symbol": "BABA",
+   "name": "Alibaba Group Holding Limited",
+   "epsEstimate": 1.56,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 269680701688
+  },
+  {
+   "symbol": "BBY",
+   "name": "Best Buy Co., Inc.",
+   "epsEstimate": 1.488866,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 9890428613
+  },
+  {
+   "symbol": "BURL",
+   "name": "Burlington Stores, Inc.",
+   "epsEstimate": 1.717568,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 2981044293
+  },
+  {
+   "symbol": "BZUN",
+   "name": "Baozun Inc.",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 2309054294
+  },
+  {
+   "symbol": "DKS",
+   "name": "Dick's Sporting Goods Inc",
+   "epsEstimate": 1.40365,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 5079376682
+  },
+  {
+   "symbol": "DLTR",
+   "name": null,
+   "epsEstimate": 0.918554,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 5038497462
+  },
+  {
+   "symbol": "DLTR",
+   "name": "Dollar Tree, Inc.",
+   "epsEstimate": 0.911765,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 5038497462
+  },
+  {
+   "symbol": "DRTSW",
+   "name": null,
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 249574
+  }
+ ],
+ "after": [
+  {
+   "symbol": "ADSK",
+   "name": "Autodesk, Inc.",
+   "epsEstimate": 3.042906,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 2132877789
+  },
+  {
+   "symbol": "AMBA",
+   "name": "Ambarella, Inc.",
+   "epsEstimate": 0.314004,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 119677376
+  },
+  {
+   "symbol": "ARWR",
+   "name": "Arrowhead Pharmaceuticals, Inc.",
+   "epsEstimate": -1.522762,
+   "eps": -3.04,
+   "revenue": null,
+   "revenueEstimate": 60675761
+  },
+  {
+   "symbol": "BBAR",
+   "name": "Banco BBVA Argentina S.A.",
+   "epsEstimate": 0.462417,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1222033789697
+  },
+  {
+   "symbol": "DELL",
+   "name": "Dell Technologies Inc.",
+   "epsEstimate": 6.536473,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 49196695997
+  },
+  {
+   "symbol": "HPQ",
+   "name": "HP Inc.",
+   "epsEstimate": 0.744157,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 15343218375
+  },
+  {
+   "symbol": "NOAH",
+   "name": "Noah Holdings Ltd.",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "NTNX",
+   "name": "Nutanix, Inc.",
+   "epsEstimate": 0.602893,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 762522524
+  },
+  {
+   "symbol": "QMLS",
+   "name": "QumulusAI, Inc.",
+   "epsEstimate": -0.376069,
+   "eps": -0.29,
+   "revenue": null,
+   "revenueEstimate": 15397880
+  },
+  {
+   "symbol": "SB",
+   "name": "Safe Bulkers, Inc",
+   "epsEstimate": 0.265,
+   "eps": 0.31,
+   "revenue": null,
+   "revenueEstimate": 82600000
+  }
+ ],
+ "notSupplied": [
+  {
+   "symbol": "AVXL",
+   "name": "Anavex Life Sciences Corp.",
+   "epsEstimate": -0.11,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 0
+  },
+  {
+   "symbol": "BNAI",
+   "name": "Brand Engagement Network Inc.",
+   "epsEstimate": -0.66,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1900000
+  },
+  {
+   "symbol": "CLSK",
+   "name": "CleanSpark, Inc.",
+   "epsEstimate": -0.360563,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 128494908
+  },
+  {
+   "symbol": "GASS",
+   "name": "StealthGas, Inc.",
+   "epsEstimate": 0.39,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 42400000
+  },
+  {
+   "symbol": "GGAL",
+   "name": "Grupo Financiero Galicia S.A.",
+   "epsEstimate": 1.171396,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1699297119
+  },
+  {
+   "symbol": "JFIN",
+   "name": "Jiayin Group Inc.",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  },
+  {
+   "symbol": "PD",
+   "name": "PagerDuty, Inc.",
+   "epsEstimate": 0.354831,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 124114572
+  },
+  {
+   "symbol": "PSHG",
+   "name": "Performance Shipping Inc.",
+   "epsEstimate": 0.31301,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 29195625
+  },
+  {
+   "symbol": "WOOF",
+   "name": "Petco Health and Wellness Company, Inc.",
+   "epsEstimate": 0.037783,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": 1474438986
+  },
+  {
+   "symbol": "YRD",
+   "name": "Yiren Digital Ltd.",
+   "epsEstimate": null,
+   "eps": null,
+   "revenue": null,
+   "revenueEstimate": null
+  }
+ ]
+}

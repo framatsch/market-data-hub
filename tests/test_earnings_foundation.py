@@ -13,12 +13,12 @@ from app.models.earnings import (
     EarningsSymbolStatus,
     NextEarnings,
 )
-from app.providers.base import BaseEarningsProvider
+from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.utils.errors import AppError, InvalidProviderError, ProviderQuotaExhaustedError
 
 
-class FakeEarningsProvider(BaseEarningsProvider):
+class FakeEarningsProvider(BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "fake"
 
     async def get_upcoming_earnings(self, start, end, roots):

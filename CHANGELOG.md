@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- EarningsAPI provider (`earningsapi`, free key): upcoming report dates, reported quarters and
+  revenue estimate/actual from `/v2/earnings` (per symbol) and `/v2/calendar/earnings` (day
+  calendar). Request pacing for 60 per minute, request budget defaults 100 per day and 1,000
+  per month, connection test, key in the encrypted key store.
+- Day-calendar window for providers with a day calendar (`EARNINGS_DAY_CALENDAR_WEEKDAYS`,
+  default 7) and per-symbol refresh rules (`EARNINGS_SYMBOL_RESYNC_DAYS`, default 7); moved
+  report dates replace stale events in the store (`calendar-day:YYYY-MM-DD` sync scopes).
+- `revenue_estimate` and `revenue_actual` on earnings events (JSON, CSV, MCP); Alembic
+  migration `0004`.
+- `kind` parameter (`all`, `upcoming`, `reported`) for `GET /earnings/calendar`,
+  `GET /companies/{symbol}/earnings` and the MCP tool `get_earnings_calendar`.
+- `GET /providers`: `available.earnings_upcoming`, `available.earnings_history`,
+  `defaults.earnings_upcoming`, `defaults.earnings_history` and `defaults.earnings`;
+  composed earnings responses carry `meta.providers`.
+
+### Changed
+
+- Earnings are split into two interfaces and capabilities, `earnings_upcoming`
+  (`BaseEarningsUpcomingProvider`) and `earnings_history` (`BaseEarningsHistoryProvider`);
+  `earnings` stays in the catalog as their union. The setting `default_earnings_provider` is
+  replaced by `default_earnings_upcoming_provider` and `default_earnings_history_provider`
+  (migrated once, still accepted as shorthand for both). Admin UI: two default dropdowns and
+  `Earnings upcoming` / `Earnings history` chips.
+- A history-only provider asked for upcoming events answers 501 with `details.supported`
+  naming the providers of that role.
+
 ## [1.5.1] - 2026-11-18
 
 ### Fixed

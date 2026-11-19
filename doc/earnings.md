@@ -1,23 +1,26 @@
 # Earnings Calendar
 
-Earnings dates and results for **stocks**, through a provider-neutral `earnings` capability. Two providers are available, both disabled until you store a key and enable them in the Admin UI. Neither needs a subscription.
+Earnings dates and results for **stocks**, through a provider-neutral `earnings` capability. Three providers are available, all disabled until you store a key and enable them in the Admin UI. None needs a subscription.
 
 | Provider | Upcoming dates | History | Prices | Cost model |
 |---|---|---|---|---|
 | `alphavantage` | announced dates of the whole US market in **one** request | full quarterly history (report date, release time, EPS estimate/actual/surprise) | `1d` (latest 100 trading days), `1w` (full), end-of-day last price | free key, about **25 requests per day** (shared by prices and earnings) |
+| `earningsapi` | announced dates per stock plus a market-wide **day calendar** (one request per day) | reported quarters of the last 24 months with EPS estimate/actual and **revenue estimate/actual** | – | free key, **100 requests per day / 1,000 per month**, 60 per minute |
 | `financialdatasets` | – (answers 501 for `/earnings/next`) | report date and SEC filing time, actual EPS, **no estimates** | `1d`/`1w` of any range, last price, company profile | pay per request, USD 0.02 (default budget 1,000 per month = USD 20) |
 
-Set the default with **Admin → Settings → Default Earnings Provider** or pass `provider=` per request. Without a configured provider the endpoints answer 503 `No earnings provider configured — enable a provider in the admin UI`.
+Earnings are two roles, each with its own default in **Admin → Settings**: **Default Earnings Upcoming Provider** (`earnings_upcoming`: `alphavantage`, `earningsapi`) and **Default Earnings History Provider** (`earnings_history`: all three). `/earnings/next` and `kind=upcoming` use the upcoming default, `kind=reported` the history default and `kind=all` both: unreported events come from the upcoming provider, reported ones from the history provider, an announced event is dropped when the history provider has a reported event of the same symbol within 7 days, and `meta.providers` names both (`meta.provider` is omitted). With one provider for both roles nothing is composed. `provider=` serves every role that provider implements; asking a history-only provider for upcoming events answers 501 with `details.supported` listing the providers of that role. The former single setting `default_earnings_provider` is migrated once to both roles and still accepted as shorthand. Without a configured provider the endpoints answer 503 `No earnings provider configured — enable a provider in the admin UI`.
 
 ## Endpoints
 
 | Endpoint | Result |
 |---|---|
 | `GET /earnings/next?symbols=AAPL,MSFT,SPY` | One row per symbol, in request order: `event` (earliest on or after today in New York, or `null`), `days_until`, `last_reported`, `status` (`ok`, `none_scheduled`, `not_applicable`). Answered from the calendar only: at most one provider request and **never** a history request. |
-| `GET /earnings/calendar?symbols=…&from=…&to=…` | Events of up to 50 symbols, oldest first. Defaults: `from` = today − 30 days, `to` = today + 90 days, at most 800 days. `format=csv` adds `X-MDH-Data-As-Of`. |
+| `GET /earnings/calendar?symbols=…&from=…&to=…&kind=all` | Events of up to 50 symbols, oldest first. Defaults: `from` = today − 30 days, `to` = today + 90 days, at most 800 days. `format=csv` adds `X-MDH-Data-As-Of`. |
 | `GET /companies/{symbol}/earnings?from=…&to=…` | Past and upcoming events of one stock. Defaults: today − 1095 days … today + 400 days. ETF → 422 `CAPABILITY_NOT_SUPPORTED`, unknown symbol → 404. |
 
-MCP tools: `get_earnings_calendar` (`symbols`, `from_date`, `to_date`, `provider`) and `get_next_earnings` (`symbols`, `provider`); they use the same service, store and cache policy.
+`kind` is `all` (default), `upcoming` (announced, `reported: false`; no history is requested from calendar providers) or `reported` (`reported: true`; no calendar or day calendar is requested); another value answers 422.
+
+MCP tools: `get_earnings_calendar` (`symbols`, `from_date`, `to_date`, `kind`, `provider`) and `get_next_earnings` (`symbols`, `provider`); they use the same service, store and cache policy.
 
 ```bash
 curl 'http://localhost:8000/earnings/next?symbols=AAPL,MSFT,SPY'
@@ -27,7 +30,7 @@ curl 'http://localhost:8000/companies/AAPL/earnings?provider=alphavantage'
 
 ### Event fields
 
-`symbol`, `report_date`, `report_time` (`bmo` before the open, `amc` after the close, `during`, `unknown`), `date_status` (`confirmed`, `projected`, `unknown`), `reported`, `fiscal_period_end`, `eps_estimate`, `eps_actual`, `eps_surprise`, `eps_surprise_pct` (decimal strings), `currency`, `provider`, `updated_at`.
+`symbol`, `report_date`, `report_time` (`bmo` before the open, `amc` after the close, `during`, `unknown`), `date_status` (`confirmed`, `projected`, `unknown`), `reported`, `fiscal_period_end`, `eps_estimate`, `eps_actual`, `eps_surprise`, `eps_surprise_pct`, `revenue_estimate`, `revenue_actual` (decimal strings; revenue only from `earningsapi`, otherwise `null`), `currency`, `provider`, `updated_at`.
 
 - **Announced dates only.** The Alpha Vantage calendar lists companies that have announced a date. A company that has not (typically a late-January reporter in mid-November) has **no event**: `/earnings/next` answers `none_scheduled` together with `last_reported`. MDH never estimates or extrapolates a date.
 - `date_status` is exactly what the provider states. Alpha Vantage does not say whether a date is confirmed, so upcoming events are `unknown`; reported events are `confirmed`. Whether to show an unconfirmed date is the client's decision.
@@ -90,3 +93,14 @@ The cache keys contain the sorted symbols and the New York date, so `?symbols=MS
 ## Not covered
 
 An IBKR implementation (requires a Wall Street Horizon subscription; the capability allows adding it later), fundamentals, analyst estimates and dividends, estimated dates for companies that have not announced, ETFs/indices/futures, non-US listings, a background scheduler, and the history of report-date changes.
+
+
+## EarningsAPI (per-symbol provider)
+
+`earningsapi` (`https://api.earningsapi.com`, key as query parameter `apikey`) has no market-wide range calendar, so MDH uses two request types and its own store (`upcoming_mode: symbol` with a day calendar):
+
+- **Day-calendar window.** `/v2/calendar/earnings?date=` returns all companies of one day (`pre`, `after`, `notSupplied`). MDH keeps the previous weekday through `EARNINGS_DAY_CALENDAR_WEEKDAYS` (default 7) weekdays ahead synchronised, one request per day. A day is refreshed when its last synchronisation is older than 20 hours and it is the previous weekday, today or one of the next two weekdays (steady state about five requests per weekday, about 110 per month, independent of the watchlist). The previous day's refresh delivers the actual EPS of the reports of that day. A day calendar is authoritative for its date: a moved report date replaces the stale event in the store.
+- **Per-symbol requests.** `/v2/earnings?symbol=` returns the upcoming and the reported quarters of one stock. MDH requests a stock only when the store cannot answer: it was never synchronised and the request needs its history (or its next event, which the window does not hold); it has no upcoming event and has reported since its last synchronisation (next quarter, once per quarter) or its last synchronisation is older than `EARNINGS_SYMBOL_RESYNC_DAYS` (default 7; EarningsAPI lists the next quarter only after the company announced it); or a day calendar removed its event. A stock with a known next date is never re-requested for its age. Stocks beyond the remaining request budget are served from the store or answered `status: "error"` with `provider request budget exhausted`, in request order.
+- Recorded behaviour (free key, 2026-11-19): invalid key → HTTP 403 `Invalid API Key`; unknown symbol and ETFs → HTTP 404 `{"error":"Symbol not found"}` (404 also counts against the quota); `BRK.B` and `BRK-B` both work and are returned as `BRK.B`; the day calendar is populated about two weeks ahead; quota headers `X-Daily-*` (resets 00:00 UTC) and `X-Quota-*` (monthly) are sent with every response.
+- Without the history store the parsed day calendars (7 days) and symbol results (`EARNINGS_SYMBOL_RESYNC_DAYS`) are kept in Redis with the same rules; moved dates are then caught by the day window only.
+- Event mapping: `time-pre-market`/`time-after-hours`/`null` → `bmo`/`amc`/`unknown`; `eps_surprise` and `eps_surprise_pct` are computed from estimate and actual; there is no fiscal period end and no confirmation flag (`date_status` is `unknown` until reported); currency is USD.

@@ -223,6 +223,8 @@ def test_admin_settings_defaults_get_and_update(client, monkeypatch) -> None:
         "default_news_provider": "",
         "default_volatility_provider": "",
         "default_earnings_provider": "",
+        "default_earnings_upcoming_provider": "",
+        "default_earnings_history_provider": "",
     }
 
     async def fake_reload(config_repo, settings_repo):
@@ -256,6 +258,8 @@ def test_admin_settings_capabilities(client) -> None:
         "companies": ["ibkr", "lseg"],
         "news": ["finnhub"],
         "volatility": ["ibkr", "lseg"],
+        "earnings_upcoming": [],
+        "earnings_history": [],
         "earnings": [],
     }
 
@@ -266,12 +270,17 @@ def test_admin_earnings_capability_and_default(client, monkeypatch) -> None:
     asyncio.run(config_repo.save("financialdatasets", {"enabled": True}))
     capabilities = client.get("/api/admin/settings/capabilities").json()
     assert capabilities["earnings"] == ["alphavantage", "financialdatasets"]
+    assert capabilities["earnings_upcoming"] == ["alphavantage"]
+    assert capabilities["earnings_history"] == ["alphavantage", "financialdatasets"]
 
     from app.api.routes_admin import registry
 
     async def fake_reload(config_repo, settings_repo):
-        registry.default_earnings_provider = await settings_repo.get(
-            "default_earnings_provider"
+        registry.default_earnings_upcoming_provider = await settings_repo.get(
+            "default_earnings_upcoming_provider"
+        )
+        registry.default_earnings_history_provider = await settings_repo.get(
+            "default_earnings_history_provider"
         )
 
     monkeypatch.setattr(registry, "default_earnings_provider", None)
@@ -280,7 +289,19 @@ def test_admin_earnings_capability_and_default(client, monkeypatch) -> None:
         "/api/admin/settings/defaults",
         json={"default_earnings_provider": "AlphaVantage"},
     )
-    assert response.json()["default_earnings_provider"] == "alphavantage"
+    body = response.json()
+    assert body["default_earnings_provider"] == "alphavantage"
+    assert body["default_earnings_upcoming_provider"] == "alphavantage"
+    assert body["default_earnings_history_provider"] == "alphavantage"
+
+    # A history-only provider as shorthand sets only the history role.
+    response = client.put(
+        "/api/admin/settings/defaults",
+        json={"default_earnings_provider": "financialdatasets"},
+    )
+    body = response.json()
+    assert body["default_earnings_upcoming_provider"] == "alphavantage"
+    assert body["default_earnings_history_provider"] == "financialdatasets"
 
 
 def test_admin_volatility_default_round_trip(client, monkeypatch) -> None:
@@ -589,7 +610,7 @@ def test_provider_details_state_price_adjustment_and_earnings_capability(client)
     assert providers["alphavantage"]["price_adjustment"] == "none"
     assert providers["financialdatasets"]["price_adjustment"] == "unknown"
     assert providers["ibkr"]["price_adjustment"] is None
-    assert providers["alphavantage"]["capabilities"] == ["prices", "earnings"]
-    assert providers["financialdatasets"]["capabilities"] == ["prices", "companies", "earnings"]
+    assert providers["alphavantage"]["capabilities"] == ["prices", "earnings_upcoming", "earnings_history"]
+    assert providers["financialdatasets"]["capabilities"] == ["prices", "companies", "earnings_history"]
     assert providers["alphavantage"]["price_support"]["native_intervals"] == ["1d", "1w"]
     assert providers["alphavantage"]["enabled"] is False

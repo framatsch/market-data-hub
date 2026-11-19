@@ -13,7 +13,11 @@ import httpx
 from app.market_hours import ET, as_utc, week_monday
 from app.models.earnings import EarningsEvent, earnings_today
 from app.models.price import PriceBar, PriceQuote
-from app.providers.base import BaseEarningsProvider, BasePriceProvider
+from app.providers.base import (
+    BaseEarningsHistoryProvider,
+    BaseEarningsUpcomingProvider,
+    BasePriceProvider,
+)
 from app.providers.credentials import get_provider_credential_sync
 from app.providers.metered import MeteredHttpProvider
 from app.utils.errors import (
@@ -47,12 +51,13 @@ def calendar_horizon(end: date, today: date | None = None) -> str:
     return "12month"
 
 
-class AlphaVantageProvider(MeteredHttpProvider, BasePriceProvider, BaseEarningsProvider):
+class AlphaVantageProvider(MeteredHttpProvider, BasePriceProvider, BaseEarningsUpcomingProvider, BaseEarningsHistoryProvider):
     name = "alphavantage"
     base_url = "https://www.alphavantage.co"
     minimum_spacing = 1.05
     native_intervals = frozenset({"1d", "1w"})
     price_adjustment = "none"
+    upcoming_mode = "calendar"
 
     async def _auth(self, params):
         key = await asyncio.to_thread(get_provider_credential_sync, self.name, "api_key")
