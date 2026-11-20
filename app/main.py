@@ -75,7 +75,6 @@ async def lifespan(app: FastAPI) -> Any:
     store_state = await setup_store()
 
     # --- STARTUP PROTOCOL OVERVIEW ---
-    active_providers = list(registry._providers.keys())
     mcp_status = "ENABLED ✅" if settings.MCP_ENABLED else "DISABLED ❌"
     base_url = _public_base_url()
 
@@ -89,19 +88,10 @@ Cache Status: {cache_state}
 History Store: {store_state}
 {"MCP Path    : /mcp/sse, /mcp/messages" if settings.MCP_ENABLED else ""}
 {"-" * 60}
-ACTIVE PROVIDERS:
-"""
-    for p in ["ibkr", "ibkrweb", "lseg", "finnhub", "polygon", "schwab", "prixe"]:
-        status = "✅ Active" if p in active_providers else "❌ Unavailable"
-        banner += f"  - {p.upper():<8}: {status}\n"
-
-    banner += (
-        f"{'-' * 60}\n"
-        f"Admin UI    : {base_url}/admin\n"
-        f"API docs    : {base_url}/docs\n"
-        "Service is ready to accept requests\n"
-        f"{'=' * 60}"
-    )
+Admin UI    : {base_url}/admin
+API docs    : {base_url}/docs
+Service is ready to accept requests
+{"=" * 60}"""
 
     # Force print to stdout to ensure it shows in Docker logs immediately
     print(banner, flush=True)

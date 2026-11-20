@@ -22,16 +22,16 @@ from app.main import app, lifespan
 
 
 @pytest.mark.asyncio
-async def test_lifespan():
-    # Mock registry shutdown
+async def test_lifespan(capsys):
     mock_registry = MagicMock()
     mock_registry.shutdown = AsyncMock()
     mock_registry.reload_from_config = AsyncMock()
-    
+
     with patch("app.providers.registry.registry", mock_registry):
         async with lifespan(app):
-            # Startup protocol logic runs here
-            pass
-        
-        # Verify shutdown called
-        mock_registry.shutdown.assert_called_once()
+            mock_registry.reload_from_config.assert_awaited_once()
+            startup_output = capsys.readouterr().out
+            assert "STARTUP PROTOCOL" in startup_output
+            assert "ACTIVE PROVIDERS" not in startup_output
+
+        mock_registry.shutdown.assert_awaited_once()
