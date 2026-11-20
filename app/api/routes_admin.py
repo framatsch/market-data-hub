@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from app import cache as response_cache
 from app.admin.provider_config_repository import KNOWN_PROVIDERS, ProviderRuntimeConfig
@@ -33,6 +33,7 @@ from app.providers.base import (
     BasePriceProvider,
     BaseVolatilityProvider,
 )
+from app.providers.ibkr_web import IbkrWebProvider
 from app.providers.registry import registry
 from app.store import engine as store_engine
 from app.store import repository as store_repository
@@ -88,6 +89,7 @@ CREDENTIAL_ALLOWLIST: dict[str, set[str]] = {
 
 PROVIDER_CAPABILITIES: dict[str, list[str]] = {
     "ibkr": ["prices", "options", "companies", "volatility"],
+    "ibkrweb": ["prices", "options", "companies", "volatility"],
     "lseg": ["prices", "companies", "volatility"],
     "schwab": ["prices", "options"],
     "finnhub": ["news"],
@@ -117,6 +119,37 @@ class ProviderConfigUpdate(BaseModel):
     circuit_breaker_reset_seconds: float | None = None
     connection_config: dict[str, Any] | None = None
     history_store_intervals: list[str] | None = None
+
+
+class IbkrWebGatewayUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    base_url: str | None = None
+    verify_tls: bool | None = None
+    ca_bundle: str | None = None
+    account_id: str | None = None
+    compete: bool | None = None
+    market_data_type: int | None = Field(default=None, ge=1, le=4)
+    max_streams: int | None = Field(default=None, ge=1, le=100)
+    login_url: str | None = None
+
+
+class IbkrWebSessionStatus(BaseModel):
+    state: Literal["disabled", "unknown", "unreachable", "login_required", "competing", "brokerage_pending", "ready", "rate_limited"]
+    base_url: str | None = None
+    login_url: str | None = None
+    connected: bool = False
+    authenticated: bool = False
+    competing: bool = False
+    server_version: str | None = None
+    account_count: int = 0
+    username: str | None = None
+    account_mode: Literal["paper", "live"] | None = None
+    sso_expires_seconds: int | None = None
+    last_tickle: datetime | None = None
+    last_error: str | None = None
+    retry_after_seconds: int = 0
+    rate_limit_count: int = 0
 
 
 class SystemDefaultsUpdate(BaseModel):
@@ -653,6 +686,7 @@ async def get_admin_settings_capabilities(
 async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]:
     repo = get_provider_config_repository()
     configs = {config.provider_name: config for config in await repo.list_all()}
+    both_ibkr = all(configs[name].enabled for name in ("ibkr", "ibkrweb"))
     return [
         {
             **_provider_status(name, configs[name]),
@@ -661,6 +695,8 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
             "options_support": _provider_options_support(name),
             "volatility_support": _provider_volatility_support(name),
             "config": configs[name].model_dump(),
+            **({"warnings": ["ibkr_single_session"]} if both_ibkr and name in {"ibkr", "ibkrweb"} else {}),
+            **({"notes": ["Futures history uses the current front-month contract, not a continuous series."]} if name == "ibkrweb" else {}),
             "config_summary": {
                 "timeout_seconds": configs[name].timeout_seconds,
                 "retry_count": configs[name].retry_count,
@@ -735,6 +771,59 @@ async def update_admin_provider_config(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await registry.reload_from_config(repo)
     return config.model_dump()
+
+
+@router.put("/providers/ibkrweb/gateway")
+async def update_ibkr_web_gateway(payload: IbkrWebGatewayUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+    repo = get_provider_config_repository()
+    current = await repo.get("ibkrweb")
+    updates = payload.model_dump(exclude_unset=True)
+    for field in ("ca_bundle", "account_id", "login_url"):
+        if field in updates and updates[field] is None:
+            updates[field] = ""
+    try:
+        config = await repo.save("ibkrweb", {"connection_config": {**current.connection_config, **updates}})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=_validation_message(exc)) from exc
+    await registry.reload_from_config(repo)
+    return config.model_dump()
+
+
+def _validation_message(exc: ValueError) -> str:
+    """Readable 422 text instead of a raw pydantic dump (the admin form shows it verbatim)."""
+    if not isinstance(exc, ValidationError):
+        return str(exc)
+    messages = []
+    for error in exc.errors():
+        message = str(error["msg"]).removeprefix("Value error, ")
+        location = ".".join(str(part) for part in error["loc"])
+        messages.append(f"{location}: {message}" if location else message)
+    return "; ".join(messages)
+
+
+def _enabled_ibkr_web() -> IbkrWebProvider:
+    provider = registry.get_provider_instance("ibkrweb")
+    if not isinstance(provider, IbkrWebProvider):
+        raise HTTPException(status_code=404, detail="IBKR Web API provider is not enabled")
+    return provider
+
+
+@router.get("/providers/ibkrweb/session", response_model=IbkrWebSessionStatus, response_model_exclude_unset=True)
+async def get_ibkr_web_session(_principal: PrincipalDep) -> dict[str, Any]:
+    provider = registry.get_provider_instance("ibkrweb")
+    if not isinstance(provider, IbkrWebProvider):
+        return {"state": "disabled"}
+    return await provider.session.admin_status()
+
+
+@router.post("/providers/ibkrweb/session/init", response_model=IbkrWebSessionStatus)
+async def init_ibkr_web_session(_principal: PrincipalDep) -> dict[str, Any]:
+    return await _enabled_ibkr_web().session.refresh()
+
+
+@router.post("/providers/ibkrweb/session/logout", response_model=IbkrWebSessionStatus)
+async def logout_ibkr_web_session(_principal: PrincipalDep) -> dict[str, Any]:
+    return await _enabled_ibkr_web().session.logout()
 
 
 @router.post(

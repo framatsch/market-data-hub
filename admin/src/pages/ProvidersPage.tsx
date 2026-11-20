@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -24,10 +24,12 @@ import {
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { fetcher } from '../lib/api';
+import { IBKR_SINGLE_SESSION_WARNING, IBKR_WEB_LABEL } from '../lib/ibkr';
 import type { Provider, CredentialMetadata } from '../types';
 import { ProviderDetailsPanel } from '../components/provider/ProviderDetailsPanel';
 import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
 import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
+import { IbkrWebConnectionSection } from '../components/provider/IbkrWebConnectionSection';
 import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
 
 type FilterType = 'all' | 'active' | 'inactive' | 'healthy' | 'not-configured';
@@ -82,6 +84,9 @@ function renderAuthSection(provider: Provider) {
   }
   if (provider.name === 'ibkr') {
     return <IbkrConnectionSection />;
+  }
+  if (provider.name === 'ibkrweb') {
+    return <IbkrWebConnectionSection />;
   }
   return <ApiKeyAuthSection providerName={provider.name} />;
 }
@@ -162,6 +167,9 @@ export default function ProvidersPage() {
       <Typography variant="h4" gutterBottom>
         Provider Management
       </Typography>
+      {providersQuery.data?.some((provider) => provider.warnings?.includes('ibkr_single_session')) && (
+        <Alert severity="warning" sx={{ mb: 2 }}>{IBKR_SINGLE_SESSION_WARNING}</Alert>
+      )}
 
       {/* 0.6: Filter chips above the list */}
       <Stack direction="row" spacing={1} sx={{ mt: 2, mb: 3 }}>
@@ -199,7 +207,7 @@ export default function ProvidersPage() {
                 const isAutoExpand = expandParam === provider.name;
                 const capabilities = provider.capabilities ?? [];
                 return (
-                  <>
+                  <Fragment key={provider.name}>
                     {/* Provider row */}
                     <TableRow
                       key={provider.name}
@@ -214,7 +222,7 @@ export default function ProvidersPage() {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                          {provider.name.toUpperCase()}
+                          {provider.name === 'ibkrweb' ? IBKR_WEB_LABEL : provider.name.toUpperCase()}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {capabilities.map(capabilityLabel).join(' · ')}
@@ -255,8 +263,13 @@ export default function ProvidersPage() {
                               provider={provider}
                               providerName={provider.name}
                               enabled={provider.enabled}
-                              hideConnectionJson={provider.name === 'ibkr'}
-                              authSection={renderAuthSection(provider)}
+                              hideConnectionJson={provider.name === 'ibkr' || provider.name === 'ibkrweb'}
+                              authSection={<>
+                                {provider.warnings?.includes('ibkr_single_session') && (
+                                  <Alert severity="warning" sx={{ mb: 2 }}>{IBKR_SINGLE_SESSION_WARNING}</Alert>
+                                )}
+                                {renderAuthSection(provider)}
+                              </>}
                               onSuccess={(msg) => setSnackbar({ open: true, message: msg, severity: 'success' })}
                               onError={(msg) => setSnackbar({ open: true, message: msg, severity: 'error' })}
                               onToggle={(enabled) => toggleMutation.mutate({ name: provider.name, enabled })}
@@ -266,7 +279,7 @@ export default function ProvidersPage() {
                         </Collapse>
                       </TableCell>
                     </TableRow>
-                  </>
+                  </Fragment>
                 );
               })}
             </TableBody>

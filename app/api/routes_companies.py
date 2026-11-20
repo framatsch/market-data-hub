@@ -49,7 +49,8 @@ CompanySymbol = Annotated[ParsedSymbol, Depends(symbol_param(COMPANY_TYPES))]
 @router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
 @cache(expire=settings.CACHE_TTL_COMPANY_SEARCH_SECONDS, key="companies:search")
 async def search_companies(
-    q: str, service: CompanyServiceDep, provider: str | None = None
+    q: str, service: CompanyServiceDep,
+    provider: str | None = Query(None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."),
 ) -> Any:
     """Search for companies by query string."""
     provider = provider.lower() if provider else None
@@ -107,7 +108,8 @@ async def get_company_earnings(
 @router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
 @cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
-    symbol: CompanySymbol, service: CompanyServiceDep, provider: str | None = None
+    symbol: CompanySymbol, service: CompanyServiceDep,
+    provider: str | None = Query(None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."),
 ) -> Any:
     """Get company profile information (stocks and ETFs only; others are 422)."""
     provider = provider.lower() if provider else None

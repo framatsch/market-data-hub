@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional IBKR Web API provider (`ibkrweb`) for the Client Portal Gateway, with prices, historical bars, stock/ETF options, company data and 30-day implied-volatility snapshots. Includes session controls in Admin and an optional local `cpgw` Compose profile. No IBKR credentials are stored by MDH. Futures history is front-month only; IV history and news are not supported. Set `login_url` (`IBKRWEB_LOGIN_URL`) when the browser reaches the gateway under a different address than MDH, e.g. under Compose.
+
 ## [1.6.0] - 2026-11-19
 
 ### Added

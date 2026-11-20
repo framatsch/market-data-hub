@@ -1,18 +1,22 @@
 import asyncio
 import json
 import sqlite3
+import ssl
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.providers.ibkr_web_config import IbkrWebConnectionConfig
 
 STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
-KNOWN_PROVIDERS = ("ibkr", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets", "earningsapi")
+KNOWN_PROVIDERS = ("ibkr", "ibkrweb", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets", "earningsapi")
+OPT_IN_PROVIDERS = frozenset({"ibkrweb", "alphavantage", "financialdatasets", "earningsapi"})
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
+    "ibkrweb": set(IbkrWebConnectionConfig.model_fields),
     "schwab": {
         "callback_url",
         "alert_webhook_format",
@@ -135,6 +139,15 @@ class ProviderConfigRepository:
             candidate = ProviderRuntimeConfig(**values)
         candidate = replace(candidate, updated_at=datetime.now(UTC).isoformat())
         self._validate_config(candidate)
+        if provider_name == "ibkrweb" and (
+            candidate.enabled or isinstance(config, ProviderRuntimeConfig) or "connection_config" in config
+        ):
+            gateway = IbkrWebConnectionConfig.from_settings(candidate.connection_config)
+            if gateway.ca_bundle:
+                try:
+                    gateway.verification()
+                except (OSError, ssl.SSLError) as exc:
+                    raise ValueError("ca_bundle must point to a readable CA certificate file") from exc
         with self._connect() as conn:
             conn.execute(
                 """
@@ -254,14 +267,15 @@ class ProviderConfigRepository:
     def _default_enabled(self, provider_name: str) -> bool:
         enabled_str = settings.ENABLED_PROVIDERS.strip()
         if not enabled_str:
-            # Metered providers need a key and a budget decision: opt-in only.
-            return provider_name not in {"alphavantage", "financialdatasets", "earningsapi"}
+            return provider_name not in OPT_IN_PROVIDERS
         enabled = {
             name.strip().lower() for name in enabled_str.split(",") if name.strip()
         }
         return provider_name in enabled
 
     def _default_rate_limit(self, provider_name: str) -> float:
+        if provider_name == "ibkrweb":
+            return 6.0
         if provider_name in {"alphavantage", "earningsapi"}:
             return 1.0
         if provider_name == "schwab":
@@ -273,6 +287,8 @@ class ProviderConfigRepository:
         return 0.0
 
     def _default_connection_config(self, provider_name: str) -> dict[str, Any]:
+        if provider_name == "ibkrweb":
+            return IbkrWebConnectionConfig.settings_defaults()
         if provider_name == "alphavantage":
             return {"request_budget_per_day": 25, "request_budget_per_month": 0}
         if provider_name == "financialdatasets":
@@ -314,6 +330,8 @@ class ProviderConfigRepository:
             raise ValueError("retry_backoff_seconds must be non-negative")
         if config.rate_limit_per_sec < 0:
             raise ValueError("rate_limit_per_sec must be non-negative")
+        if config.provider_name == "ibkrweb" and not 0 < config.rate_limit_per_sec <= 10:
+            raise ValueError("ibkrweb rate_limit_per_sec must be greater than 0 and at most 10")
         if config.circuit_breaker_failure_threshold < 1:
             raise ValueError("circuit_breaker_failure_threshold must be at least 1")
         if config.circuit_breaker_reset_seconds <= 0:
@@ -325,6 +343,8 @@ class ProviderConfigRepository:
                 "history_store_intervals must be a list of: "
                 + ", ".join(STORABLE_INTERVALS)
             )
+        if not isinstance(config.connection_config, dict):
+            raise ValueError("connection_config must be an object")  # noqa: TRY004 (admin validation)
         allowed_connection_keys = CONNECTION_CONFIG_ALLOWLIST[config.provider_name]
         for key in ("request_budget_per_day", "request_budget_per_month"):
             if key in config.connection_config:

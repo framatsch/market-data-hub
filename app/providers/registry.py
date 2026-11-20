@@ -22,6 +22,7 @@ from typing import Any
 
 from app.admin.provider_config_repository import (
     KNOWN_PROVIDERS,
+    OPT_IN_PROVIDERS,
     ProviderConfigRepository,
     ProviderRuntimeConfig,
 )
@@ -42,6 +43,7 @@ from app.providers.earningsapi import EarningsApiProvider
 from app.providers.financialdatasets import FinancialDatasetsProvider
 from app.providers.finnhub import FinnhubProvider
 from app.providers.ibkr import IBKRProvider
+from app.providers.ibkr_web import IbkrWebProvider
 from app.providers.lseg import LSEGProvider
 from app.providers.mock_news import MockNewsProvider
 from app.providers.polygon import PolygonProvider
@@ -65,6 +67,7 @@ DEFAULT_PROVIDER_FALLBACKS = {
 class ProviderRegistry:
     provider_classes: dict[str, type[Any]] = {
         "ibkr": IBKRProvider,
+        "ibkrweb": IbkrWebProvider,
         "lseg": LSEGProvider,
         "schwab": SchwabProvider,
         "mock": MockNewsProvider,
@@ -180,7 +183,7 @@ class ProviderRegistry:
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
             to_load = {name: cls for name, cls in self.provider_classes.items()
-                       if name not in {"alphavantage", "financialdatasets", "earningsapi"}}
+                        if name not in OPT_IN_PROVIDERS}
 
         for name, cls in to_load.items():
             try:
@@ -264,10 +267,15 @@ class ProviderRegistry:
 
             for name in enabled:
                 config = configs[name]
-                if name not in next_providers:
+                existing = next_providers.get(name)
+                replace = isinstance(existing, IbkrWebProvider) and existing.requires_replacement(config)
+                if existing is None or replace:
                     try:
                         provider = self.provider_classes[name]()
                         provider.name = name
+                        self._apply_runtime_config(provider, config)
+                        if isinstance(provider, IbkrWebProvider):
+                            provider.start()
                         next_providers[name] = provider
                     except ImportError as exc:
                         logger.warning("Provider '%s' not available: %s", name, exc)
@@ -277,7 +285,10 @@ class ProviderRegistry:
                             "Failed to initialize provider '%s': %s", name, exc
                         )
                         continue
-                self._apply_runtime_config(next_providers[name], config)
+                else:
+                    self._apply_runtime_config(existing, config)
+                    if isinstance(existing, IbkrWebProvider):
+                        existing.start()
 
             for name, provider in current_providers.items():
                 replacement = next_providers.get(name)

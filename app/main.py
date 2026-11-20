@@ -91,7 +91,7 @@ History Store: {store_state}
 {"-" * 60}
 ACTIVE PROVIDERS:
 """
-    for p in ["ibkr", "lseg", "finnhub", "polygon", "schwab", "prixe"]:
+    for p in ["ibkr", "ibkrweb", "lseg", "finnhub", "polygon", "schwab", "prixe"]:
         status = "✅ Active" if p in active_providers else "❌ Unavailable"
         banner += f"  - {p.upper():<8}: {status}\n"
 

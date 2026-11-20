@@ -52,6 +52,19 @@ services:
       start_period: 10s
     networks:
       - market-data-hub
+      - cpgw
+
+  ibkr-cpgw:
+    build:
+      context: ./tools/cpgw
+    profiles: ["cpgw"]
+    init: true
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./tools/cpgw/conf.yaml:/cpgw/root/conf.yaml:ro
+    networks:
+      - cpgw
 
   postgres:
     image: postgres:16-alpine
@@ -99,6 +112,11 @@ services:
 networks:
   market-data-hub:
     driver: bridge
+  cpgw:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.191.0/24
 
 volumes:
   keys-db:

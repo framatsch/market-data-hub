@@ -40,11 +40,11 @@ async def get_last_price(
     service: PriceServiceDep,
     provider: str | None = Query(
         None,
-        description="Data provider: 'ibkr' or 'lseg'. Note: LSEG ignores market_data_type",
+        description="Data provider (e.g. ibkr, ibkrweb, lseg). LSEG ignores market_data_type.",
     ),
     market_data_type: int | None = Query(
         None,
-        description="Market data type (IBKR only): 1=Live (Level 2), 2=Frozen, 3=Delayed (default). LSEG ignores this parameter.",
+        description="IBKR market data type: 1=Live, 2=Frozen, 3=Delayed (default), 4=Delayed Frozen. ibkrweb checks the gateway's delivered type.",
     ),
     format: str = "json",
 ) -> Any:
@@ -94,7 +94,7 @@ async def get_historical_prices(
     extended_hours: bool = Query(
         False, description="Include extended trading hours (pre-market/after-hours)"
     ),
-    provider: str | None = None,
+    provider: str | None = Query(None, description="Price provider (e.g. ibkr, ibkrweb, lseg)."),
     format: str = "json",
 ) -> Any:
     """

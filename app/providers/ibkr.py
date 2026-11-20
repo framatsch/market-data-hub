@@ -58,6 +58,15 @@ from app.providers.base import (
     BasePriceProvider,
     BaseVolatilityProvider,
 )
+from app.providers.ibkr_common import (
+    FUTURES_EXCHANGES,
+    INDEX_EXCHANGES,
+    INDEX_ROOT_OVERRIDES,
+    NATIVE_INTERVALS,
+    exchange_timezone,
+    select_front_month,
+    tws_trading_hours_open,
+)
 from app.utils.errors import (
     AppError,
     CapabilityNotSupportedError,
@@ -75,16 +84,6 @@ from app.utils.symbols import canonical_symbol
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
 
-_FUTURES_EXCHANGES = {
-    **dict.fromkeys(("ES", "NQ", "RTY"), "CME"),
-    **dict.fromkeys(("YM", "ZC", "ZW", "ZS", "ZN", "ZB"), "CBOT"),
-    **dict.fromkeys(("CL", "NG", "RB", "HO"), "NYMEX"),
-    **dict.fromkeys(("GC", "SI", "HG"), "COMEX"),
-}
-# Canonical (primary listing) index roots that IBKR lists under another symbol.
-_INDEX_ROOT_OVERRIDES = {"DJI": "INDU"}
-
-
 class IBKRProvider(
     BasePriceProvider,
     BaseOptionsProvider,
@@ -95,10 +94,10 @@ class IBKRProvider(
     """Implementation for IBKR provider using ib_async.
 
     Instrument types: stocks/ETFs (SMART), indices (``Index`` contract, with the
-    ``_INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
+    ``INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
     price, ``ContFuture`` for history). Option underlyings stay stock/ETF.
     """
-    native_intervals = frozenset({"1m", "2m", "5m", "15m", "30m", "1h", "1d", "1w"})
+    native_intervals = frozenset(NATIVE_INTERVALS)
 
     price_sec_types = frozenset({"stock", "etf", "index", "future"})
     price_history_sec_types = frozenset({"stock", "etf", "index", "future"})
@@ -583,118 +582,23 @@ class IBKRProvider(
     def _is_market_open(
         self, trading_hours: str | None, timezone_id: str | None = None
     ) -> bool | None:
-        """
-        Determine if market is currently open based on trading_hours string and timezone.
-
-        Format examples (Old):
-        - "NYSESTD;0930-1600"
-        - "NYSESTD;0930-1600:CLOSED;20220101-20220102"
-
-        Format examples (New - from modern IBKR Gateway):
-        - "20260122:0400-20260122:2000;20260123:0400-20260123:2000;20260124:CLOSED;..."
-        - "20260122:0930-20260122:1600;20260123:0930-20260123:1600;20260124:CLOSED;..."
-
-        Args:
-            trading_hours: Trading hours string from IBKR
-            timezone_id: Timezone ID from IBKR (e.g., "US/Eastern", "MET", "Japan")
-
-        Returns:
-            True if market is open, False if closed, None if unknown
-        """
+        """Determine market-open status from TWS trading hours and timezone."""
         if not trading_hours:
             logger.debug("No trading hours information available")
             return None
 
         try:
-            # Use timezone from IBKR - different exchanges have different timezones
-            # US/Eastern for NYSE/NASDAQ, MET for Germany, Japan for Tokyo, etc.
             if timezone_id:
                 try:
-                    # Map IBKR timezone names to zoneinfo names
-                    timezone_map = {
-                        "US/Eastern": "America/New_York",
-                        "MET": "Europe/Berlin",  # Middle European Time
-                        "Japan": "Asia/Tokyo",
-                        "US/Central": "America/Chicago",
-                        "US/Mountain": "America/Denver",
-                        "US/Pacific": "America/Los_Angeles",
-                    }
-                    tz_name = timezone_map.get(timezone_id, timezone_id)
-                    tz = ZoneInfo(tz_name)
-                    now = datetime.now(tz)
-                    logger.debug(f"Using timezone: {timezone_id} ({tz_name})")
+                    now = datetime.now(exchange_timezone(timezone_id))
                 except Exception as e:
                     logger.warning(
                         f"Could not load timezone '{timezone_id}': {e}, using UTC"
                     )
                     now = datetime.now(UTC)
             else:
-                # Fallback to US/Eastern if no timezone provided (legacy behavior)
-                logger.debug("No timezone provided, defaulting to US/Eastern")
-                now = datetime.now(ZoneInfo("America/New_York"))
-
-            current_date_str = now.strftime("%Y%m%d")
-            current_time_str = now.strftime("%H%M")
-
-            # Split by semicolon to get individual day entries
-            day_entries = trading_hours.split(";")
-
-            # Look for today's entry
-            for entry in day_entries:
-                if entry.startswith(current_date_str):
-                    # Format: "20260122:0400-20260122:2000" or "20260122:CLOSED"
-                    if "CLOSED" in entry:
-                        logger.debug(f"Market closed on {current_date_str}")
-                        return False
-
-                    # Parse: "20260122:0400-20260122:2000"
-                    # Split by "-" first to get start and end parts
-                    if "-" not in entry:
-                        logger.debug(f"No time range in entry: {entry}")
-                        return None
-
-                    time_parts = entry.split("-")
-                    if len(time_parts) != 2:
-                        logger.debug(f"Unexpected format: {entry}")
-                        return None
-
-                    # Extract start time from "20260122:0400"
-                    start_part = time_parts[0]
-                    start_time = start_part.split(":")[1] if ":" in start_part else None
-
-                    # Extract end time from "20260122:2000"
-                    end_part = time_parts[1]
-                    end_time = end_part.split(":")[1] if ":" in end_part else None
-
-                    if not start_time or not end_time:
-                        logger.debug(f"Could not extract times from: {entry}")
-                        return None
-
-                    is_within = start_time <= current_time_str < end_time
-                    logger.debug(
-                        f"Current time {current_time_str} within {start_time}-{end_time}: {is_within}"
-                    )
-                    return is_within
-
-            # Fallback for old format: "NYSESTD;0930-1600"
-            if "NYSESTD" in trading_hours or trading_hours.count(":") == 1:
-                parts = trading_hours.split(":")
-                if len(parts) >= 2:
-                    time_part = parts[1]
-                    if "-" in time_part:
-                        start_time, end_time = (
-                            time_part.split("-")[0],
-                            time_part.split("-")[1],
-                        )
-                        is_within = start_time <= current_time_str < end_time
-                        logger.debug(
-                            f"Old format - Time {current_time_str} within {start_time}-{end_time}: {is_within}"
-                        )
-                        return is_within
-
-            logger.debug(f"Could not parse trading hours format: {trading_hours}")
-            return None
-
+                now = datetime.now(exchange_timezone())
+            return tws_trading_hours_open(trading_hours, now)
         except Exception as e:
             logger.warning(f"Error parsing trading hours '{trading_hours}': {e}")
             return None
@@ -732,14 +636,14 @@ class IBKRProvider(
         Futures are returned unqualified (a concrete month needs
         `_resolve_contract`); `continuous=True` yields the `ContFuture` series.
         Index roots deviating from the primary listing live in
-        `_INDEX_ROOT_OVERRIDES`; unknown roots pass through.
+        `INDEX_ROOT_OVERRIDES`; unknown roots pass through.
         """
         kind = sec_type.lower()
         if kind == "index":
-            native = _INDEX_ROOT_OVERRIDES.get(root, root)
+            native = INDEX_ROOT_OVERRIDES.get(root, root)
             return Index(native, self._get_index_exchange(native))
         if kind == "future":
-            exchange = _FUTURES_EXCHANGES.get(root, "")
+            exchange = FUTURES_EXCHANGES.get(root, "")
             if continuous:
                 return ContFuture(root, exchange=exchange)
             return Future(root, exchange=exchange)
@@ -751,7 +655,7 @@ class IBKRProvider(
         """Concrete contract: the front-month future, or its continuous series."""
         if sec_type.lower() != "future":
             return self._contract_for(root, sec_type)
-        if continuous and root in _FUTURES_EXCHANGES:
+        if continuous and root in FUTURES_EXCHANGES:
             return self._contract_for(root, "future", continuous=True)
         front, _ = await self._front_month_future(root, "MarketData", "no_front_month")
         if continuous:
@@ -1091,7 +995,7 @@ class IBKRProvider(
         self, root: str, entity: str, reason: str
     ) -> tuple[Contract, ContractDetails]:
         """Nearest non-expired contract of a futures root (7-day roll buffer)."""
-        exchange = _FUTURES_EXCHANGES.get(root)
+        exchange = FUTURES_EXCHANGES.get(root)
         details = await self.ib.reqContractDetailsAsync(
             Future(root, exchange=exchange or "")
         )
@@ -1113,7 +1017,6 @@ class IBKRProvider(
                     "Unknown futures root must resolve to exactly one exchange",
                     details={"symbol": root, "exchanges": exchanges},
                 )
-        cutoff = date.today() + timedelta(days=7)
         candidates = []
         for future_contract, detail in contracts:
             expiry = future_contract.lastTradeDateOrContractMonth.split(" ")[0]
@@ -1123,12 +1026,11 @@ class IBKRProvider(
                 last_trade = datetime.strptime(expiry, "%Y%m%d").date()
             except ValueError:
                 continue
-            if last_trade >= cutoff:
-                candidates.append((last_trade, future_contract, detail))
-        if not candidates:
+            candidates.append((last_trade, (future_contract, detail)))
+        selected = select_front_month(candidates, date.today())
+        if selected is None:
             raise DataNotFoundError(entity, root, details={"reason": reason})
-        _, selected_contract, selected = min(candidates, key=lambda item: item[0])
-        return selected_contract, selected
+        return selected
 
     @staticmethod
     def _volatility_error(exc: Exception, instrument: str, reason: str) -> AppError:
@@ -1669,16 +1571,7 @@ class IBKRProvider(
         raise ProviderError(
             f"Unsupported interval '{interval}' for IBKR provider.",
             details={
-                "supported_intervals": [
-                    "1m",
-                    "2m",
-                    "5m",
-                    "15m",
-                    "30m",
-                    "1h",
-                    "1d",
-                    "1w",
-                ]
+                "supported_intervals": list(NATIVE_INTERVALS),
             },
         )
 
@@ -1699,16 +1592,7 @@ class IBKRProvider(
 
     def _get_index_exchange(self, symbol: str) -> str:
         """Get primary exchange for index symbols."""
-        # Mapping of common index symbols to their exchanges
-        index_exchanges = {
-            "SPX": "CBOE",  # S&P 500
-            "RUT": "RUSSELL",  # Russell 2000
-            "VIX": "CBOE",  # Volatility Index
-            "NDX": "NASDAQ",  # NASDAQ-100
-            "DJX": "CBOE",  # Dow Jones
-            "INDU": "NYSE",  # Dow Jones Industrial Average
-        }
-        return index_exchanges.get(symbol.upper(), "CBOE")  # Default to CBOE
+        return INDEX_EXCHANGES.get(symbol.upper(), "CBOE")
 
     # ==================== Company Data Methods ====================
 

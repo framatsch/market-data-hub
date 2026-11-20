@@ -19,15 +19,39 @@ MCP is mounted in the same FastAPI app (same port)
 
 | Data | Primary | Fallback | Notes |
 |---|---|---|---|
-| Prices (stock, ETF, index, future) | IBKR | LSEG, Polygon, Prixe, Schwab | IBKR honors `market_data_type` (1 Live, 2 Frozen, 3 Delayed; default 3). Missing subscription → HTTP 403 `PROVIDER_NOT_ENTITLED`. See [Symbol notation](#symbol-notation). |
-| Historical OHLCV | IBKR | LSEG, Polygon, Schwab | Coverage depends on symbol/entitlement. Schwab has no futures history. |
-| Options (chain, quote, Greeks) | IBKR | Schwab | Not available via LSEG (missing pricing scope in our subscription). |
-| Company data | LSEG | Finnhub | |
+| Prices (stock, ETF, index, future) | IBKR | IBKR Web API, LSEG, Polygon, Prixe, Schwab | Missing subscription → HTTP 403 `PROVIDER_NOT_ENTITLED`. See [Symbol notation](#symbol-notation). |
+| Historical OHLCV | IBKR | IBKR Web API, LSEG, Polygon, Schwab | The IBKR Web API returns the current futures contract, not a continuous series. |
+| Options (chain, quote, Greeks) | IBKR | IBKR Web API, Schwab | IBKR Web API supports stock and ETF underlyings. |
+| Company data | LSEG | IBKR Web API, Finnhub | |
 | News | Finnhub | IBKR | LSEG news is not exposed (`provider=lseg` → `INVALID_PROVIDER`). Mock provider for development. |
-| Underlying IV | LSEG, IBKR | – | See [Implied Volatility](#underlying-implied-volatility). Polygon/Schwab are not underlying-IV providers. |
+| Underlying IV | LSEG, IBKR | IBKR Web API (snapshot only) | See [Implied Volatility](#underlying-implied-volatility). |
 | Earnings (stocks) | EarningsAPI (free key), Alpha Vantage (free key) | Financial Datasets (pay per request) | Announced dates only, never estimated. See [Earnings Calendar](#earnings-calendar). |
 
 Historical REST/MCP dates are normalized to UTC: naive means UTC, omitted `end` = now, omitted `start` = `end` − 30 days.
+
+### IBKR Web API (Client Portal Gateway)
+
+`ibkrweb` is opt-in and separate from `ibkr` (TWS/IB Gateway). It uses a browser-authenticated Client Portal Gateway and never stores an IBKR password. Use [IBKR's Client Portal Gateway](https://www.interactivebrokers.com/docs/web-api/v1/introduction) on the same host, or start the optional local Compose service:
+
+```bash
+docker compose --profile cpgw up -d --build
+```
+
+1. Open `https://localhost:5000` in the browser and log in, including any IBKR authentication prompts. The packaged gateway uses a self-signed certificate. For a remote server, open an SSH tunnel (`ssh -L 5000:127.0.0.1:5000 <server>`) and sign in through `https://localhost:5000` on your computer. Do not expose this port publicly.
+2. In Admin → Providers → **IBKR Web API (CPGW)**, set the gateway URL: `https://localhost:5000` for a native MDH process on that host, or `https://ibkr-cpgw:5000` when both services run under Compose. Under Compose the browser cannot resolve `ibkr-cpgw`, so also set **Browser login URL** (`login_url`, env `IBKRWEB_LOGIN_URL`) to the address you open the gateway with, e.g. `https://localhost:5000`. Leave **Verify TLS** off only for these local/self-signed endpoints. A remote gateway needs a trusted certificate or a CA bundle readable on the MDH host. The Compose service uses a dedicated `172.30.191.0/24` bridge; if that subnet overlaps your network, change both the Compose subnet and `tools/cpgw/conf.yaml` allowlist together.
+3. Enable `ibkrweb` and use **Test connection**. Choose it explicitly (for example `curl 'http://localhost:8000/prices/AAPL/last?provider=ibkrweb'`) or set it as the default for prices, options, companies or volatility in Admin.
+
+Keep-alive normally maintains the brokerage session and retries initialisation after the nightly reset, but IBKR still requires a browser login daily. Admin shows `login_required` when a new login is needed; `IBKRWEB_ALERT_WEBHOOK_URL` optionally posts a reminder. IBKR allows **one brokerage session per username**. Keep `compete` off unless you intend to disconnect the existing IBKR session. Use separate usernames to run TWS and `ibkrweb` side by side. Multiple applications can use the same gateway session; **Logout** affects all of them.
+
+MDH defaults to 6 gateway requests/sec and limits history to 50 requests/min. A 429 pauses the provider for 15 minutes instead of retrying. Leave headroom if more than one application uses the gateway. `market_data_type` checks the data actually delivered by IBKR; it does not change the gateway's stream. Type 1 requires real-time entitlement.
+
+| Capability | `ibkrweb` compared with `ibkr` |
+|---|---|
+| Prices and OHLCV | Stock/ETF/index and front-month futures; historical futures are not continuous. |
+| Options | Stock/ETF chain and individual OCC option quote, with Greeks where entitled. |
+| Companies | Contract profile and search by ticker or company name. |
+| Volatility | 30-day underlying IV snapshot where available. IV history and IV stats return 501 without an upstream request. |
+| News | Not supported. Continue using a news provider. |
 
 ## Symbol notation
 
@@ -45,7 +69,7 @@ Every REST route, MCP tool and WebSocket subscription takes the same symbol nota
 - `sec_type` (`stock|etf|index|future|option`, case-insensitive, legacy `STK`) stays valid. It must agree with a prefix (`F:ES?sec_type=stock` → 422); `ES?sec_type=future` equals `F:ES`; `sec_type=etf` only combines with bare symbols.
 - Provider-native forms (`.SPX`, `$SPX`) are rejected with 422 and a suggestion (`I:SPX`). Native identifiers stay reachable through override parameters such as `ric`.
 - Responses echo the canonical symbol (`symbol`, `underlying_symbol`). `source_instrument` on prices shows the native instrument actually queried (`ESZ6`, `ESc1`, `.SPX`, `$SPX`).
-- Futures mean the front month: last price uses the nearest contract, history the provider's continuous series (IBKR `ContFuture`, LSEG `c1`), without back-adjustment.
+- Futures mean the front month: last price uses the nearest contract. History uses the provider's continuous series when available (IBKR `ContFuture`, LSEG `c1`) without back-adjustment. `ibkrweb` returns bars for the current front-month contract only.
 
 Supported types per endpoint: prices and volatility `stock|etf|index|future`; option chain/quote underlying `stock|etf|index`; company profile/news `stock|etf`; WebSocket `stock|etf|index|future`. Anything else → 422 before a provider is called.
 

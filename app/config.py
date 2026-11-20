@@ -69,6 +69,24 @@ class Settings(BaseSettings):
     IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR: bool = True
     IBKR_IV_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0)
 
+    # IBKR Web API (Client Portal Gateway; browser-managed login)
+    IBKRWEB_BASE_URL: str = "https://127.0.0.1:5000"
+    IBKRWEB_LOGIN_URL: str = ""  # browser-facing gateway URL when base_url is not reachable from the browser
+    IBKRWEB_VERIFY_TLS: bool = False
+    IBKRWEB_CA_BUNDLE: str = ""
+    IBKRWEB_ACCOUNT_ID: str = ""
+    IBKRWEB_COMPETE: bool = False
+    IBKRWEB_MARKET_DATA_TYPE: int = Field(default=3, ge=1, le=4)
+    IBKRWEB_MAX_STREAMS: int = Field(default=80, ge=1, le=100)
+    IBKRWEB_TICKLE_INTERVAL_SECONDS: float = Field(default=60, ge=5)
+    IBKRWEB_SESSION_INIT_TIMEOUT_SECONDS: float = Field(default=15, gt=2)
+    IBKRWEB_PENALTY_SECONDS: float = Field(default=900, gt=0)
+    IBKRWEB_SNAPSHOT_TIMEOUT_SECONDS: float = Field(default=4, gt=0)
+    IBKRWEB_OPTION_SNAPSHOT_TIMEOUT_SECONDS: float = Field(default=10, gt=0)
+    IBKRWEB_SNAPSHOT_BATCH_SIZE: int = Field(default=50, ge=1, le=50)
+    IBKRWEB_IV_TIMEOUT_SECONDS: float = Field(default=10, gt=0)
+    IBKRWEB_ALERT_WEBHOOK_URL: str = ""
+
     # LSEG Provider
     # Streaming pricing FIDs and historical_pricing are entitled (incl. ATM IV).
     # REST pricing snapshots ('trapi.data.pricing.read') and TR.* datagrid

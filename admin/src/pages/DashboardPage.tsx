@@ -24,9 +24,11 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { fetcher } from '../lib/api';
+import { IBKR_SINGLE_SESSION_WARNING, IBKR_WEB_LABEL } from '../lib/ibkr';
 import type { Provider, SchwabAuthStatus, CredentialMetadata } from '../types';
 import { ApiKeyAuthSection } from '../components/provider/ApiKeyAuthSection';
 import { IbkrConnectionSection } from '../components/provider/IbkrConnectionSection';
+import { IbkrWebConnectionSection } from '../components/provider/IbkrWebConnectionSection';
 import { SchwabOAuthSection } from '../components/provider/SchwabOAuthSection';
 import { ProviderConfigSection } from '../components/provider/ProviderConfigSection';
 import { ProviderSupport } from '../components/provider/ProviderSupport';
@@ -47,6 +49,7 @@ function providerLabel(name: string) {
   const labels: Record<string, string> = {
     lseg: 'LSEG',
     ibkr: 'IBKR',
+    ibkrweb: IBKR_WEB_LABEL,
     schwab: 'Schwab',
     finnhub: 'Finnhub',
     polygon: 'Polygon',
@@ -110,6 +113,9 @@ function TabPanel({ children, value, index }: TabPanelProps) {
 function AuthSection({ providerName }: { providerName: string }) {
   if (providerName === 'ibkr') {
     return <IbkrConnectionSection />;
+  }
+  if (providerName === 'ibkrweb') {
+    return <IbkrWebConnectionSection />;
   }
   if (providerName === 'schwab') {
     return (
@@ -242,13 +248,16 @@ function ProviderDrawer({
 
                 <Box sx={{ flex: 1, overflow: 'auto', px: 3 }}>
                   <TabPanel value={tab} index={0}>
+                    {provider.warnings?.includes('ibkr_single_session') && (
+                      <Alert severity="warning" sx={{ mb: 2 }}>{IBKR_SINGLE_SESSION_WARNING}</Alert>
+                    )}
                     <AuthSection providerName={provider.name} />
                   </TabPanel>
 
                   <TabPanel value={tab} index={1}>
                     <ProviderConfigSection
                       providerName={provider.name}
-                      hideConnectionJson={provider.name === 'ibkr'}
+                      hideConnectionJson={provider.name === 'ibkr' || provider.name === 'ibkrweb'}
                       onSuccess={showSuccess}
                       onError={showError}
                     />
@@ -437,6 +446,9 @@ export default function DashboardPage() {
       <Typography variant="h4" gutterBottom>
         Providers
       </Typography>
+      {providersQuery.data?.some((provider) => provider.warnings?.includes('ibkr_single_session')) && (
+        <Alert severity="warning" sx={{ mb: 2 }}>{IBKR_SINGLE_SESSION_WARNING}</Alert>
+      )}
 
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
         {(['all', 'active', 'inactive', 'healthy', 'not-configured'] as FilterType[]).map(filter => (

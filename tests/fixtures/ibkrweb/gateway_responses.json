@@ -1,0 +1,67 @@
+{
+  "status_ready": {"authenticated": true, "established": true, "connected": true, "competing": false},
+  "status_logged_out": {"authenticated": false, "established": false, "connected": false, "competing": false},
+  "tickle": {
+    "ssoExpires": 428545,
+    "iserver": {"authStatus": {"authenticated": true, "established": true, "connected": true, "competing": false}}
+  },
+  "accounts": {"accounts": ["TEST1"]},
+  "stocks": {
+    "AAPL": [{"name": "APPLE INC", "assetClass": "STK", "contracts": [{"conid": 265598, "exchange": "NASDAQ", "isUS": true}, {"conid": 38708077, "exchange": "MEXI", "isUS": false}]}],
+    "SPY": [{"name": "SS SPDR S&P 500 ETF TRUST-US", "assetClass": "STK", "contracts": [{"conid": 756733, "exchange": "ARCA", "isUS": true}]}],
+    "BRK B": [{"name": "BERKSHIRE HATHAWAY INC-CL B", "assetClass": "STK", "contracts": [{"conid": 72063691, "exchange": "NYSE", "isUS": true}]}],
+    "ZZZZINVALID": []
+  },
+  "futures": {
+    "ES": [{"symbol": "ES", "conid": 515416632, "underlyingConid": 11004968, "expirationDate": 20261218, "ltd": 20261217}],
+    "CL": [{"symbol": "CL", "conid": 296574787, "underlyingConid": 17340715, "expirationDate": 20261120, "ltd": 20261201}]
+  },
+  "search_SPX": [{"conid": "416904", "companyName": "S&P 500 Stock Index", "symbol": "SPX", "description": "CBOE", "restricted": "IND", "sections": [{"secType": "IND", "exchange": "CBOE;"}]}],
+  "search_INDU": [{"conid": "1935181", "symbol": "INDU", "description": "CME", "restricted": "IND", "sections": [{"secType": "IND", "exchange": "CME;"}]}],
+  "search_BRK_B": [{"conid": "72063691", "companyName": "BERKSHIRE HATHAWAY INC-CL B", "symbol": "BRK B", "description": "NYSE", "sections": [{"secType": "STK"}, {"secType": "OPT", "months": "NOV26;DEC26;JAN27", "exchange": "SMART;AMEX;BATS"}]}],
+  "search_AAPL": [{"conid": "265598", "companyName": "APPLE INC", "symbol": "AAPL", "description": "NASDAQ", "sections": [{"secType": "STK"}, {"secType": "OPT", "months": "NOV26;DEC26;JAN27"}]}],
+  "search_apple_name": [{"conid": "265598", "companyHeader": "APPLE INC (NASDAQ)", "companyName": null, "symbol": "AAPL", "description": null, "sections": [], "secType": "STK"}],
+  "strikes": {"call": [345.0, 347.5, 350.0], "put": [345.0, 347.5, 350.0]},
+  "option_info": [
+    {"conid": 939828681, "symbol": "AAPL", "secType": "OPT", "exchange": "SMART", "right": "C", "strike": 350.0, "currency": "USD", "maturityDate": "20261211", "multiplier": "100", "tradingClass": "AAPL"},
+    {"conid": 692808279, "symbol": "AAPL", "secType": "OPT", "exchange": "SMART", "right": "C", "strike": 350.0, "currency": "USD", "maturityDate": "20261218", "multiplier": "100", "tradingClass": "AAPL"},
+    {"conid": 692809971, "symbol": "AAPL", "secType": "OPT", "exchange": "SMART", "right": "P", "strike": 350.0, "currency": "USD", "maturityDate": "20261218", "multiplier": "100", "tradingClass": "AAPL"}
+  ],
+  "snapshot_preflight": [{"conidEx": "416904", "conid": 416904}],
+  "snapshot": [
+    {"conid": 265598, "conidEx": "265598", "_updated": 1795123354128, "31": "348.80", "87": "39.9M", "7762": "39856904", "7283": "23.601%", "6509": "DB", "7638": "5.81M"},
+    {"conid": 416904, "conidEx": "416904", "31": "7177.56", "7283": "22.964%", "6509": "Z"},
+    {"conid": 1935181, "conidEx": "1935181", "7283": "N/A", "6509": "N"},
+    {"conid": 515416632, "conidEx": "515416632", "31": "7199.00", "7283": "10.781%", "6509": "DB"},
+    {"conid": 692808279, "conidEx": "692808279", "31": "10.15", "87": "3.35K", "7762": "3351", "7633": "24.8%", "7308": "0.519", "7309": "0.016", "7310": "-0.189", "7311": "0.391", "7638": "27.6K", "6509": "ZBd"}
+  ],
+  "history_daily": {
+    "symbol": "AAPL", "barLength": 86400, "mdAvailability": "S", "outsideRth": false, "volumeFactor": 40,
+    "data": [
+      {"o": 357.13, "c": 352.78, "h": 357.14, "l": 351.31, "v": 482572.95, "t": 1794839400000},
+      {"o": 352.83, "c": 351.91, "h": 355.36, "l": 349.67, "v": 491662.875, "t": 1794925800000}
+    ]
+  },
+  "history_minute": {
+    "symbol": "AAPL", "barLength": 60, "mdAvailability": "S", "outsideRth": true, "volumeFactor": 40,
+    "data": [
+      {"o": 350.65, "c": 350.24, "h": 350.65, "l": 350.22, "v": 8.5, "t": 1795006740000},
+      {"o": 351.51, "c": 351.76, "h": 351.51, "l": 351.51, "v": 786.775, "t": 1795021080000}
+    ]
+  },
+  "schedule": {
+    "exchange_time_zone": "US/Eastern",
+    "schedules": {"20261119": {
+      "liquid_hours": [{"opening": 1795098600, "closing": 1795122000}],
+      "extended_hours": [{"cancel_daily_orders": true, "opening": 1795078800, "closing": 1795136400}]
+    }}
+  },
+  "contract_info": {"symbol": "AAPL", "con_id": 265598, "instrument_type": "STK", "local_symbol": "AAPL", "company_name": "APPLE INC", "industry": "Computers", "category": "Computers", "exchange": "SMART", "currency": "USD", "r_t_h": true},
+  "error_400": {"error": "Bad Request: strike is required for warrant and option", "statusCode": 400},
+  "synthetic_errors": {
+    "401": {"error": "Unauthorized"},
+    "429": {"error": "Too many requests"},
+    "500": {"error": "Internal gateway error"},
+    "503": {"error": "Service unavailable"}
+  }
+}

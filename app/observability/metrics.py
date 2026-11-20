@@ -1,8 +1,14 @@
-from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 REGISTRY = CollectorRegistry()
 
-PROVIDERS = frozenset({"ibkr", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets", "earningsapi"})
+PROVIDERS = frozenset({"ibkr", "ibkrweb", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets", "earningsapi"})
 ENDPOINTS = frozenset(
     {
         "prices",
@@ -36,6 +42,18 @@ REQUEST_DURATION = Histogram(
 UPSTREAM_REQUESTS = Counter(
     "mdh_provider_upstream_requests_total",
     "Actual upstream attempts sent to metered providers, across all capabilities.",
+    ("provider",),
+    registry=REGISTRY,
+)
+PROVIDER_SESSION_STATE = Gauge(
+    "mdh_provider_session_state",
+    "Current gateway session state (1 for active state, 0 otherwise).",
+    ("provider", "state"),
+    registry=REGISTRY,
+)
+PROVIDER_RATE_LIMITS = Counter(
+    "mdh_provider_rate_limits_total",
+    "HTTP 429 responses received from an upstream provider.",
     ("provider",),
     registry=REGISTRY,
 )

@@ -65,7 +65,7 @@ async def get_implied_volatility(
     ),
     provider: str | None = Query(
         None,
-        description="Volatility provider override: lseg or ibkr; otherwise the configured default.",
+        description="Volatility provider override: lseg, ibkr or ibkrweb; otherwise the configured default.",
     ),
     format: Literal["json", "csv"] = Query(
         "json",
@@ -117,7 +117,7 @@ async def get_implied_volatility_history(
     ),
     provider: str | None = Query(
         None,
-        description="Volatility provider override: lseg or ibkr; otherwise the configured default.",
+        description="Volatility history provider: lseg or ibkr. ibkrweb supports snapshots only.",
     ),
     format: Literal["json", "csv"] = Query(
         "json",
@@ -175,7 +175,7 @@ async def get_implied_volatility_stats(
     ),
     provider: str | None = Query(
         None,
-        description="Volatility provider override: lseg or ibkr; otherwise the configured default.",
+        description="Volatility history provider: lseg or ibkr. ibkrweb supports snapshots only.",
     ),
     format: Literal["json", "csv"] = Query(
         "json",

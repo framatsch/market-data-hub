@@ -34,3 +34,7 @@ Each provider entry in the Provider Management page SHALL display the service ty
 - **WHEN** `GET /api/admin/providers` is called and EarningsAPI is listed
 - **THEN** its `capabilities` SHALL be `["earnings_upcoming", "earnings_history"]`
 
+#### Scenario: IBKR Web API capabilities
+- **WHEN** `GET /api/admin/providers` is called and `ibkrweb` is listed
+- **THEN** its `capabilities` SHALL be `["prices", "options", "companies", "volatility"]` and the UI SHALL render `Prices`, `Options`, `Companies` and `Volatility` chips, but no `News` chip
+

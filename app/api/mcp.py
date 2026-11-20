@@ -708,7 +708,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "sec_type": _SEC_TYPE,
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Price provider override (e.g. ibkr, ibkrweb, lseg)",
                 },
             },
         },
@@ -743,7 +743,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "sec_type": _SEC_TYPE,
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Price provider override (e.g. ibkr, ibkrweb, lseg)",
                 },
             },
         },
@@ -768,7 +768,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 },
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Options provider override (e.g. ibkr, ibkrweb, schwab)",
                 },
             },
         },
@@ -787,7 +787,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 },
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Options provider override (e.g. ibkr, ibkrweb, schwab)",
                 },
             },
         },
@@ -807,7 +807,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "symbol": _SYMBOL_COMPANY,
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Company data provider override (e.g. ibkr, ibkrweb, lseg)",
                 },
             },
         },
@@ -827,7 +827,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 "query": {"type": "string", "description": "Search term, e.g. Apple"},
                 "provider": {
                     "type": "string",
-                    "description": "Data provider override (e.g. ibkr, lseg)",
+                    "description": "Company data provider override (e.g. ibkr, ibkrweb, lseg)",
                 },
             },
         },
@@ -908,7 +908,7 @@ TOOL_REGISTRY.extend(
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Volatility provider override (lseg or ibkr).",
+                        "description": "Volatility provider override (lseg, ibkr or ibkrweb).",
                     },
                 },
             },
@@ -948,7 +948,7 @@ TOOL_REGISTRY.extend(
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Volatility provider override (lseg or ibkr).",
+                        "description": "Volatility history provider override (lseg or ibkr; ibkrweb is snapshot-only).",
                     },
                 },
             },
@@ -984,7 +984,7 @@ TOOL_REGISTRY.extend(
                     },
                     "provider": {
                         "type": "string",
-                        "description": "Volatility provider override (lseg or ibkr).",
+                        "description": "Volatility history provider override (lseg or ibkr; ibkrweb is snapshot-only).",
                     },
                 },
             },

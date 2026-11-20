@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Tabs, Tab, Typography, Chip, Stack, Switch, Tooltip } from '@mui/material';
+import { IBKR_WEB_LABEL } from '../../lib/ibkr';
 import type { Provider } from '../../types';
 import { ProviderConfigSection } from './ProviderConfigSection';
 import { ProviderSupport } from './ProviderSupport';
@@ -66,7 +67,7 @@ export function ProviderDetailsPanel({
       {/* Header: provider name + enabled/disabled badge top-right */}
       <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Typography variant="h6" sx={{ fontWeight: 700 }}>
-          {providerName.toUpperCase()}
+          {providerName === 'ibkrweb' ? IBKR_WEB_LABEL : providerName.toUpperCase()}
         </Typography>
         <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1}>
           <Chip

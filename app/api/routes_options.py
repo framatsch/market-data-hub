@@ -56,7 +56,7 @@ async def get_option_chain(
         None,
         description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)",
     ),
-    provider: str | None = None,
+    provider: str | None = Query(None, description="Options provider (e.g. ibkr, ibkrweb, schwab)."),
     format: str = "json",
 ) -> Any:
     """Get option chain for a symbol and expiry.
@@ -115,7 +115,7 @@ async def get_option_quote(
         None,
         description="Market data type: 1=Live (Level 2), 2=Frozen, 3=Delayed (default, free)",
     ),
-    provider: str | None = None,
+    provider: str | None = Query(None, description="Options provider (e.g. ibkr, ibkrweb, schwab)."),
     format: str = "json",
 ) -> Any:
     """Get a specific option quote.

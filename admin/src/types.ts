@@ -4,6 +4,7 @@ export interface Provider {
   status: 'healthy' | 'paused' | 'degraded' | 'offline' | 'disabled' | 'unavailable';
   error?: string | null;
   capabilities?: string[];
+  warnings?: string[];
   price_support?: {
     price_sec_types: string[];
     price_history_sec_types: string[];
