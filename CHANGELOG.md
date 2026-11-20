@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-20
+
 ### Added
 
 - Optional IBKR Web API provider (`ibkrweb`) for the Client Portal Gateway, with prices, historical bars, stock/ETF options, company data and 30-day implied-volatility snapshots. Includes session controls in Admin and an optional local `cpgw` Compose profile. No IBKR credentials are stored by MDH. Futures history is front-month only; IV history and news are not supported. Set `login_url` (`IBKRWEB_LOGIN_URL`) when the browser reaches the gateway under a different address than MDH, e.g. under Compose.
+- Financial Datasets company news (`GET /companies/{symbol}/news`, MCP `get_company_news`, Admin `News` capability chip and default news provider selection): up to 10 recent English articles from `/news`, with local date/category/limit filters, shared title-keyword categorisation and stable URL-based IDs.
+- `Server-Timing`, `X-Data-Source` and `X-Data-Provider` on market-data responses,
+  including cache revalidation and CSV exports. Every HTTP response carries a
+  validated or generated `X-Request-ID` for log correlation.
+- Bounded-label data-source and layer timing metrics for HTTP and MCP, structured
+  audit fields, and a concurrent Redis miss counter. See the
+  [Grafana dashboard specification](doc/observability/grafana-dashboard-spec.md).
+
+### Fixed
+
+- Removed the static `ACTIVE PROVIDERS` list from the startup log banner, which omitted newer
+  providers and did not reflect runtime configuration changes.
+- A failing provider reconfiguration no longer aborts reloading the remaining providers in the
+  registry.
 
 ## [1.6.0] - 2026-11-19
 
