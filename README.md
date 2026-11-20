@@ -282,7 +282,9 @@ Tools: `get_last_price`, `get_historical_prices`, `get_option_chain`, `get_optio
 
 ## Observability
 
-`GET /metrics` exposes Prometheus metrics with bounded labels (`provider`, `endpoint`, `status_class`). Each API request emits one JSON audit log line (`event="request_completed"`; set `X-Client-ID` to identify clients, otherwise `anonymous`).
+`GET /metrics` exposes Prometheus request and layer metrics with bounded labels; symbols appear only in logs. Market-data responses include `Server-Timing`, `X-Data-Source`, and `X-Data-Provider`. Each HTTP response echoes a valid `X-Request-ID` or generates one for log correlation. HTTP audits use `request_completed` (`X-Client-ID` identifies the client); MCP tools emit `mcp_tool_completed`.
+
+See the [Grafana dashboard specification](doc/observability/grafana-dashboard-spec.md) for metric labels, log fields, and the PromQL and LogQL queries.
 
 ## Deployment
 

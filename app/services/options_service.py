@@ -18,10 +18,9 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-import structlog
-
 from app import response_meta
 from app.models.options import OptionChain, OptionQuote
+from app.observability.telemetry import bind_data_provider
 from app.providers.base import BaseOptionsProvider
 from app.providers.registry import ProviderRegistry, get_registry
 from app.utils.errors import CapabilityNotSupportedError
@@ -62,7 +61,7 @@ class OptionsService:
         market_data_type: int | None = None,
     ) -> OptionChain:
         async with self.registry.use_options_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             _check_support(provider, "option_chain", symbol)
             chain = await provider.get_option_chain(
                 symbol.root,
@@ -94,7 +93,7 @@ class OptionsService:
         market_data_type: int | None = None,
     ) -> OptionQuote:
         async with self.registry.use_options_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             _check_support(provider, "option_quote", symbol)
             quote = await provider.get_option_quote(
                 symbol.root,

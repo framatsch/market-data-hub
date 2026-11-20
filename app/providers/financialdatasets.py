@@ -12,7 +12,7 @@ import httpx
 
 from app.market_hours import ET, as_utc, week_monday
 from app.models.company import CompanyProfile
-from app.models.earnings import EarningsEvent
+from app.models.earnings import EarningsEvent, ReportTime
 from app.models.news import NewsArticle
 from app.models.price import PriceBar, PriceQuote
 from app.providers.base import (
@@ -62,7 +62,7 @@ def _news_day(raw: str) -> date:
         return as_utc(datetime.fromisoformat(raw)).date()
 
 
-def _report_time(row: dict[str, Any]) -> str:
+def _report_time(row: dict[str, Any]) -> ReportTime:
     window = row.get("filing_window")
     if window == "PRE_MARKET":
         return "bmo"

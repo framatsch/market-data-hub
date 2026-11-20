@@ -14,9 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import structlog
-
 from app.models.company import CompanyProfile, CompanySummary
+from app.observability.telemetry import bind_data_provider
 from app.providers.registry import ProviderRegistry, get_registry
 from app.utils.symbols import ParsedSymbol
 
@@ -29,14 +28,14 @@ class CompanyService:
         self, symbol: ParsedSymbol, provider_name: str | None = None
     ) -> CompanyProfile:
         async with self.registry.use_company_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             return await provider.get_company_profile(symbol.root)
 
     async def search_companies(
         self, query: str, provider_name: str | None = None
     ) -> list[CompanySummary]:
         async with self.registry.use_company_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             return await provider.search_companies(query)
 
 

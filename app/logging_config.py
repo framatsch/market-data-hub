@@ -66,6 +66,7 @@ class RequestContextFilter(logging.Filter):
         if provider is None and record.name.startswith("app.providers."):
             provider = record.name.split(".")[2]
         record.provider = provider or "none"
+        record.request_id = context.get("request_id")
         return True
 
 
@@ -85,6 +86,8 @@ class JsonRequestFormatter(logging.Formatter):
             .isoformat()
             .replace("+00:00", "Z"),
         }
+        if request_id := getattr(record, "request_id", None):
+            payload["request_id"] = request_id
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)

@@ -19,11 +19,12 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import and_, delete, exists, select, text
+from sqlalchemy import and_, delete, exists, select, text, true
 from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -369,7 +370,7 @@ async def upsert_history(
                 EarningsEventRow.provider == provider,
                 EarningsEventRow.symbol == symbol,
                 EarningsEventRow.report_date >= prune_upcoming_from,
-                EarningsEventRow.report_date.not_in(keep) if keep else True,
+                EarningsEventRow.report_date.not_in(keep) if keep else true(),
             )
         )
     await drop_reconciled_calendar_rows(session, provider, symbol)
@@ -390,4 +391,4 @@ async def clear(session: AsyncSession, provider: str | None = None) -> int:
         sync = sync.where(EarningsSync.provider == provider)
     result = await session.execute(query)
     await session.execute(sync)
-    return int(result.rowcount or 0)
+    return int(cast(CursorResult[Any], result).rowcount or 0)

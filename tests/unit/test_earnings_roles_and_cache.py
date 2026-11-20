@@ -2,10 +2,12 @@
 
 import json
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.models.earnings import EarningsEvent
+from app.observability.telemetry import RequestTelemetry, request_telemetry
 from app.providers.base import BaseEarningsHistoryProvider, BaseEarningsUpcomingProvider
 from app.providers.registry import ProviderRegistry
 from app.services import earnings_service as module
@@ -124,6 +126,24 @@ async def test_next_uses_upcoming_role_only():
     assert result.provider == "earningsapi"
 
 
+async def test_next_uses_separate_store_provider_for_last_reported(monkeypatch):
+    svc = build([Upcoming(), History()], "earningsapi", "financialdatasets")
+    reported = ev("ADI", date(2026, 8, 19), "financialdatasets", eps_actual="3")
+    stored = AsyncMock(return_value={"ADI": reported})
+    monkeypatch.setattr(svc, "_stored_last_reported", stored)
+    telemetry = RequestTelemetry("test", "http")
+    token = request_telemetry.set(telemetry)
+    try:
+        result = await svc.next(syms("ADI"))
+        assert result.provider == "earningsapi"
+        assert result.rows[0].last_reported == reported
+        assert telemetry.store_outcome == "partial"
+        assert telemetry.data_provider == "earningsapi"
+    finally:
+        request_telemetry.reset(token)
+    stored.assert_awaited_once_with("financialdatasets", ["ADI"], TODAY)
+
+
 async def test_explicit_history_only_provider_with_kind_all_and_501():
     up, hist = Upcoming(), History()
     svc = build([up, hist], "earningsapi", "financialdatasets")
@@ -167,7 +187,14 @@ async def test_without_store_each_day_and_symbol_is_requested_once(monkeypatch):
     up = Upcoming()
     svc = build([up], "earningsapi", "earningsapi")
     first = await svc.next(syms("NVDA,ADI"))
-    second = await svc.next(syms("NVDA,ADI"))
+    telemetry = RequestTelemetry("test", "http")
+    token = request_telemetry.set(telemetry)
+    try:
+        second = await svc.next(syms("NVDA,ADI"))
+        assert telemetry.earnings_fallback_hit
+        assert set(telemetry.spans) == {"redis"}
+    finally:
+        request_telemetry.reset(token)
     assert len(up.day_calls) == len(set(up.day_calls)) == 9
     assert up.symbol_calls == ["NVDA"]
     by = {r.symbol: r for r in second.rows}

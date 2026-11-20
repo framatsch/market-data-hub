@@ -38,6 +38,7 @@ from app.models.common import ResponseEnvelope
 from app.models.company import CompanyProfile, CompanySummary
 from app.models.earnings import EarningsEvent, earnings_today
 from app.models.news import NewsMetadata, NewsResponse
+from app.observability.headers import CSV_RESPONSE_HEADERS, DATA_RESPONSE_HEADERS
 from app.utils.csv_export import to_csv
 from app.utils.symbols import COMPANY_TYPES, ParsedSymbol
 
@@ -46,7 +47,10 @@ router = APIRouter(prefix="/companies", tags=["Companies"])
 CompanySymbol = Annotated[ParsedSymbol, Depends(symbol_param(COMPANY_TYPES))]
 
 
-@router.get("/search", response_model=ResponseEnvelope[list[CompanySummary]])
+@router.get(
+    "/search", response_model=ResponseEnvelope[list[CompanySummary]],
+    responses={200: {"headers": DATA_RESPONSE_HEADERS}},
+)
 @cache(expire=settings.CACHE_TTL_COMPANY_SEARCH_SECONDS, key="companies:search")
 async def search_companies(
     q: str, service: CompanyServiceDep,
@@ -59,7 +63,8 @@ async def search_companies(
 
 
 @router.get(
-    "/{symbol}/earnings", response_model=ResponseEnvelope[list[EarningsEvent]]
+    "/{symbol}/earnings", response_model=ResponseEnvelope[list[EarningsEvent]],
+    responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_EARNINGS_SECONDS, key="companies:earnings")
 async def get_company_earnings(
@@ -105,7 +110,10 @@ async def get_company_earnings(
     return earnings_envelope(result.events, result)
 
 
-@router.get("/{symbol}", response_model=ResponseEnvelope[CompanyProfile])
+@router.get(
+    "/{symbol}", response_model=ResponseEnvelope[CompanyProfile],
+    responses={200: {"headers": DATA_RESPONSE_HEADERS}},
+)
 @cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
     symbol: CompanySymbol, service: CompanyServiceDep,
@@ -117,7 +125,10 @@ async def get_company_profile(
     return ResponseEnvelope(data=profile)
 
 
-@router.get("/{symbol}/news", response_model=NewsResponse)
+@router.get(
+    "/{symbol}/news", response_model=NewsResponse,
+    responses={200: {"headers": CSV_RESPONSE_HEADERS}},
+)
 @cache(expire=settings.CACHE_TTL_COMPANY_NEWS_SECONDS, key="companies:news")
 async def get_company_news(
     symbol: CompanySymbol,

@@ -3,12 +3,16 @@
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 from app.config import settings
-from app.providers.base import _apply_runtime_config_defaults
+from app.providers.base import (
+    BasePriceProvider,
+    _apply_runtime_config_defaults,
+    suppress_provider_timing,
+)
 from app.providers.credentials import get_provider_credential_sync
 from app.providers.request_budget import BUDGET_DEFAULTS, RequestBudget
 from app.utils.errors import (
@@ -117,7 +121,8 @@ class MeteredHttpProvider:
 
     async def test_connection(self) -> dict[str, Any]:
         try:
-            await self.get_last_price("AAPL")
+            with suppress_provider_timing():
+                await cast(BasePriceProvider, self).get_last_price("AAPL")
             return {"status_code": 200, "success": True, "message": f"Connected to {self.name}", "details": {"ticker": "AAPL"}}
         except AppError as exc:
             status = 429 if exc.code == "PROVIDER_QUOTA_EXHAUSTED" else 503

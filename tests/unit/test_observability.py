@@ -1,17 +1,21 @@
 import json
+import logging
 import re
 from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import structlog
 from fastapi.testclient import TestClient
 
 from app.dependencies import get_price_service
+from app.logging_config import JsonRequestFormatter, RequestContextFilter
 from app.main import app
 from app.models.price import PriceQuote
 from app.observability.metrics import metrics_response, record_request
 from app.observability.middleware import ObservabilityMiddleware
+from app.observability.telemetry import DATA_ROUTES
 
 
 @pytest.fixture
@@ -93,6 +97,7 @@ def test_audit_log_has_required_fields(client, capfd):
 
     entry = logs[0]
     assert entry["event"] == "request_completed"
+    assert entry["request_id"] == response.headers["X-Request-ID"]
     assert entry["level"] == "info"
     assert re.match(r"\d{4}-\d{2}-\d{2}T.*Z", entry["timestamp"])
     assert entry["client_id"] == "trading-bot-7"
@@ -112,6 +117,69 @@ def test_health_and_metrics_are_not_audit_logged(client, capfd):
     assert client.get("/metrics").status_code == 200
 
     assert audit_lines(capfd.readouterr().out) == []
+
+
+@pytest.mark.parametrize("path", ["/prices/AAPL/last", "/health", "/not-a-route"])
+def test_valid_request_id_is_echoed(client, path):
+    response = client.get(path, headers={"X-Request-ID": "vt_7.f:3-a"})
+    assert response.headers["X-Request-ID"] == "vt_7.f:3-a"
+
+
+@pytest.mark.parametrize("inbound", [None, "", "x" * 129, "with space", "with\nnewline"])
+def test_missing_or_invalid_request_id_is_replaced(client, inbound):
+    headers = {} if inbound is None else {"X-Request-ID": inbound}
+    response = client.get("/health", headers=headers)
+    assert re.fullmatch(r"[a-f0-9]{32}", response.headers["X-Request-ID"])
+
+
+def test_unhandled_error_keeps_request_id(monkeypatch):
+    def fail():
+        raise RuntimeError("unexpected test exception")
+
+    monkeypatch.setitem(app.dependency_overrides, get_price_service, fail)
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/prices/AAPL/last", headers={"X-Request-ID": "vt-error"}
+    )
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "vt-error"
+    assert re.fullmatch(r"total;dur=\d+\.\d", response.headers["Server-Timing"])
+    assert "X-Data-Source" not in response.headers
+
+
+@pytest.mark.parametrize("path", DATA_ROUTES)
+def test_openapi_documents_data_headers(client, path):
+    schema = client.get("/openapi.json").json()
+    method = schema["paths"][path]["get"]
+    headers = method["responses"]["200"]["headers"]
+    assert set(headers) >= {
+        "Server-Timing", "X-Data-Source", "X-Data-Provider", "X-FastAPI-Cache",
+        "X-Request-ID", "Cache-Control",
+    }
+    if any(param["name"] == "format" for param in method.get("parameters", [])):
+        assert "X-MDH-Data-As-Of" in headers
+    assert set(headers["X-Data-Source"]["schema"]["enum"]) == {
+        "redis", "postgres", "provider", "postgres+provider",
+    }
+
+
+def test_cors_exposes_observability_headers_for_allowed_origin(client):
+    response = client.get("/prices/AAPL/last", headers={"Origin": "http://localhost:5173"})
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert {name.strip() for name in response.headers["Access-Control-Expose-Headers"].split(",")} == {
+        "Server-Timing", "X-FastAPI-Cache", "X-Data-Source", "X-Data-Provider",
+        "X-Request-ID", "X-MDH-Data-As-Of",
+    }
+
+
+def test_stdlib_request_context_filter_and_formatter():
+    record = logging.LogRecord("app.test", logging.INFO, __file__, 1, "test", (), None)
+    formatter = JsonRequestFormatter()
+    context_filter = RequestContextFilter()
+    with structlog.contextvars.bound_contextvars(request_id="vt-42"):
+        assert context_filter.filter(record)
+        assert json.loads(formatter.format(record))["request_id"] == "vt-42"
+    assert context_filter.filter(record)
+    assert "request_id" not in json.loads(formatter.format(record))
 
 
 def test_redact_params_hides_secret_like_query_keys():

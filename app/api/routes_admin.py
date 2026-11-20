@@ -592,7 +592,7 @@ async def get_admin_history_store(_principal: PrincipalDep) -> dict[str, Any]:
         return result
 
     async def load() -> dict[str, Any]:
-        async with store_engine.session_scope() as session:
+        async with store_engine.session_scope(operation="read") as session:
             return await store_repository.status(session)
 
     counts = await store_engine.guarded(load, None)
@@ -618,7 +618,7 @@ async def clear_admin_history_store(
     provider = payload.provider.lower() if payload.provider else None
 
     async def run() -> dict[str, int]:
-        async with store_engine.session_scope() as session:
+        async with store_engine.session_scope(operation="write") as session:
             return await store_repository.clear(
                 session, payload.dataset, symbol, provider, payload.interval
             )

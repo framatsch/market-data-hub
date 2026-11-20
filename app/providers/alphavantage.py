@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 from app.market_hours import ET, as_utc, week_monday
-from app.models.earnings import EarningsEvent, earnings_today
+from app.models.earnings import EarningsEvent, ReportTime, earnings_today
 from app.models.price import PriceBar, PriceQuote
 from app.providers.base import (
     BaseEarningsHistoryProvider,
@@ -28,6 +28,8 @@ from app.utils.errors import (
     ProviderQuotaExhaustedError,
     ProviderTimeoutError,
 )
+
+_REPORT_TIMES: dict[str, ReportTime] = {"pre-market": "bmo", "post-market": "amc"}
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -106,7 +108,7 @@ class AlphaVantageProvider(MeteredHttpProvider, BasePriceProvider, BaseEarningsU
                 continue
             result.append(EarningsEvent(
                 symbol=symbol, report_date=reported,
-                report_time={"pre-market": "bmo", "post-market": "amc"}.get(row.get("timeOfTheDay", ""), "unknown"),
+                report_time=_REPORT_TIMES.get(row.get("timeOfTheDay", ""), "unknown"),
                 fiscal_period_end=date.fromisoformat(row["fiscalDateEnding"]) if row.get("fiscalDateEnding") else None,
                 eps_estimate=_decimal(row.get("estimate")), currency=row.get("currency") or None,
                 provider=self.name, updated_at=received,
@@ -121,7 +123,7 @@ class AlphaVantageProvider(MeteredHttpProvider, BasePriceProvider, BaseEarningsU
         received = datetime.now(UTC)
         return [EarningsEvent(
             symbol=root, report_date=date.fromisoformat(row["reportedDate"]), reported=True,
-            report_time={"pre-market": "bmo", "post-market": "amc"}.get(row.get("reportTime", ""), "unknown"),
+            report_time=_REPORT_TIMES.get(row.get("reportTime", ""), "unknown"),
             fiscal_period_end=date.fromisoformat(row["fiscalDateEnding"]),
             eps_actual=_decimal(row.get("reportedEPS")), eps_estimate=_decimal(row.get("estimatedEPS")),
             eps_surprise=_decimal(row.get("surprise")), eps_surprise_pct=_decimal(row.get("surprisePercentage")),

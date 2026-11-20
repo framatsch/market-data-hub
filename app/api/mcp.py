@@ -31,8 +31,10 @@ import logging
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
+from time import perf_counter
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -40,6 +42,14 @@ from app import response_meta
 from app.cache import cached_call
 from app.config import APP_VERSION
 from app.models.earnings import earnings_today
+from app.observability.audit import audit_log
+from app.observability.metrics import record_data_request, release_cache_misses
+from app.observability.telemetry import (
+    MCP_DATA_TOOLS,
+    RequestTelemetry,
+    canonical_telemetry_symbol,
+    request_telemetry,
+)
 from app.providers.registry import get_registry
 from app.services.company_service import CompanyService
 from app.services.earnings_service import (
@@ -263,16 +273,44 @@ async def _dispatch(method: str, params: dict[str, Any]) -> dict[str, Any] | Non
         return {"tools": TOOL_REGISTRY}
 
     if method == "tools/call":
-        name = params.get("name")
-        if not isinstance(name, str):
-            raise AppError("Tool name must be a string", code="INVALID_PARAMS")
-        args = params.get("arguments", {})
-        handler = TOOL_HANDLERS.get(name)
-        if not handler:
-            raise AppError(f"Unknown tool: {name}", code="UNKNOWN_TOOL")
-        return await handler(args)
+        return await _dispatch_tool(params)
 
     raise AppError(f"Unknown method: {method}", code="UNKNOWN_METHOD")
+
+
+async def _dispatch_tool(params: dict[str, Any]) -> dict[str, Any]:
+    name = params.get("name")
+    handler = TOOL_HANDLERS.get(name) if isinstance(name, str) else None
+    args = params.get("arguments", {})
+    tool = name if isinstance(name, str) and handler is not None else "unknown"
+    telemetry = RequestTelemetry(uuid.uuid4().hex, "mcp", endpoint=MCP_DATA_TOOLS.get(tool, "other"))
+    if isinstance(args, dict):
+        telemetry.symbol = canonical_telemetry_symbol(args.get("symbol"), args.get("sec_type"))
+    success = False
+    token = request_telemetry.set(telemetry)
+    with structlog.contextvars.bound_contextvars(request_id=telemetry.request_id, provider=None):
+        try:
+            if not isinstance(name, str):
+                raise AppError("Tool name must be a string", code="INVALID_PARAMS")
+            if handler is None:
+                raise AppError(f"Unknown tool: {name}", code="UNKNOWN_TOOL")
+            result = await handler(args)
+            success = not result.get("isError", False)
+            return result
+        finally:
+            try:
+                timing = telemetry.finish(perf_counter())
+                if success and telemetry.endpoint != "other":
+                    record_data_request(telemetry, timing.elapsed)
+                log = audit_log.info if success else audit_log.warning
+                log(
+                    "mcp_tool_completed", request_id=telemetry.request_id,
+                    tool=tool, status="ok" if success else "error",
+                    **timing.log_fields(telemetry, success),
+                )
+            finally:
+                release_cache_misses(telemetry)
+                request_telemetry.reset(token)
 
 
 # ---------------------------------------------------------------------------

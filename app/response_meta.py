@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from app.observability.telemetry import current_telemetry
+
 
 @dataclass
 class ResponseMeta:
@@ -30,6 +32,8 @@ class ResponseMeta:
         self.stale_reason = reason
         if source_provider:
             self.source_provider = source_provider
+            if (telemetry := current_telemetry()) is not None:
+                telemetry.data_provider = source_provider
 
     def to_meta(self) -> dict[str, Any]:
         as_of = self.data_as_of or datetime.now(UTC)

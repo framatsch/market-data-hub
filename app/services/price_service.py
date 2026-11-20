@@ -17,13 +17,12 @@
 from datetime import UTC, datetime
 from typing import Any
 
-import structlog
-
 from app import response_meta
 from app.admin.runtime import get_provider_config_repository
 from app.models.common import MarketStatus
 from app.models.price import PriceBar, PriceQuote
 from app.observability.metrics import record_history_store_read
+from app.observability.telemetry import bind_data_provider, current_telemetry
 from app.providers.base import BasePriceProvider
 from app.providers.registry import ProviderRegistry, get_registry
 from app.store import engine, repository
@@ -83,7 +82,7 @@ class PriceService:
         market_data_type: int | None = None,
     ) -> PriceQuote:
         async with self.registry.use_price_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             _check_support(provider, "last", symbol)
             quote = await provider.get_last_price(
                 symbol.root, market_data_type, symbol.sec_type
@@ -135,7 +134,7 @@ class PriceService:
     ) -> Loaded[PriceBar]:
         """Bars of `interval`: natively from the provider or derived from smaller bars."""
         async with self.registry.use_price_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             _check_support(provider, "history", symbol)
             native = provider.native_intervals
             if not isinstance(native, frozenset):  # stand-ins without a declaration
@@ -243,7 +242,7 @@ class PriceService:
         need = min(re, profile.newest_closed(datetime.now(UTC)))
 
         async def lookup() -> list[Any]:
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="read") as session:
                 candidates = await repository.covering_price_series(
                     session, symbol.canonical, provider_name, rs
                 )
@@ -263,11 +262,14 @@ class PriceService:
             meta.data_as_of = series.synced_at
         meta.mark_stale(reason, series.key.provider)
         record_history_store_read("prices", "fallback_provider")
+        if (telemetry := current_telemetry()) is not None:
+            telemetry.store_outcome = "stale"
+            telemetry.data_provider = series.key.provider
         return bars
 
     async def get_market_status(self, provider_name: str | None = None) -> MarketStatus:
         async with self.registry.use_price_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             return await provider.get_market_status()
 
 

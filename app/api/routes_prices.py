@@ -26,6 +26,7 @@ from app.cache import cache
 from app.config import settings
 from app.dependencies import PriceServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
+from app.observability.headers import CSV_RESPONSE_HEADERS
 from app.utils.csv_export import to_csv
 from app.utils.symbols import PRICE_TYPES, ParsedSymbol
 
@@ -34,7 +35,7 @@ router = APIRouter(prefix="/prices", tags=["Prices"])
 PriceSymbol = Annotated[ParsedSymbol, Depends(symbol_param(PRICE_TYPES))]
 
 
-@router.get("/{symbol}/last")
+@router.get("/{symbol}/last", responses={200: {"headers": CSV_RESPONSE_HEADERS}})
 async def get_last_price(
     symbol: PriceSymbol,
     service: PriceServiceDep,
@@ -83,7 +84,7 @@ async def get_last_price(
     return ResponseEnvelope(data=quote)
 
 
-@router.get("/{symbol}/history")
+@router.get("/{symbol}/history", responses={200: {"headers": CSV_RESPONSE_HEADERS}})
 @cache(expire=settings.CACHE_TTL_HISTORICAL_OPEN_BAR_SECONDS)
 async def get_historical_prices(
     symbol: PriceSymbol,

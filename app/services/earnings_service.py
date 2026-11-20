@@ -24,8 +24,9 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
+from typing import cast
 
-import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import response_meta
@@ -36,6 +37,8 @@ from app.models.earnings import (
     NextEarnings,
     earnings_today,
 )
+from app.observability.telemetry import bind_data_provider, current_telemetry
+from app.observability.telemetry import span as telemetry_span
 from app.providers.base import (
     BaseEarningsHistoryProvider,
     BaseEarningsProvider,
@@ -63,14 +66,14 @@ from app.utils.errors import (
     DataValidationError,
     ProviderQuotaExhaustedError,
 )
-from app.utils.symbols import ParsedSymbol, parse_symbol
+from app.utils.symbols import ParsedSymbol, SecType, parse_symbol
 
 logger = logging.getLogger(__name__)
 
 MAX_SYMBOLS = 50
 MAX_RANGE_DAYS = 800
 HISTORY_LOOKBACK_DAYS = 1095
-EARNINGS_TYPES = frozenset({"stock", "etf"})
+EARNINGS_TYPES: frozenset[SecType] = frozenset({"stock", "etf"})
 CALENDAR_KEY = "mdh:earnings:provider-calendar:{provider}:12month"
 DAY_KEY = "mdh:earnings:provider-day:{provider}:{day}"
 SYMBOL_KEY = "mdh:earnings:provider-symbol:{provider}:{root}"
@@ -184,6 +187,41 @@ class _Gathered:
     budget_errors: dict[str, AppError] = field(default_factory=dict)
     calendar_error: AppError | None = None
     calendar_available: bool = True
+    used_store: bool = False
+    from_store: bool = False
+    from_provider: bool = False
+    from_redis: bool = False
+
+
+def _record_sources(*gathers: _Gathered | None, stored_report: bool = False) -> None:
+    telemetry = current_telemetry()
+    if telemetry is None:
+        return
+    results = [gathered for gathered in gathers if gathered is not None]
+    from_store = stored_report or any(result.from_store for result in results)
+    from_provider = any(result.from_provider for result in results)
+    if from_store:
+        telemetry.store_outcome = (
+            "stale" if response_meta.current().stale else "partial" if from_provider else "hit"
+        )
+    elif any(result.used_store for result in results):
+        telemetry.store_outcome = "miss"
+    if not from_store and not from_provider:
+        telemetry.earnings_fallback_hit = any(result.from_redis for result in results)
+
+
+def _kept_stored_event(
+    previous: list[EarningsEvent], current: list[EarningsEvent], fetched: list[EarningsEvent],
+    start: date, end: date,
+) -> bool:
+    def identity(event: EarningsEvent) -> tuple[str, date, date | None]:
+        return event.symbol, event.report_date, event.fiscal_period_end
+
+    retained = {identity(event) for event in previous} - {identity(event) for event in fetched}
+    return any(
+        start <= event.report_date <= end and identity(event) in retained
+        for event in current
+    )
 
 
 @dataclass
@@ -246,7 +284,7 @@ class EarningsService:
         self, work: Callable[[AsyncSession], Awaitable[object]]
     ) -> bool:
         async def run() -> bool:
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="write") as session:
                 await work(session)
             return True
 
@@ -256,7 +294,7 @@ class EarningsService:
         self, provider: str, roots: list[str], start: date, end: date
     ) -> list[EarningsEvent] | None:
         async def load() -> list[EarningsEvent]:
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="read") as session:
                 return await repo.read_events(session, provider, roots, start, end)
 
         return await engine.guarded(load, None)
@@ -267,7 +305,7 @@ class EarningsService:
         window_start = today - timedelta(days=settings.EARNINGS_ACTUALS_WINDOW_DAYS)
 
         async def load() -> _Snapshot:
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="read") as session:
                 events = await repo.read_events(
                     session, provider, roots, min(start, window_start), end
                 )
@@ -301,7 +339,8 @@ class EarningsService:
         if redis is None:
             return None
         try:
-            raw = await redis.get(CALENDAR_KEY.format(provider=provider))
+            async with telemetry_span("redis", "read"):
+                raw = await redis.get(CALENDAR_KEY.format(provider=provider))
             if not raw:
                 return None
             payload = json.loads(raw)
@@ -324,11 +363,12 @@ class EarningsService:
                 "fetched_at": fetched_at.isoformat(),
                 "events": [event.model_dump(mode="json") for event in events],
             }
-            await redis.set(
-                CALENDAR_KEY.format(provider=provider),
-                json.dumps(payload),
-                ex=settings.EARNINGS_CALENDAR_RESYNC_HOURS * 3600,
-            )
+            async with telemetry_span("redis-write", "write"):
+                await redis.set(
+                    CALENDAR_KEY.format(provider=provider),
+                    json.dumps(payload),
+                    ex=settings.EARNINGS_CALENDAR_RESYNC_HOURS * 3600,
+                )
         except Exception:
             logger.debug("Earnings calendar cache write failed", exc_info=True)
 
@@ -426,7 +466,7 @@ class EarningsService:
 
         if plan.calendar_due:
             try:
-                fetched_calendar = await provider.get_upcoming_earnings(
+                fetched_calendar = await cast(BaseEarningsUpcomingProvider, provider).get_upcoming_earnings(
                     today, today + timedelta(days=CALENDAR_HORIZON_DAYS), None
                 )
                 if snapshot is not None:
@@ -449,7 +489,7 @@ class EarningsService:
         for root in plan.history_due:
             attempted.append(root)
             try:
-                events = await provider.get_earnings_history(root)
+                events = await cast(BaseEarningsHistoryProvider, provider).get_earnings_history(root)
             except DataNotFoundError:
                 events = []
                 result.not_found.add(root)
@@ -461,13 +501,13 @@ class EarningsService:
                     break
                 if snapshot is not None:
                     await self._store_call(
-                        lambda s, r=root: repo.mark_failed(s, name, r, now)
+                        partial(repo.mark_failed, provider=name, scope=root, now=now)
                     )
                 continue
             fetched_history[root] = events
             if snapshot is not None:
                 wrote |= await self._store_call(
-                    lambda s, r=root, e=events: repo.upsert_history(s, name, r, e, now)
+                    partial(repo.upsert_history, provider=name, symbol=root, events=events, now=now)
                 )
         skipped = [
             *(root for root in plan.history_due if quota_hit and root not in attempted),
@@ -484,6 +524,15 @@ class EarningsService:
             fetched_history, wrote,
         )
         result.events = reconcile_events(events)
+        result.used_store = snapshot is not None
+        result.from_provider = fetched_calendar is not None or bool(fetched_history)
+        result.from_redis = cached is not None and needs_calendar and fetched_calendar is None
+        if snapshot is not None and current_telemetry() is not None:
+            result.from_store = not result.from_provider or _kept_stored_event(
+                snapshot.events, result.events,
+                [*(fetched_calendar or []), *(e for batch in fetched_history.values() for e in batch)],
+                read_start, read_end,
+            )
         seen = {event.symbol for event in result.events}
         result.known = seen | (snapshot.known if snapshot else set())
 
@@ -533,9 +582,9 @@ class EarningsService:
             ):
                 # A refresh is overdue but paused after a failure: data is stale.
                 code = "PROVIDER_ERROR"
-            for root, exc in result.errors.items():
+            for root, failure in result.errors.items():
                 if root in seen:
-                    code = code or exc.code
+                    code = code or failure.code
             if code:
                 meta.mark_stale(code)
         return result
@@ -552,7 +601,7 @@ class EarningsService:
     ) -> _SymState:
         if use_store:
             async def load() -> _SymState:
-                async with engine.session_scope() as session:
+                async with engine.session_scope(operation="read") as session:
                     events = await repo.read_events(session, name, roots, *span)
                     syncs = await repo.get_syncs(
                         session, name, [*roots, *(repo.day_scope(d) for d in days)]
@@ -582,7 +631,8 @@ class EarningsService:
 
         async def read(key: str) -> tuple[list[EarningsEvent], datetime] | None:
             try:
-                raw = await redis.get(key)
+                async with telemetry_span("redis", "read"):
+                    raw = await redis.get(key)
                 if not raw:
                     return None
                 payload = json.loads(raw)
@@ -617,7 +667,8 @@ class EarningsService:
                 "fetched_at": fetched_at.isoformat(),
                 "events": [event.model_dump(mode="json") for event in events],
             }
-            await redis.set(key, json.dumps(payload), ex=ttl)
+            async with telemetry_span("redis-write", "write"):
+                await redis.set(key, json.dumps(payload), ex=ttl)
         except Exception:
             logger.debug("Earnings cache write failed", exc_info=True)
 
@@ -680,6 +731,7 @@ class EarningsService:
             max(read_end, today + timedelta(days=PLANNER_SPAN_DAYS)),
         )
         state = await self._load_symbol_state(name, roots, days, span, True)
+        initial_state = state
         store = state.store
         budget = getattr(provider, "budget", None)
         result = _Gathered([], {}, set())
@@ -795,6 +847,17 @@ class EarningsService:
         result.events = reconcile_events(
             [e for e in events if e.symbol in selected and read_start <= e.report_date <= read_end]
         )
+        result.used_store = initial_state.store
+        result.from_provider = bool(fetched_days or fetched_symbols)
+        result.from_redis = not initial_state.store and bool(
+            (needs_window and initial_state.eph_days) or initial_state.eph_symbols
+        )
+        if initial_state.store and current_telemetry() is not None:
+            result.from_store = not result.from_provider or _kept_stored_event(
+                initial_state.events, result.events,
+                [e for batch in (*fetched_days.values(), *fetched_symbols.values()) for e in batch],
+                read_start, read_end,
+            )
         seen = {event.symbol for event in result.events}
         result.known = seen | state.known | set(state.symbol_syncs)
         result.calendar_available = not (result.calendar_error and not result.events)
@@ -995,12 +1058,13 @@ class EarningsService:
             up, hist = roles.upcoming, roles.history
             if up is not None and hist is not None and up.name == hist.name:
                 provider = up
-                structlog.contextvars.bind_contextvars(provider=provider.name)
+                bind_data_provider(provider.name)
                 gathered = await self._gather(
                     provider, roots, start, end,
                     fetch_history=kind != "upcoming", fetch_upcoming=kind != "reported",
                     read_start=start, read_end=end,
                 )
+                _record_sources(gathered)
                 events = [e for e in gathered.events if start <= e.report_date <= end]
                 statuses = self._statuses(symbols, gathered, provider, start)
                 composed = None
@@ -1011,7 +1075,7 @@ class EarningsService:
                     composed["upcoming"] = up.name
                 if hist is not None:
                     composed["history"] = hist.name
-                structlog.contextvars.bind_contextvars(provider=",".join(composed.values()))
+                bind_data_provider(*composed.values())
                 up_g = hist_g = None
                 if up is not None:
                     up_g = await self._gather(
@@ -1023,6 +1087,7 @@ class EarningsService:
                         hist, roots, start, end, fetch_history=True, fetch_upcoming=False,
                         read_start=start, read_end=end,
                     )
+                _record_sources(up_g, hist_g)
                 in_range = lambda g: [e for e in (g.events if g else []) if start <= e.report_date <= end]
                 events = self._compose_events(in_range(up_g), in_range(hist_g))
                 statuses = self._merge_statuses(
@@ -1146,7 +1211,7 @@ class EarningsService:
         self, name: str, roots: list[str], today: date
     ) -> dict[str, EarningsEvent]:
         async def load() -> list[EarningsEvent]:
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="read") as session:
                 return await repo.read_events(
                     session, name, roots, today - timedelta(days=HISTORY_LOOKBACK_DAYS), today
                 )
@@ -1169,7 +1234,7 @@ class EarningsService:
             roles = await self._open_roles(stack, provider_name, "upcoming")
             provider = roles.upcoming
             assert provider is not None
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             gathered = await self._gather(
                 provider, roots, today, today + timedelta(days=CALENDAR_HORIZON_DAYS),
                 fetch_history=False,
@@ -1182,6 +1247,7 @@ class EarningsService:
             hist_default = self.registry.default_earnings_history_provider
             if provider_name is None and hist_default and hist_default != provider.name:
                 history_events = await self._stored_last_reported(hist_default, roots, today)
+            _record_sources(gathered, stored_report=bool(history_events))
             by_symbol: dict[str, list[EarningsEvent]] = defaultdict(list)
             for event in gathered.events:
                 by_symbol[event.symbol].append(event)

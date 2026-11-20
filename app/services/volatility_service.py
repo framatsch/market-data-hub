@@ -19,8 +19,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict, cast
 
-import structlog
-
 from app import response_meta
 from app.models.volatility import (
     VolatilityHistory,
@@ -30,6 +28,7 @@ from app.models.volatility import (
     VolatilityTenorDays,
 )
 from app.observability.metrics import record_history_store_read
+from app.observability.telemetry import bind_data_provider
 from app.providers.base import BaseVolatilityProvider
 from app.providers.registry import ProviderRegistry, get_registry
 from app.store import engine
@@ -115,7 +114,7 @@ class VolatilityService:
     ) -> VolatilitySnapshot:
         sec_type = cast(VolatilitySecType, symbol.sec_type)
         async with self.registry.use_volatility_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             self._check_support(provider, "snapshot", sec_type)
             snapshot = await provider.get_implied_volatility(symbol.root, sec_type, ric)
             return snapshot.model_copy(update={"symbol": symbol.canonical})
@@ -132,7 +131,7 @@ class VolatilityService:
     ) -> VolatilityHistory:
         sec_type = cast(VolatilitySecType, symbol.sec_type)
         async with self.registry.use_volatility_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             self._check_support(provider, operation, sec_type, tenor_days)
             history = await provider.get_implied_volatility_history(
                 symbol.root,

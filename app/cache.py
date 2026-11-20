@@ -45,6 +45,8 @@ from app.market_hours import (
     next_transition,
 )
 from app.models.earnings import earnings_today
+from app.observability.metrics import register_cache_miss
+from app.observability.telemetry import current_telemetry, span
 from app.providers.registry import registry
 from app.utils.intervals import normalize_interval
 from app.utils.symbols import ParsedSymbol, parse_symbol
@@ -295,6 +297,20 @@ def _key_parts(key: str | bytes) -> tuple[str, dict[str, str]]:
     return route, dict(parse_qsl(segments[-1]))
 
 
+def _cache_hit_provider(key: str) -> str | None:
+    route, params = _key_parts(key)
+    provider = params.get("provider")
+    if route not in _EARNINGS_ROUTES or not provider or "+" not in provider:
+        return provider
+    upcoming, history = provider.split("+", 1)
+    kind = params.get("kind", "all")
+    return "+".join(
+        name
+        for name, applicable in ((upcoming, kind != "reported"), (history, kind != "upcoming"))
+        if applicable and name != "-"
+    ) or None
+
+
 def _day_granular(params: dict[str, str]) -> None:
     """Daily-or-longer history keys use the UTC date of start and end."""
     try:
@@ -404,6 +420,8 @@ async def mdh_key_builder(
         if raw_symbol
         else None
     )
+    if symbol is not None and (telemetry := current_telemetry()) is not None:
+        telemetry.symbol = symbol.canonical
     await policy.refresh()
     return _compose_key(path, symbol, params)
 
@@ -466,8 +484,10 @@ def cache(
                 if post is not None and not isinstance(result, Response):
                     result = post(result, request if isinstance(request, Request) else None)
                 injected = kwargs.get("__fastapi_cache_response")
-                if response_meta.current().stale and isinstance(injected, Response):
-                    injected.headers["Cache-Control"] = "no-store"
+                if response_meta.current().stale:
+                    _mark_cache_bypass()
+                    if isinstance(injected, Response):
+                        injected.headers["Cache-Control"] = "no-store"
                 if (
                     isinstance(result, Response)
                     and isinstance(injected, Response)
@@ -495,17 +515,40 @@ async def cached_call(
     refresh: bool = False,
 ) -> Any:
     """Cache MCP domain data, never exceptions, using the HTTP backend and policy."""
+    token = response_meta.begin() if response_meta.current_or_none() is None else None
+    try:
+        return await _cached_call(route_key, symbol, params, loader, refresh=refresh)
+    finally:
+        if token is not None:
+            response_meta.end(token)
+
+
+async def _cached_call(
+    route_key: str,
+    symbol: ParsedSymbol | None,
+    params: dict[str, Any],
+    loader: Callable[[], Awaitable[Any]],
+    *,
+    refresh: bool,
+) -> Any:
     if not FastAPICache.get_enable():
+        _mark_cache_bypass()
         return await loader()
     await policy.refresh()
     key = _compose_key(route_key, symbol, {**params, "channel": "mcp"})
     backend = FastAPICache.get_backend()
-    if not refresh:
+    if refresh:
+        _mark_cache_bypass()
+    else:
         try:
             value = await backend.get(key)
             if value is not None:
                 return MdhJsonCoder.decode(value)
         except Exception as exc:
+            telemetry = current_telemetry()
+            if telemetry is not None and telemetry.cache_status == "hit":
+                telemetry.data_provider = None
+            _mark_cache_bypass()
             logger.warning(
                 "MCP cache read failed (%s); serving live data", type(exc).__name__
             )
@@ -517,6 +560,12 @@ async def cached_call(
             "MCP cache write failed (%s); serving live data", type(exc).__name__
         )
     return result
+
+
+def _mark_cache_bypass() -> None:
+    if (telemetry := current_telemetry()) is not None:
+        telemetry.cache_status = "bypass"
+        telemetry.ttl_seconds = None
 
 
 class FailOpenRedisBackend(RedisBackend):
@@ -543,12 +592,24 @@ class FailOpenRedisBackend(RedisBackend):
         if time.monotonic() < self.retry_at:
             return 0, None
         try:
-            result = await super().get_with_ttl(key)
-            self.recovered()
-            return result
+            async with span("redis", "read"):
+                ttl, value = await super().get_with_ttl(key)
         except Exception:
             self.failed()
             return 0, None
+        self.recovered()
+        telemetry = current_telemetry()
+        state = response_meta.current_or_none()
+        if telemetry is not None and not (state and state.no_cache):
+            if value is None:
+                telemetry.cache_status = "miss"
+                telemetry.ttl_seconds = 0
+                register_cache_miss(telemetry, key)
+            else:
+                telemetry.cache_status = "hit"
+                telemetry.ttl_seconds = ttl
+                telemetry.data_provider = _cache_hit_provider(key)
+        return ttl, value
 
     async def get(self, key: str) -> bytes | None:
         return (await self.get_with_ttl(key))[1]
@@ -562,10 +623,15 @@ class FailOpenRedisBackend(RedisBackend):
         request = _request.get()
         if request is not None:
             request.scope["mdh_cache_ttl"] = ttl
+        telemetry = current_telemetry()
         if ttl == 0 or time.monotonic() < self.retry_at:
+            _mark_cache_bypass()
             return
         try:
-            await super().set(key, value, ttl)
+            async with span("redis-write", "write"):
+                await super().set(key, value, ttl)
+            if telemetry is not None and telemetry.cache_status == "miss":
+                telemetry.ttl_seconds = ttl
             self.recovered()
         except Exception:
             self.failed()

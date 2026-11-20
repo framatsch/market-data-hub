@@ -24,6 +24,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from structlog.contextvars import bound_contextvars
 
 from app.api import (
     routes_admin,
@@ -39,7 +40,12 @@ from app.cache import CacheControlMiddleware, setup_cache, shutdown_cache
 from app.config import APP_VERSION, settings
 from app.logging_config import get_uvicorn_log_config, setup_logging
 from app.observability.audit import setup_structlog
-from app.observability.middleware import ObservabilityMiddleware
+from app.observability.headers import EXPOSED_HEADERS
+from app.observability.middleware import (
+    ObservabilityMiddleware,
+    data_response_headers,
+    request_id_for,
+)
 from app.store.engine import setup_store, shutdown_store
 from app.utils.errors import AppError, ErrorDetail, ErrorResponse
 
@@ -131,11 +137,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=EXPOSED_HEADERS,
 )
 
-# Starlette applies middleware in reverse registration order, so this runs after CORS.
-app.add_middleware(ObservabilityMiddleware)
 app.add_middleware(CacheControlMiddleware)
+# Observe the response after both inner middlewares have finalised the headers.
+app.add_middleware(ObservabilityMiddleware)
 
 # REST routers
 app.include_router(routes_meta.router)
@@ -280,8 +287,20 @@ async def app_error_handler(request: Request, exc: AppError) -> Any:
 @app.exception_handler(Exception)
 async def general_error_handler(request: Request, exc: Exception) -> Any:
     """Handle unexpected errors."""
-    logger.error(f"Unexpected error: {exc}", exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    # Starlette sends unhandled 500s outside user middleware, after context reset.
+    telemetry = request.scope.get("mdh_telemetry")
+    request_id = telemetry.request_id if telemetry is not None else request_id_for(request)
+    with bound_contextvars(request_id=request_id):
+        logger.error(f"Unexpected error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers=(
+            data_response_headers(telemetry, 500)
+            if telemetry is not None
+            else {"X-Request-ID": request_id}
+        ),
+    )
 
 
 if __name__ == "__main__":

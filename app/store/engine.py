@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
 from app.config import settings
+from app.observability.telemetry import span
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -115,11 +116,13 @@ async def guarded(call: Callable[[], Awaitable[T]], default: T) -> T:
 
 
 @asynccontextmanager
-async def session_scope() -> AsyncIterator[AsyncSession]:
+async def session_scope(
+    *, operation: Literal["read", "write"] = "read"
+) -> AsyncIterator[AsyncSession]:
     """Transactional session; raises when the store is off (callers use `guarded`)."""
     if _sessions is None:
         raise RuntimeError("History store is not configured")
-    async with _sessions() as session, session.begin():
+    async with span("db", operation), _sessions() as session, session.begin():
         yield session
 
 

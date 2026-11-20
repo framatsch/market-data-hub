@@ -24,6 +24,7 @@ from app.cache import cache
 from app.config import APP_VERSION, settings
 from app.dependencies import PriceServiceDep
 from app.models.common import HealthResponse, MarketStatus, ResponseEnvelope
+from app.observability.headers import DATA_RESPONSE_HEADERS
 from app.observability.metrics import metrics_response
 from app.providers.registry import get_registry
 
@@ -62,7 +63,10 @@ async def get_metrics() -> Any:
     )
 
 
-@router.get("/market-status", response_model=ResponseEnvelope[MarketStatus])
+@router.get(
+    "/market-status", response_model=ResponseEnvelope[MarketStatus],
+    responses={200: {"headers": DATA_RESPONSE_HEADERS}},
+)
 @cache(expire=settings.CACHE_TTL_MARKET_STATUS_SECONDS, key="market-status")
 async def get_market_status(
     service: PriceServiceDep,

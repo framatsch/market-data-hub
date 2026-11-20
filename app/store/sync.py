@@ -40,6 +40,7 @@ from app.market_hours import (
 from app.models.price import PriceBar
 from app.models.volatility import VolatilityPoint
 from app.observability.metrics import record_history_store_read
+from app.observability.telemetry import StoreOutcome, current_telemetry
 from app.store import engine, repository
 from app.store.repository import Series, SeriesKey, midnight
 from app.utils.errors import AppError
@@ -307,7 +308,7 @@ class HistorySync:
     ) -> Served[Any]:
         now = as_utc(now_override or datetime.now(UTC))
         rs, re = profile.request_range(start, end)
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="write") as session:
             series = await repository.get_or_create_series(
                 session, key, sec_type, source_interval
             )
@@ -325,7 +326,7 @@ class HistorySync:
                         raise
                     changed = False  # retry on the next request
             if changed:
-                async with engine.session_scope() as session:
+                async with engine.session_scope(operation="write") as session:
                     await repository.update_series(
                         session, series.id, source_interval=source_interval
                     )
@@ -354,14 +355,14 @@ class HistorySync:
                 )
                 if reloaded:
                     result = "reload"
-                async with engine.session_scope() as session:
+                async with engine.session_scope(operation="read") as session:
                     series = await repository.get_series(session, key) or series
         except Exception as exc:
             if not is_transient(exc):
                 raise
             stale_reason = getattr(exc, "code", "PROVIDER_ERROR")
             runtime.last_error = stale_reason
-            async with engine.session_scope() as session:
+            async with engine.session_scope(operation="write") as session:
                 await repository.update_series(session, series.id, sync_failed_at=now)
                 series = await repository.get_series(session, key) or series
             if not self._covers(profile, series, rs):
@@ -382,11 +383,22 @@ class HistorySync:
             ):
                 stale_reason = runtime.last_error
                 result = "stale"
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="read") as session:
             items = await self._read(session, profile, series, rs, re, start, end)
         if stale_reason is None:
             items = self._with_forming(profile, items, runtime, rs, re, now)
         record_history_store_read(profile.metric_dataset, result)
+        if (telemetry := current_telemetry()) is not None:
+            outcomes: dict[str, StoreOutcome] = {
+                "store": "hit",
+                "tail_sync": "partial",
+                "backfill": "partial",
+                "full_load": "miss",
+                "reload": "miss",
+                "stale": "stale",
+            }
+            telemetry.store_outcome = outcomes.get(result)
+            telemetry.data_provider = key.provider
         return Served(
             items=items,
             data_as_of=series.synced_at,
@@ -463,7 +475,7 @@ class HistorySync:
         position_end = min(
             profile.newest_closed(now), profile.request_range(step.start, end)[1]
         )
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="write") as session:
             await self._write(session, profile, series, closed, replace=False)
             fields: dict[str, Any] = {"synced_at": now, "sync_failed_at": None}
             if loaded.source_instrument:
@@ -541,7 +553,7 @@ class HistorySync:
         runtime: _Runtime,
     ) -> bool:
         overlap = settings.HISTORY_STORE_OVERLAP_BARS
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="read") as session:
             stored: list[Any]
             if profile.dataset == "iv":
                 stored = await repository.newest_points(session, series, overlap)
@@ -571,7 +583,7 @@ class HistorySync:
                 key, profile, series, loader, now, runtime, series.source_interval
             )
         newest_positions = sorted(profile.position(item) for item in closed)
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="write") as session:
             await self._write(session, profile, series, closed, replace=False)
             covered_to = self._covered_to(
                 profile,
@@ -613,7 +625,7 @@ class HistorySync:
         if not closed:
             return False  # an empty answer must not wipe the stored rows
         positions = sorted(profile.position(item) for item in closed)
-        async with engine.session_scope() as session:
+        async with engine.session_scope(operation="write") as session:
             await self._write(session, profile, series, closed, replace=True)
             fields: dict[str, Any] = {
                 "synced_at": now,

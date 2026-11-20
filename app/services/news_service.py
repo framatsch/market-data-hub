@@ -16,9 +16,8 @@
 
 from datetime import date
 
-import structlog
-
 from app.models.news import NewsArticle
+from app.observability.telemetry import bind_data_provider
 from app.providers.registry import ProviderRegistry, get_registry
 from app.utils.symbols import ParsedSymbol
 
@@ -39,7 +38,7 @@ class NewsService:
         category: str | None = None,
     ) -> list[NewsArticle]:
         async with self.registry.use_news_provider(provider_name) as provider:
-            structlog.contextvars.bind_contextvars(provider=provider.name)
+            bind_data_provider(provider.name)
             return await provider.get_company_news(
                 symbol=symbol.root,
                 from_date=from_date,

@@ -27,6 +27,7 @@ from app.cache import cache
 from app.config import settings
 from app.dependencies import OptionsServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
+from app.observability.headers import CSV_RESPONSE_HEADERS
 from app.utils.csv_export import to_csv
 from app.utils.symbols import OPTION_UNDERLYING_TYPES, ParsedSymbol, strip_option_prefix
 
@@ -37,7 +38,7 @@ UnderlyingSymbol = Annotated[
 ]
 
 
-@router.get("/{symbol}/chain")
+@router.get("/{symbol}/chain", responses={200: {"headers": CSV_RESPONSE_HEADERS}})
 @cache(expire=settings.CACHE_TTL_OPTION_CHAIN_SECONDS)
 async def get_option_chain(
     symbol: UnderlyingSymbol,
@@ -106,7 +107,7 @@ async def get_option_chain(
     return response_meta.envelope(chain)
 
 
-@router.get("/{symbol}/quote/{option_id}")
+@router.get("/{symbol}/quote/{option_id}", responses={200: {"headers": CSV_RESPONSE_HEADERS}})
 async def get_option_quote(
     symbol: UnderlyingSymbol,
     option_id: str,

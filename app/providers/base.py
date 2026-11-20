@@ -15,8 +15,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime
 from decimal import Decimal
+from functools import wraps
 from typing import Any, Literal
 
 from app.models.common import MarketStatus
@@ -31,10 +35,51 @@ from app.models.volatility import (
     VolatilitySnapshot,
     VolatilityTenorDays,
 )
+from app.observability.telemetry import PROVIDER_OPERATIONS, current_telemetry, span
 from app.utils.errors import CapabilityNotSupportedError
 
+_inside_provider_call = ContextVar("mdh_inside_provider_call", default=False)
 
-class BasePriceProvider(ABC):
+
+@contextmanager
+def suppress_provider_timing() -> Iterator[None]:
+    token = _inside_provider_call.set(True)
+    try:
+        yield
+    finally:
+        _inside_provider_call.reset(token)
+
+
+def _observed(method: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    @wraps(method)
+    async def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        if _inside_provider_call.get():
+            return await method(self, *args, **kwargs)
+        with suppress_provider_timing():
+            if (telemetry := current_telemetry()) is not None:
+                telemetry.provider_names.add(self.name)
+            async with span("provider", method.__name__, provider=self.name):
+                return await method(self, *args, **kwargs)
+
+    wrapped.__dict__["_mdh_observed"] = True
+    return wrapped
+
+
+class _ObservedProvider(ABC):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # A single cooperative hook covers providers with multiple capabilities.
+        for operation in PROVIDER_OPERATIONS & cls.__dict__.keys():
+            method = cls.__dict__[operation]
+            if (
+                callable(method)
+                and not getattr(method, "__isabstractmethod__", False)
+                and not getattr(method, "_mdh_observed", False)
+            ):
+                setattr(cls, operation, _observed(method))
+
+
+class BasePriceProvider(_ObservedProvider):
     name = "none"
     # Instrument types the hub has implemented a native mapping for. These describe
     # code, never the user's subscription (see PROVIDER_NOT_ENTITLED for that).
@@ -76,7 +121,7 @@ class BasePriceProvider(ABC):
         raise NotImplementedError("Market status not implemented for this provider")
 
 
-class BaseCompanyProvider(ABC):
+class BaseCompanyProvider(_ObservedProvider):
     name = "none"
 
     def configure(self, config: Any) -> None:
@@ -97,7 +142,7 @@ class BaseCompanyProvider(ABC):
         """Test provider connectivity and return status_code/success/message/details."""
 
 
-class BaseOptionsProvider(ABC):
+class BaseOptionsProvider(_ObservedProvider):
     name = "none"
     option_underlying_sec_types: frozenset[str] = frozenset({"stock", "etf"})
 
@@ -129,7 +174,7 @@ class BaseOptionsProvider(ABC):
         """Test provider connectivity and return status_code/success/message/details."""
 
 
-class BaseNewsProvider(ABC):
+class BaseNewsProvider(_ObservedProvider):
     """Abstract base class for news data providers."""
 
     name = "none"
@@ -179,7 +224,7 @@ def _upcoming_unsupported(provider: str) -> CapabilityNotSupportedError:
     return CapabilityNotSupportedError(provider, "upcoming earnings", sec_type="stock", supported=[])
 
 
-class BaseEarningsProvider(ABC):
+class BaseEarningsProvider(_ObservedProvider):
     """Common base of the two earnings interfaces (upcoming dates, reported history)."""
 
     name = "none"
@@ -227,7 +272,7 @@ class BaseEarningsHistoryProvider(BaseEarningsProvider):
         """Fetch reported events for one stock."""
 
 
-class BaseVolatilityProvider(ABC):
+class BaseVolatilityProvider(_ObservedProvider):
     """Underlying implied volatility, separate from per-contract options data."""
 
     name = "none"
