@@ -3,6 +3,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -564,3 +565,96 @@ async def test_unknown_expiry_in_listed_month_is_cached(make_provider, monkeypat
         chain = await provider.get_option_chain("AAPL", date(2026, 12, 4), Decimal(345), Decimal(350))
         assert (chain.options, chain.provider) == ([], "ibkrweb")
     assert [path for path, _ in calls].count(OPTION_INFO) == 3
+
+
+@pytest.mark.parametrize(("hours", "expected"), [((-1, 1), True), ((-3, -1), False)])
+async def test_market_open_evaluates_todays_trading_schedule(make_provider, hours, expected):
+    # Built around "now" so the D9 evaluation runs on every day, not only on the fixture date.
+    now = datetime.now(UTC)
+    zone = "US/Eastern"
+    today = now.astimezone(ZoneInfo(zone)).strftime("%Y%m%d")
+    opening, closing = (int((now + timedelta(hours=offset)).timestamp()) for offset in hours)
+
+    def handle(path, _params):
+        if path == "trsrv/stocks":
+            return DATA["stocks"]
+        if path == SCHEDULE:
+            return {"exchange_time_zone": zone,
+                    "schedules": {today: {"extended_hours": [{"opening": opening, "closing": closing}]}}}
+        assert path == SNAPSHOT
+        return DATA["snapshot"]
+
+    provider, _ = make_provider(handle)
+    assert (await provider.get_last_price("AAPL")).is_market_open is expected
+
+
+async def test_cold_chain_looks_up_strikes_concurrently(make_provider, monkeypatch):
+    monkeypatch.setattr(ibkr_web_contracts, "_ttl", lambda _day: 3600)
+    expiry = date(2026, 12, 18)
+
+    def handle(path, params):
+        if path == SEARCH:
+            return DATA["search_AAPL"]
+        if path == "iserver/secdef/strikes":
+            return DATA["strikes"]
+        if path == OPTION_INFO:
+            return [{**row, "strike": float(params["strike"])} for row in DATA["option_info"]]
+        assert path == SNAPSHOT
+        return []
+
+    provider, _ = make_provider(handle)
+    in_flight = peak = 0
+    request = provider.session.request
+
+    async def tracking(path, **kwargs):
+        nonlocal in_flight, peak
+        if path != OPTION_INFO:
+            return await request(path, **kwargs)
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        try:
+            return await request(path, **kwargs)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(provider.session, "request", tracking)
+    monkeypatch.setattr(settings, "IBKRWEB_OPTION_SNAPSHOT_TIMEOUT_SECONDS", 0.1)
+    chain = await provider.get_option_chain("AAPL", expiry, Decimal(345), Decimal(350))
+    assert {option.strike for option in chain.options} == {Decimal(345), Decimal("347.5"), Decimal(350)}
+    assert peak == 3
+
+
+async def test_ibkrweb_admin_routes_require_auth(api_registry, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_AUTH_ENABLED", True)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http:
+        base = "/api/admin/providers/ibkrweb"
+        responses = [
+            await http.put(f"{base}/gateway", json={"compete": True}),
+            await http.get(f"{base}/session"),
+            await http.post(f"{base}/session/init"),
+            await http.post(f"{base}/session/logout"),
+        ]
+    assert [response.status_code for response in responses] == [401] * 4
+
+
+async def test_registry_reload_survives_failing_reconfigure(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "ENABLED_PROVIDERS", "none")
+    repo = ProviderConfigRepository(str(tmp_path / "keys.db"))
+    defaults = SettingsRepository(str(tmp_path / "keys.db"))
+    reg = ProviderRegistry()
+    try:
+        await repo.save("ibkrweb", {"enabled": True})
+        await reg.reload_from_config(repo, defaults)
+        provider = reg.get_provider_instance("ibkrweb")
+
+        def broken(_config):
+            raise FileNotFoundError("ca bundle removed")
+
+        monkeypatch.setattr(provider, "requires_replacement", broken)
+        await repo.save("mock", {"enabled": True})
+        await reg.reload_from_config(repo, defaults)  # must not raise
+        assert reg.get_provider_instance("ibkrweb") is provider
+        assert reg.get_provider_instance("mock") is not None
+    finally:
+        await reg.shutdown()

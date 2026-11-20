@@ -57,6 +57,7 @@
 - [x] 6b.4 Keep-alive survives unexpected exceptions and logs failures once; admin logout sends no login alert
 - [x] 6b.5 Last-price fallback failure keeps the entitlement error; history ranges above 40 windows rejected up front
 - [x] 6b.6 Option chain tolerates rejected strikes, caches missing strikes and unknown expiries
+- [x] 6b.8 Cold chains look up strikes concurrently (≤ 4); two tickle timeouts mark a hung gateway `unreachable`; a failing reconfigure no longer aborts the registry reload; tests for D9 market-open, webhook payload, session gauge and admin auth
 - [x] 6b.7 `login_url` setting for the browser login button; readable 422 messages; tests for all of the above
 
 ## 7. Deployment, docs and verification

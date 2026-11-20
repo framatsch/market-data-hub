@@ -106,6 +106,8 @@ _MISSING = TypeAdapter(bool)
 # Strikes without a contract for an expiry (e.g. outside the weekly strike range) are looked up again only after this.
 _MISSING_TTL = 6 * 3600
 _MISSING_EXPIRY_TTL = 3600
+# Concurrent secdef/info lookups for a cold chain; the gateway pacer still bounds the request rate.
+_INFO_CONCURRENCY = 4
 
 
 def stock_root(root: str) -> str:
@@ -355,18 +357,27 @@ class IbkrWebContracts:
             elif not await self._cache.get(self._missing_key(root, expiry, strike, right), _MISSING):
                 missing.setdefault(strike, set()).add(right)
         ttl = _ttl(expiry + timedelta(days=1))
-        for strike, rights in missing.items():
+        path = "iserver/secdef/info"
+        limit = asyncio.Semaphore(_INFO_CONCURRENCY)
+
+        async def lookup(strike: Decimal, rights: set[str]) -> list[_Object]:
             params: dict[str, Any] = {
                 "conid": underlying.conid, "sectype": "OPT", "month": _month(expiry),
                 "strike": f"{strike:f}", "exchange": "SMART",
             }
             if len(rights) == 1:
                 params["right"] = next(iter(rights))
-            path = "iserver/secdef/info"
-            try:
-                rows = _objects(await self._session.request(path, params=params, expected=list), path)
-            except (DataNotFoundError, DataValidationError):
-                rows = []  # the gateway rejects strikes it does not list; skip only this strike
+            async with limit:
+                try:
+                    return _objects(await self._session.request(path, params=params, expected=list), path)
+                except (DataNotFoundError, DataValidationError):
+                    return []  # the gateway rejects strikes it does not list; skip only this strike
+
+        # A TaskGroup cancels the remaining lookups as soon as one fails with a real error.
+        async with asyncio.TaskGroup() as group:
+            tasks = {strike: group.create_task(lookup(strike, rights)) for strike, rights in missing.items()}
+        for strike, rights in missing.items():
+            rows = tasks[strike].result()
             # Prefer the standard trading class to adjusted contracts with the same strike.
             rows.sort(key=lambda row: row.get("tradingClass") != root)
             for row in rows:

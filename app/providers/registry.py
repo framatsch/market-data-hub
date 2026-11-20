@@ -268,7 +268,11 @@ class ProviderRegistry:
             for name in enabled:
                 config = configs[name]
                 existing = next_providers.get(name)
-                replace = isinstance(existing, IbkrWebProvider) and existing.requires_replacement(config)
+                try:
+                    replace = isinstance(existing, IbkrWebProvider) and existing.requires_replacement(config)
+                except Exception as exc:
+                    logger.error("Failed to evaluate config of provider '%s': %s", name, exc)
+                    continue
                 if existing is None or replace:
                     try:
                         provider = self.provider_classes[name]()
@@ -286,9 +290,12 @@ class ProviderRegistry:
                         )
                         continue
                 else:
-                    self._apply_runtime_config(existing, config)
-                    if isinstance(existing, IbkrWebProvider):
-                        existing.start()
+                    try:
+                        self._apply_runtime_config(existing, config)
+                        if isinstance(existing, IbkrWebProvider):
+                            existing.start()
+                    except Exception as exc:
+                        logger.error("Failed to reconfigure provider '%s': %s", name, exc)
 
             for name, provider in current_providers.items():
                 replacement = next_providers.get(name)

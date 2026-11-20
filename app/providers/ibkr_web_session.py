@@ -50,6 +50,7 @@ _SHARED_PENALTIES: dict[str, float] = {}
 # Only the newest session may write the state gauge; a closed predecessor must not reset it.
 _gauge_owner: "IbkrWebSession | None" = None
 _RECHECK_INTERVAL_SECONDS = 30.0
+_HUNG_TICKLES = 2  # consecutive keep-alive timeouts before the gateway counts as unreachable
 
 
 class GatewayPacer:
@@ -158,6 +159,7 @@ class IbkrWebSession:
         self._last_recheck = -math.inf
         self._refresh_failure: tuple[float, AppError] | None = None
         self._keep_alive_error: str | None = None
+        self._tickle_timeouts = 0
 
     @property
     def state(self) -> str:
@@ -311,6 +313,14 @@ class IbkrWebSession:
                 await self.tickle()
             except asyncio.CancelledError:
                 raise
+            except ProviderTimeoutError as exc:
+                if exc.details.get("reason") == "rate_limited":
+                    continue
+                self._tickle_timeouts += 1
+                if self._tickle_timeouts >= _HUNG_TICKLES and self._state == "ready":
+                    # The next request re-checks the session instead of trusting a stale "ready".
+                    self._set_state("unreachable", "Client Portal Gateway did not answer the keep-alive")
+                self._log_keep_alive_failure(exc.message)
             except AppError as exc:
                 self._last_error = exc.message
                 self._log_keep_alive_failure(exc.message)
@@ -318,6 +328,7 @@ class IbkrWebSession:
                 self._last_error = f"Keep-alive failed: {type(exc).__name__}"
                 self._log_keep_alive_failure(self._last_error, unexpected=True)
             else:
+                self._tickle_timeouts = 0
                 if self._keep_alive_error is not None:
                     logger.info("IBKR Web API keep-alive recovered")
                 self._keep_alive_error = None

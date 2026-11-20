@@ -482,3 +482,70 @@ def test_login_url_is_reported_for_login_required():
     for invalid in ("http://localhost:5000", "https://user@localhost:5000", "localhost:5000"):
         with pytest.raises(ValidationError, match="login_url"):
             IbkrWebConnectionConfig(base_url="https://localhost:5000", verify_tls=False, login_url=invalid)
+
+
+async def test_hung_gateway_leaves_ready_after_repeated_tickle_timeouts(session_factory):
+    calls = []
+    base = ready_handler(calls, lambda _path: pytest.fail("no data request expected"))
+
+    def handle(request):
+        if request.url.path == TICKLE:
+            calls.append(TICKLE)
+            raise httpx.ReadTimeout("hung", request=request)
+        return base(request)
+
+    ticks = 0
+
+    async def sleep(_delay):
+        nonlocal ticks
+        ticks += 1
+        if ticks > 2:
+            raise asyncio.CancelledError
+
+    session = session_factory(handle, sleep=sleep)
+    await session.ensure_ready()
+    with pytest.raises(asyncio.CancelledError):
+        await session._run_keep_alive()
+    assert calls.count(TICKLE) == 2
+    assert session.state == "unreachable"
+    assert "keep-alive" in session.status()["last_error"]
+
+
+async def test_login_alert_payload_and_failure_only_logged(session_factory, monkeypatch, caplog):
+    from app.providers import ibkr_web_session
+
+    sent = []
+
+    def webhook(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(500 if len(sent) > 1 else 200)
+
+    session = session_factory(lambda _request: httpx.Response(401), login_url="https://localhost:5443")
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(ibkr_web_session, "validate_webhook_url", lambda _url: None)
+    monkeypatch.setattr(
+        ibkr_web_session.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(webhook), **kwargs),
+    )
+    await session._send_alert("https://hooks.example/abc")
+    assert sent == [{"text": "IBKR Client Portal Gateway login required — log in at https://localhost:5443"}]
+    await session._send_alert("https://hooks.example/abc")  # HTTP 500 from the webhook
+    assert "login alert failed" in caplog.text
+
+
+async def test_session_gauge_follows_the_active_session(session_factory):
+    from app.observability.metrics import PROVIDER_SESSION_STATE
+
+    def gauge(state):
+        return PROVIDER_SESSION_STATE.labels("ibkrweb", state)._value.get()
+
+    calls = []
+    first = session_factory(ready_handler(calls, lambda _path: httpx.Response(200, json={})))
+    await first.ensure_ready()
+    assert (gauge("ready"), gauge("unknown")) == (1, 0)
+    second = session_factory(lambda request: httpx.Response(401))
+    second.start()
+    await first.close()  # the replaced session must not reset the successor's gauge
+    assert (gauge("unknown"), gauge("ready")) == (1, 0)
+    await second.close()
+    assert gauge("unknown") == 0
