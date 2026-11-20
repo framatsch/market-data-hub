@@ -1,8 +1,10 @@
 """Pay-per-request Financial Datasets, implemented against its pinned schema."""
 
+import logging
 from collections import defaultdict
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from hashlib import sha1
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -11,19 +13,25 @@ import httpx
 from app.market_hours import ET, as_utc, week_monday
 from app.models.company import CompanyProfile
 from app.models.earnings import EarningsEvent
+from app.models.news import NewsArticle
 from app.models.price import PriceBar, PriceQuote
 from app.providers.base import (
     BaseCompanyProvider,
     BaseEarningsHistoryProvider,
+    BaseNewsProvider,
     BasePriceProvider,
 )
 from app.providers.metered import MeteredHttpProvider
+from app.providers.news_categories import detect_category
 from app.utils.errors import (
     CapabilityNotSupportedError,
     DataNotFoundError,
     DataValidationError,
     ProviderError,
 )
+
+logger = logging.getLogger(__name__)
+NEWS_LIMIT = 10
 
 # Even late SEC filers report within 90 days of period end; anything later is a comparative.
 MAX_FILING_LAG = timedelta(days=120)
@@ -46,6 +54,14 @@ def _price_day(raw: str) -> date:
     return as_utc(datetime.fromisoformat(raw.replace("Z", "+00:00"))).astimezone(ET).date()
 
 
+def _news_day(raw: str) -> date:
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        # The schema says date-only, but the live API also returns ISO timestamps.
+        return as_utc(datetime.fromisoformat(raw)).date()
+
+
 def _report_time(row: dict[str, Any]) -> str:
     window = row.get("filing_window")
     if window == "PRE_MARKET":
@@ -61,7 +77,9 @@ def _report_time(row: dict[str, Any]) -> str:
     return "unknown"
 
 
-class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseCompanyProvider, BaseEarningsHistoryProvider):
+class FinancialDatasetsProvider(
+    MeteredHttpProvider, BasePriceProvider, BaseCompanyProvider, BaseEarningsHistoryProvider, BaseNewsProvider
+):
     name = "financialdatasets"
     base_url = "https://api.financialdatasets.ai"
     native_intervals = frozenset({"1d", "1w"})
@@ -93,6 +111,52 @@ class FinancialDatasetsProvider(MeteredHttpProvider, BasePriceProvider, BaseComp
             seen.add(next_page)
             # Follow the opaque cursor as-is; don't reconstruct its original filters.
             params = dict(httpx.QueryParams(parsed.query))
+
+    async def get_company_news(
+        self,
+        symbol: str,
+        from_date: date,
+        to_date: date,
+        limit: int = 20,
+        offset: int = 0,
+        language: str = "en",
+        category: str | None = None,
+    ) -> list[NewsArticle]:
+        if language != "en":
+            return []
+
+        symbol = symbol.upper()
+        rows = await self._pages("/news", {"ticker": symbol, "limit": NEWS_LIMIT}, symbol, field="news")
+        articles = []
+        for row in rows[:NEWS_LIMIT]:
+            if not isinstance(row, dict):
+                logger.debug("Skipping malformed Financial Datasets news for %s", symbol)
+                continue
+            title, url = row.get("title"), row.get("url")
+            if not isinstance(title, str) or not title.strip() or not isinstance(url, str) or not url.strip():
+                logger.debug("Skipping Financial Datasets news without a title or URL for %s", symbol)
+                continue
+            try:
+                day = _news_day(row["date"])
+            except (KeyError, TypeError, ValueError):
+                logger.debug("Skipping Financial Datasets news with an invalid date for %s", symbol)
+                continue
+            if not from_date <= day <= to_date:
+                continue
+            detected = detect_category(title)
+            if category and detected != category:
+                continue
+
+            source = row.get("source")
+            url_hash = sha1(url.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+            articles.append(NewsArticle(
+                article_id=f"{self.name}:{url_hash}", title=title, summary="",
+                published_at=datetime.combine(day, time(), UTC),
+                source=source if isinstance(source, str) else "", url=url, category=detected,
+            ))
+
+        articles.sort(key=lambda article: article.published_at, reverse=True)
+        return articles[offset:offset + limit]
 
     async def get_earnings_history(self, root: str) -> list[EarningsEvent]:
         root = root.upper()

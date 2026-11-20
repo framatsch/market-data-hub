@@ -21,7 +21,6 @@ https://finnhub.io/docs/api/company-news
 
 import asyncio
 import logging
-import re
 import time
 from collections import deque
 from datetime import UTC, date, datetime
@@ -32,6 +31,7 @@ import httpx
 from app.config import settings
 from app.models.news import NewsArticle
 from app.providers.base import BaseNewsProvider
+from app.providers.news_categories import detect_category
 from app.utils.errors import DataNotFoundError, ProviderConnectionError, ProviderError
 
 logger = logging.getLogger(__name__)
@@ -60,46 +60,6 @@ class FinnhubProvider(BaseNewsProvider):
 
         # HTTP client
         self._client: httpx.AsyncClient | None = None
-
-        # Category keywords for sentiment-based categorization
-        self._category_keywords = {
-            "earnings": [
-                r"\bearnings?\b",
-                r"\beps\b",
-                r"\brev(enue)?\b",
-                r"\bguidance\b",
-                r"\bprofit\b",
-                r"\bloss\b",
-                r"\bmargin\b",
-                r"\bshares?\b",
-                r"\bdividend\b",
-                r"\bq[1-4]\s*result",
-                r"\bfiscal\b",
-            ],
-            "merger": [
-                r"\b(m&a|merger|acquisition|acquires?|acquired|deal)\b",
-                r"\btakeover\b",
-                r"\bipo\b",
-                r"\bspac\b",
-                r"\bmarket cap\b",
-                r"\b(buyout|buy[- ]?out)\b",
-                r"\bcombination\b",
-            ],
-            "product": [
-                r"\b(launch|release|announce|unveiled?|new\s+product)\b",
-                r"\b(app|service|feature|update|version)\b",
-                r"\bsoftware\b",
-                r"\bhardware\b",
-                r"\bdevice\b",
-                r"\bplatform\b",
-            ],
-            "legal": [
-                r"\b(lawsuit|sued|settlement|conviction|guilty)\b",
-                r"\b(regulatory|fda|sec|antitrust|investigation)\b",
-                r"\b(fine|penalty|compliance|illegal)\b",
-                r"\blegal\b",
-            ],
-        }
 
         logger.info("FinnhubProvider initialized")
 
@@ -192,12 +152,9 @@ class FinnhubProvider(BaseNewsProvider):
         """
         text = f"{headline} {summary or ''}".lower()
 
-        # Try keyword matching first
-        for category, keywords in self._category_keywords.items():
-            for pattern in keywords:
-                if re.search(pattern, text, re.IGNORECASE):
-                    logger.debug(f"Category '{category}' detected for: {headline[:50]}")
-                    return category
+        if (category := detect_category(text)) is not None:
+            logger.debug(f"Category '{category}' detected for: {headline[:50]}")
+            return category
 
         # Fallback: use sentiment as proxy
         if sentiment:

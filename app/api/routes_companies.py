@@ -123,7 +123,7 @@ async def get_company_news(
     symbol: CompanySymbol,
     service: NewsServiceDep,
     provider: str | None = Query(
-        None, description="News provider (finnhub, ibkr, mock)"
+        None, description="News provider (finnhub, ibkr, financialdatasets, mock)"
     ),
     days: int | None = Query(None, description="Last N days (overrides from/to dates)"),
     from_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -145,6 +145,9 @@ async def get_company_news(
     1. If `days` is provided: Last N days from today (overrides from/to)
     2. If `from_date` and/or `to_date` provided: Use explicit range
     3. Default: Last 30 days
+
+    Financial Datasets applies filters and pagination to at most the 10 most recent
+    upstream articles and returns no results for languages other than English (`en`).
 
     **Examples:**
     - Last 7 days: `?days=7`

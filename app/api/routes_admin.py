@@ -97,7 +97,7 @@ PROVIDER_CAPABILITIES: dict[str, list[str]] = {
     "mock": ["news"],
     "prixe": ["prices"],
     "alphavantage": ["prices", "earnings_upcoming", "earnings_history"],
-    "financialdatasets": ["prices", "companies", "earnings_history"],
+    "financialdatasets": ["prices", "companies", "earnings_history", "news"],
     "earningsapi": ["earnings_upcoming", "earnings_history"],
 }
 
@@ -426,14 +426,14 @@ def _provider_capabilities(name: str, provider: object | None) -> list[str]:
         capabilities.append("options")
     if isinstance(provider, BaseCompanyProvider):
         capabilities.append("companies")
-    if isinstance(provider, BaseNewsProvider):
-        capabilities.append("news")
-    if isinstance(provider, BaseVolatilityProvider):
-        capabilities.append("volatility")
     if isinstance(provider, BaseEarningsUpcomingProvider):
         capabilities.append("earnings_upcoming")
     if isinstance(provider, BaseEarningsHistoryProvider):
         capabilities.append("earnings_history")
+    if isinstance(provider, BaseNewsProvider):
+        capabilities.append("news")
+    if isinstance(provider, BaseVolatilityProvider):
+        capabilities.append("volatility")
     return capabilities
 
 

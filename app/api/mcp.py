@@ -834,7 +834,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "name": "get_company_news",
-        "description": "Get recent news articles for a company.",
+        "description": "Get recent news articles for a company. Financial Datasets is limited to the 10 most recent articles.",
         "inputSchema": {
             "type": "object",
             "required": ["symbol"],
@@ -861,7 +861,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                 },
                 "provider": {
                     "type": "string",
-                    "description": "News provider override (finnhub, ibkr, mock)",
+                    "description": "News provider override (finnhub, ibkr, financialdatasets, mock)",
                 },
             },
         },

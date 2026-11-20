@@ -13,6 +13,7 @@ from app.admin.settings_repository import SettingsRepository
 from app.api.routes_admin import router
 from app.config import settings
 from app.main import app as main_app
+from app.providers.financialdatasets import FinancialDatasetsProvider
 from app.providers.schwab import SchwabProvider
 
 
@@ -611,6 +612,22 @@ def test_provider_details_state_price_adjustment_and_earnings_capability(client)
     assert providers["financialdatasets"]["price_adjustment"] == "unknown"
     assert providers["ibkr"]["price_adjustment"] is None
     assert providers["alphavantage"]["capabilities"] == ["prices", "earnings_upcoming", "earnings_history"]
-    assert providers["financialdatasets"]["capabilities"] == ["prices", "companies", "earnings_history"]
+    assert providers["financialdatasets"]["capabilities"] == ["prices", "companies", "earnings_history", "news"]
     assert providers["alphavantage"]["price_support"]["native_intervals"] == ["1d", "1w"]
     assert providers["alphavantage"]["enabled"] is False
+
+
+def test_admin_financialdatasets_news_capability_when_enabled(client, monkeypatch) -> None:
+    from app.api.routes_admin import registry
+
+    provider = FinancialDatasetsProvider()
+    assert provider.name not in client.get("/api/admin/settings/capabilities").json()["news"]
+    assert client.post(f"/api/admin/providers/{provider.name}/enable").status_code == 200
+    monkeypatch.setitem(registry._providers, provider.name, provider)
+
+    response = client.get("/api/admin/providers")
+    assert response.status_code == 200
+    entry = next(item for item in response.json() if item["name"] == provider.name)
+    assert entry["enabled"] is True
+    assert entry["capabilities"] == ["prices", "companies", "earnings_history", "news"]
+    assert provider.name in client.get("/api/admin/settings/capabilities").json()["news"]

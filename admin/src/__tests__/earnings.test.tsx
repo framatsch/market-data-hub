@@ -123,6 +123,31 @@ describe('Default earnings provider dropdowns', () => {
   });
 });
 
+describe('Financial Datasets news capability', () => {
+  it('shows a News chip for Financial Datasets', async () => {
+    state.routes['/api/admin/providers'] = [
+      provider({ name: 'financialdatasets', capabilities: ['prices', 'companies', 'earnings_history', 'news'] }),
+    ];
+    state.routes['/api/admin/credentials'] = [];
+    renderWithProviders(<ProvidersPage />);
+    const row = (await screen.findByText('FINANCIALDATASETS')).closest('tr')!;
+    expect(within(row).getAllByText('News').length).toBeGreaterThan(0);
+  });
+
+  it('offers Financial Datasets and saves it as the default news provider', async () => {
+    state.routes['/api/admin/settings/defaults'] = { default_news_provider: '' };
+    state.routes['/api/admin/settings/capabilities'] = { news: ['finnhub', 'financialdatasets'] };
+    state.routes['PUT /api/admin/settings/defaults'] = {};
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPage />);
+    await user.click(await screen.findByRole('combobox', { name: 'Default News Provider' }));
+    await user.click(await screen.findByRole('option', { name: 'financialdatasets' }));
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(lastCall('PUT', '/api/admin/settings/defaults')?.body?.default_news_provider)
+      .toBe('financialdatasets'));
+  });
+});
+
 describe('Earnings cache policy', () => {
   const policy = {
     option_chain_seconds: 900, historical_closed_seconds: 604800, historical_open_bar_seconds: 300,

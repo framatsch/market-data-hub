@@ -1,0 +1,14 @@
+{
+  "news": [
+    {"ticker": "AAPL", "title": "Apple reports earnings for the quarter", "source": "Example Markets", "date": "2026-11-12", "url": "https://example.com/news/quarterly-earnings"},
+    {"ticker": "AAPL", "title": "Apple prepares a new device", "source": "Example Tech", "date": "2026-11-18", "url": "https://example.com/news/new-device"},
+    {"ticker": "AAPL", "title": "Apple opens a store", "source": "Example Markets", "date": "2026-11-18", "url": "https://example.com/news/new-store"},
+    {"ticker": "AAPL", "title": "Apple revises its revenue forecast", "source": "Example Markets", "date": "2026-11-10", "url": "https://example.com/news/revenue-forecast"},
+    {"ticker": "AAPL", "title": "Apple reaches a settlement", "source": "Example Markets", "date": "2026-11-11", "url": "https://example.com/news/settlement"},
+    {"ticker": "AAPL", "title": "Apple weighs an acquisition", "source": "Example Tech", "date": "2026-11-09", "url": "https://example.com/news/acquisition"},
+    {"ticker": "AAPL", "title": "Apple tests a new feature", "source": "Example Tech", "date": "2026-11-08", "url": "https://example.com/news/new-feature"},
+    {"ticker": "AAPL", "title": "Apple expands its campus", "source": "Example Markets", "date": "2026-11-07", "url": "https://example.com/news/campus"},
+    {"ticker": "AAPL", "title": "Apple names a new executive", "source": "Example Markets", "date": "2026-11-05", "url": "https://example.com/news/executive"},
+    {"ticker": "AAPL", "title": "Apple raises its dividend", "source": "Example Markets", "date": "2026-11-19"}
+  ]
+}
