@@ -124,7 +124,8 @@ def restore_next_order(result: Any, request: Request | None) -> Any:
 
 
 @router.get(
-    "/calendar", response_model=ResponseEnvelope[list[EarningsEvent]],
+    "/calendar",
+    response_model=ResponseEnvelope[list[EarningsEvent]],
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_EARNINGS_SECONDS, key="earnings:calendar")
@@ -172,7 +173,8 @@ async def get_earnings_calendar(
 
 
 @router.get(
-    "/next", response_model=ResponseEnvelope[list[NextEarnings]],
+    "/next",
+    response_model=ResponseEnvelope[list[NextEarnings]],
     responses={200: {"headers": DATA_RESPONSE_HEADERS}},
 )
 @cache(

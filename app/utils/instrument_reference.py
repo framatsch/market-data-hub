@@ -106,7 +106,9 @@ _REFERENCE: dict[tuple[SecType, str], InstrumentReference] = {
 
 def reference_for(symbol: ParsedSymbol) -> InstrumentReference | None:
     """Reference entry of a parsed symbol; a bare ticker of type stock matches ETFs too."""
-    kinds: tuple[SecType, ...] = ("etf",) if symbol.sec_type == "stock" else (symbol.sec_type,)
+    kinds: tuple[SecType, ...] = (
+        ("etf",) if symbol.sec_type == "stock" else (symbol.sec_type,)
+    )
     for kind in kinds:
         if (entry := _REFERENCE.get((kind, symbol.root))) is not None:
             return entry

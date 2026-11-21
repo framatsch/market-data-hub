@@ -236,6 +236,7 @@ class LSEGProvider(BaseCompanyProvider, BasePriceProvider, BaseVolatilityProvide
     ⚠️  Options NOT supported - use IBKR provider instead.
     LSEG subscription lacks 'trapi.data.pricing.read' scope required for real-time Greeks.
     """
+
     native_intervals = frozenset({"1m", "5m", "30m", "1h", "1d", "1w"})
 
     # Index RICs (``.SPX``) and front-month continuation RICs (``ESc1``) are

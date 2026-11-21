@@ -52,9 +52,7 @@ class RefreshPlan:
 
 def _paused(sync: SyncInfo | None, now: datetime, retry: timedelta) -> bool:
     return (
-        sync is not None
-        and sync.failed_at is not None
-        and now - sync.failed_at < retry
+        sync is not None and sync.failed_at is not None and now - sync.failed_at < retry
     )
 
 
@@ -191,20 +189,28 @@ def plan_days(
     are pending.
     """
     days = window_days(today, weekdays)
-    refresh = {previous_weekday(today), today, *next_weekdays(today, DAY_REFRESH_AHEAD_WEEKDAYS)}
+    refresh = {
+        previous_weekday(today),
+        today,
+        *next_weekdays(today, DAY_REFRESH_AHEAD_WEEKDAYS),
+    }
     due: list[date] = []
     paused: list[date] = []
     for day in days:
         sync = syncs.get(day)
         if _paused(sync, now, retry):
             paused.append(day)
-        elif sync is None or sync.synced_at is None or (
-            day in refresh and now - sync.synced_at > DAY_RESYNC
+        elif (
+            sync is None
+            or sync.synced_at is None
+            or (day in refresh and now - sync.synced_at > DAY_RESYNC)
         ):
             due.append(day)
     if budget_remaining is None:
         return DayPlan(tuple(due), (), tuple(paused))
-    return DayPlan(tuple(due[:budget_remaining]), tuple(due[budget_remaining:]), tuple(paused))
+    return DayPlan(
+        tuple(due[:budget_remaining]), tuple(due[budget_remaining:]), tuple(paused)
+    )
 
 
 # ---------------------------------------------------------- per-symbol plan
@@ -281,8 +287,12 @@ def plan_symbols(
         if _paused(item.sync, now, retry):
             paused.append(item.symbol)
         elif symbol_due(
-            item, now=now, needs_past=needs_past, needs_next=needs_next,
-            has_day_calendar=has_day_calendar, resync=resync,
+            item,
+            now=now,
+            needs_past=needs_past,
+            needs_next=needs_next,
+            has_day_calendar=has_day_calendar,
+            resync=resync,
         ):
             due.append(item.symbol)
     if budget_remaining is None:

@@ -39,7 +39,11 @@ class EarningsEvent(BaseModel):
     @classmethod
     def plain_revenue(cls, value: Decimal | None) -> Decimal | None:
         """Whole-number revenue without exponent notation (NUMERIC returns `1.14E+11`)."""
-        return Decimal(format(value, "f")) if value is not None and value.is_finite() else value
+        return (
+            Decimal(format(value, "f"))
+            if value is not None and value.is_finite()
+            else value
+        )
 
     @model_validator(mode="after")
     def reporting_state(self) -> "EarningsEvent":

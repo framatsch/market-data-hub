@@ -80,8 +80,12 @@ _PATTERNS = {
 }
 # Scopes that also own keys under another prefix (company earnings sit beside the
 # company profile keys but must not be cleared with them).
-_EXTRA_PATTERNS: dict[str, tuple[str, ...]] = {"earnings": ("mdh:companies:earnings:*",)}
-_EARNINGS_ROUTES = frozenset({"earnings:calendar", "earnings:next", "companies:earnings"})
+_EXTRA_PATTERNS: dict[str, tuple[str, ...]] = {
+    "earnings": ("mdh:companies:earnings:*",)
+}
+_EARNINGS_ROUTES = frozenset(
+    {"earnings:calendar", "earnings:next", "companies:earnings"}
+)
 
 
 class CachePolicyValues(BaseModel):
@@ -304,11 +308,17 @@ def _cache_hit_provider(key: str) -> str | None:
         return provider
     upcoming, history = provider.split("+", 1)
     kind = params.get("kind", "all")
-    return "+".join(
-        name
-        for name, applicable in ((upcoming, kind != "reported"), (history, kind != "upcoming"))
-        if applicable and name != "-"
-    ) or None
+    return (
+        "+".join(
+            name
+            for name, applicable in (
+                (upcoming, kind != "reported"),
+                (history, kind != "upcoming"),
+            )
+            if applicable and name != "-"
+        )
+        or None
+    )
 
 
 def _day_granular(params: dict[str, str]) -> None:
@@ -482,7 +492,9 @@ def cache(
             try:
                 result = await cached(*args, **kwargs)
                 if post is not None and not isinstance(result, Response):
-                    result = post(result, request if isinstance(request, Request) else None)
+                    result = post(
+                        result, request if isinstance(request, Request) else None
+                    )
                 injected = kwargs.get("__fastapi_cache_response")
                 if response_meta.current().stale:
                     _mark_cache_bypass()

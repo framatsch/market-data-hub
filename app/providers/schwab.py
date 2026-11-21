@@ -129,6 +129,7 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
     Token rotation: every 7 days; 401/403 clears the cached client automatically,
     except a 403 whose body names a missing entitlement (``PROVIDER_NOT_ENTITLED``).
     """
+
     native_intervals = frozenset({"1m", "5m", "10m", "15m", "30m", "1d", "1w"})
 
     price_sec_types = frozenset({"stock", "etf", "index", "future"})
@@ -1009,7 +1010,9 @@ class SchwabProvider(BasePriceProvider, BaseOptionsProvider):
         market_data_type: int | None = None,
         sec_type: str = "stock",
     ) -> OptionQuote:
-        del market_data_type  # Schwab options endpoint does not expose data-type selection.
+        del (
+            market_data_type
+        )  # Schwab options endpoint does not expose data-type selection.
 
         client = await self._get_client()
         try:

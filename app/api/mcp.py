@@ -64,9 +64,9 @@ from app.services.volatility_service import VolatilityService
 from app.utils.errors import AppError, DataValidationError
 from app.utils.symbols import (
     COMPANY_TYPES,
-    PROFILE_TYPES,
     OPTION_UNDERLYING_TYPES,
     PRICE_TYPES,
+    PROFILE_TYPES,
     VOLATILITY_TYPES,
     ParsedSymbol,
     SecType,
@@ -284,12 +284,18 @@ async def _dispatch_tool(params: dict[str, Any]) -> dict[str, Any]:
     handler = TOOL_HANDLERS.get(name) if isinstance(name, str) else None
     args = params.get("arguments", {})
     tool = name if isinstance(name, str) and handler is not None else "unknown"
-    telemetry = RequestTelemetry(uuid.uuid4().hex, "mcp", endpoint=MCP_DATA_TOOLS.get(tool, "other"))
+    telemetry = RequestTelemetry(
+        uuid.uuid4().hex, "mcp", endpoint=MCP_DATA_TOOLS.get(tool, "other")
+    )
     if isinstance(args, dict):
-        telemetry.symbol = canonical_telemetry_symbol(args.get("symbol"), args.get("sec_type"))
+        telemetry.symbol = canonical_telemetry_symbol(
+            args.get("symbol"), args.get("sec_type")
+        )
     success = False
     token = request_telemetry.set(telemetry)
-    with structlog.contextvars.bound_contextvars(request_id=telemetry.request_id, provider=None):
+    with structlog.contextvars.bound_contextvars(
+        request_id=telemetry.request_id, provider=None
+    ):
         try:
             if not isinstance(name, str):
                 raise AppError("Tool name must be a string", code="INVALID_PARAMS")
@@ -305,8 +311,10 @@ async def _dispatch_tool(params: dict[str, Any]) -> dict[str, Any]:
                     record_data_request(telemetry, timing.elapsed)
                 log = audit_log.info if success else audit_log.warning
                 log(
-                    "mcp_tool_completed", request_id=telemetry.request_id,
-                    tool=tool, status="ok" if success else "error",
+                    "mcp_tool_completed",
+                    request_id=telemetry.request_id,
+                    tool=tool,
+                    status="ok" if success else "error",
                     **timing.log_fields(telemetry, success),
                 )
             finally:
@@ -1041,7 +1049,7 @@ _EARNINGS_SYMBOLS = {
     "items": {"type": "string"},
     "minItems": 1,
     "maxItems": 50,
-    "description": "Stock symbols, e.g. [\"AAPL\", \"MSFT\"]. ETFs are answered as "
+    "description": 'Stock symbols, e.g. ["AAPL", "MSFT"]. ETFs are answered as '
     "not_applicable; index, future and option symbols are rejected.",
 }
 _REFRESH = {

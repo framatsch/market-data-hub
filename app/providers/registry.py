@@ -182,8 +182,11 @@ class ProviderRegistry:
             }
             logger.info(f"Filtered provider loading: {list(to_load.keys())}")
         else:
-            to_load = {name: cls for name, cls in self.provider_classes.items()
-                        if name not in OPT_IN_PROVIDERS}
+            to_load = {
+                name: cls
+                for name, cls in self.provider_classes.items()
+                if name not in OPT_IN_PROVIDERS
+            }
 
         for name, cls in to_load.items():
             try:
@@ -245,7 +248,9 @@ class ProviderRegistry:
                     "default_earnings_upcoming_provider",
                     "default_earnings_history_provider",
                 )
-                await self._migrate_earnings_default(settings_repository, system_settings)
+                await self._migrate_earnings_default(
+                    settings_repository, system_settings
+                )
                 for key in default_setting_keys:
                     if key not in system_settings:
                         await settings_repository.set(key, None)
@@ -269,9 +274,13 @@ class ProviderRegistry:
                 config = configs[name]
                 existing = next_providers.get(name)
                 try:
-                    replace = isinstance(existing, IbkrWebProvider) and existing.requires_replacement(config)
+                    replace = isinstance(
+                        existing, IbkrWebProvider
+                    ) and existing.requires_replacement(config)
                 except Exception as exc:
-                    logger.error("Failed to evaluate config of provider '%s': %s", name, exc)
+                    logger.error(
+                        "Failed to evaluate config of provider '%s': %s", name, exc
+                    )
                     continue
                 if existing is None or replace:
                     try:
@@ -295,7 +304,9 @@ class ProviderRegistry:
                         if isinstance(existing, IbkrWebProvider):
                             existing.start()
                     except Exception as exc:
-                        logger.error("Failed to reconfigure provider '%s': %s", name, exc)
+                        logger.error(
+                            "Failed to reconfigure provider '%s': %s", name, exc
+                        )
 
             for name, provider in current_providers.items():
                 replacement = next_providers.get(name)
@@ -523,9 +534,7 @@ class ProviderRegistry:
             raise InvalidProviderError(provider_name)
         return provider
 
-    def _earnings_target(
-        self, name: str | None, role: str | None
-    ) -> tuple[str, type]:
+    def _earnings_target(self, name: str | None, role: str | None) -> tuple[str, type]:
         base = {
             "upcoming": BaseEarningsUpcomingProvider,
             "history": BaseEarningsHistoryProvider,
@@ -550,7 +559,9 @@ class ProviderRegistry:
     ) -> BaseEarningsProvider:
         provider_name, base = self._earnings_target(name, role)
         provider = self._providers.get(provider_name)
-        if not isinstance(provider, base) or not isinstance(provider, BaseEarningsProvider):
+        if not isinstance(provider, base) or not isinstance(
+            provider, BaseEarningsProvider
+        ):
             raise InvalidProviderError(provider_name)
         return provider
 

@@ -135,7 +135,16 @@ class IbkrWebGatewayUpdate(BaseModel):
 
 
 class IbkrWebSessionStatus(BaseModel):
-    state: Literal["disabled", "unknown", "unreachable", "login_required", "competing", "brokerage_pending", "ready", "rate_limited"]
+    state: Literal[
+        "disabled",
+        "unknown",
+        "unreachable",
+        "login_required",
+        "competing",
+        "brokerage_pending",
+        "ready",
+        "rate_limited",
+    ]
     base_url: str | None = None
     login_url: str | None = None
     connected: bool = False
@@ -524,8 +533,10 @@ def _system_defaults() -> dict[str, str]:
         "default_news_provider": registry.default_news_provider or "",
         "default_volatility_provider": registry.default_volatility_provider or "",
         "default_earnings_provider": registry.default_earnings_provider or "",
-        "default_earnings_upcoming_provider": registry.default_earnings_upcoming_provider or "",
-        "default_earnings_history_provider": registry.default_earnings_history_provider or "",
+        "default_earnings_upcoming_provider": registry.default_earnings_upcoming_provider
+        or "",
+        "default_earnings_history_provider": registry.default_earnings_history_provider
+        or "",
     }
 
 
@@ -677,7 +688,10 @@ async def get_admin_settings_capabilities(
             continue
         for capability in PROVIDER_CAPABILITIES.get(config.provider_name, []):
             capabilities[capability].append(config.provider_name)
-            if capability.startswith("earnings_") and config.provider_name not in capabilities["earnings"]:
+            if (
+                capability.startswith("earnings_")
+                and config.provider_name not in capabilities["earnings"]
+            ):
                 capabilities["earnings"].append(config.provider_name)
     return capabilities
 
@@ -691,12 +705,26 @@ async def list_admin_providers(_principal: PrincipalDep) -> list[dict[str, Any]]
         {
             **_provider_status(name, configs[name]),
             "price_support": _provider_price_support(name),
-            "price_adjustment": getattr(_provider_for_support(name, BasePriceProvider), "price_adjustment", None),
+            "price_adjustment": getattr(
+                _provider_for_support(name, BasePriceProvider), "price_adjustment", None
+            ),
             "options_support": _provider_options_support(name),
             "volatility_support": _provider_volatility_support(name),
             "config": configs[name].model_dump(),
-            **({"warnings": ["ibkr_single_session"]} if both_ibkr and name in {"ibkr", "ibkrweb"} else {}),
-            **({"notes": ["Futures history uses the current front-month contract, not a continuous series."]} if name == "ibkrweb" else {}),
+            **(
+                {"warnings": ["ibkr_single_session"]}
+                if both_ibkr and name in {"ibkr", "ibkrweb"}
+                else {}
+            ),
+            **(
+                {
+                    "notes": [
+                        "Futures history uses the current front-month contract, not a continuous series."
+                    ]
+                }
+                if name == "ibkrweb"
+                else {}
+            ),
             "config_summary": {
                 "timeout_seconds": configs[name].timeout_seconds,
                 "retry_count": configs[name].retry_count,
@@ -745,12 +773,15 @@ async def get_admin_provider_config(
 
 @router.get("/providers/{provider_name}/usage")
 async def get_admin_provider_usage(
-    provider_name: str, _principal: PrincipalDep,
+    provider_name: str,
+    _principal: PrincipalDep,
 ) -> dict[str, Any]:
     from app.providers.request_budget import BUDGET_DEFAULTS, RequestBudget
 
     if provider_name not in BUDGET_DEFAULTS:
-        raise HTTPException(status_code=404, detail="Provider has no metered request budget")
+        raise HTTPException(
+            status_code=404, detail="Provider has no metered request budget"
+        )
     config = await get_provider_config_repository().get(provider_name)
     budget = RequestBudget(provider_name)
     budget.configure(config.connection_config)
@@ -774,7 +805,9 @@ async def update_admin_provider_config(
 
 
 @router.put("/providers/ibkrweb/gateway")
-async def update_ibkr_web_gateway(payload: IbkrWebGatewayUpdate, _principal: PrincipalDep) -> dict[str, Any]:
+async def update_ibkr_web_gateway(
+    payload: IbkrWebGatewayUpdate, _principal: PrincipalDep
+) -> dict[str, Any]:
     repo = get_provider_config_repository()
     current = await repo.get("ibkrweb")
     updates = payload.model_dump(exclude_unset=True)
@@ -782,7 +815,9 @@ async def update_ibkr_web_gateway(payload: IbkrWebGatewayUpdate, _principal: Pri
         if field in updates and updates[field] is None:
             updates[field] = ""
     try:
-        config = await repo.save("ibkrweb", {"connection_config": {**current.connection_config, **updates}})
+        config = await repo.save(
+            "ibkrweb", {"connection_config": {**current.connection_config, **updates}}
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=_validation_message(exc)) from exc
     await registry.reload_from_config(repo)
@@ -804,11 +839,17 @@ def _validation_message(exc: ValueError) -> str:
 def _enabled_ibkr_web() -> IbkrWebProvider:
     provider = registry.get_provider_instance("ibkrweb")
     if not isinstance(provider, IbkrWebProvider):
-        raise HTTPException(status_code=404, detail="IBKR Web API provider is not enabled")
+        raise HTTPException(
+            status_code=404, detail="IBKR Web API provider is not enabled"
+        )
     return provider
 
 
-@router.get("/providers/ibkrweb/session", response_model=IbkrWebSessionStatus, response_model_exclude_unset=True)
+@router.get(
+    "/providers/ibkrweb/session",
+    response_model=IbkrWebSessionStatus,
+    response_model_exclude_unset=True,
+)
 async def get_ibkr_web_session(_principal: PrincipalDep) -> dict[str, Any]:
     provider = registry.get_provider_instance("ibkrweb")
     if not isinstance(provider, IbkrWebProvider):

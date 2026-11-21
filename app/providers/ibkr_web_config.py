@@ -64,10 +64,16 @@ class IbkrWebConnectionConfig(BaseModel):
         if self.login_url:
             try:
                 login = urlsplit(self.login_url)
-                valid = login.scheme == "https" and bool(login.hostname) and "@" not in login.netloc
+                valid = (
+                    login.scheme == "https"
+                    and bool(login.hostname)
+                    and "@" not in login.netloc
+                )
             except ValueError:
                 valid = False
-            if not valid or any(char.isspace() or ord(char) < 32 for char in self.login_url):
+            if not valid or any(
+                char.isspace() or ord(char) < 32 for char in self.login_url
+            ):
                 raise ValueError("login_url must be an HTTPS URL without credentials")
         return self
 

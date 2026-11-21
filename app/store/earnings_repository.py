@@ -76,7 +76,9 @@ def _event(row: EarningsEventRow) -> EarningsEvent:
     )
 
 
-def _values(provider: str, event: EarningsEvent, source: str, now: datetime) -> dict[str, Any]:
+def _values(
+    provider: str, event: EarningsEvent, source: str, now: datetime
+) -> dict[str, Any]:
     return {
         "provider": provider,
         "symbol": event.symbol,
@@ -141,8 +143,13 @@ async def get_sync(
     if row is None:
         return None
     return SyncState(
-        provider, scope, row.covered_from, row.covered_to, row.synced_at,
-        row.sync_failed_at, row.invalidated_at,
+        provider,
+        scope,
+        row.covered_from,
+        row.covered_to,
+        row.synced_at,
+        row.sync_failed_at,
+        row.invalidated_at,
     )
 
 
@@ -156,8 +163,13 @@ async def get_syncs(
     )
     return {
         row.scope: SyncState(
-            provider, row.scope, row.covered_from, row.covered_to, row.synced_at,
-            row.sync_failed_at, row.invalidated_at,
+            provider,
+            row.scope,
+            row.covered_from,
+            row.covered_to,
+            row.synced_at,
+            row.sync_failed_at,
+            row.invalidated_at,
         )
         for row in rows.scalars()
     }
@@ -258,9 +270,7 @@ async def replace_calendar(
             )
         )
     await drop_reconciled_calendar_rows(session, provider)
-    await _mark_synced(
-        session, provider, CALENDAR_SCOPE, now, covered_from, covered_to
-    )
+    await _mark_synced(session, provider, CALENDAR_SCOPE, now, covered_from, covered_to)
 
 
 def day_scope(day: date) -> str:
@@ -306,7 +316,9 @@ async def replace_day(
         await session.execute(
             insert(EarningsEventRow)
             .values(rows[offset : offset + 1000])
-            .on_conflict_do_nothing(index_elements=["provider", "symbol", "report_date"])
+            .on_conflict_do_nothing(
+                index_elements=["provider", "symbol", "report_date"]
+            )
         )
     window = timedelta(days=DAY_REPLACE_WINDOW_DAYS)
     for offset in range(0, len(unique), 500):

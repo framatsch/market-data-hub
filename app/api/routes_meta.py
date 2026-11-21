@@ -64,7 +64,8 @@ async def get_metrics() -> Any:
 
 
 @router.get(
-    "/market-status", response_model=ResponseEnvelope[MarketStatus],
+    "/market-status",
+    response_model=ResponseEnvelope[MarketStatus],
     responses={200: {"headers": DATA_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_MARKET_STATUS_SECONDS, key="market-status")

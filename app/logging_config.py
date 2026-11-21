@@ -163,7 +163,9 @@ def setup_logging() -> None:
 
     # Suppress benign websocket "close status: 1001" errors from LSEG snapshots
     websocket_logger = logging.getLogger("websocket")
-    if not any(isinstance(f, WebsocketGoingAwayFilter) for f in websocket_logger.filters):
+    if not any(
+        isinstance(f, WebsocketGoingAwayFilter) for f in websocket_logger.filters
+    ):
         websocket_logger.addFilter(WebsocketGoingAwayFilter())
 
 

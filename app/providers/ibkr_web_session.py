@@ -39,9 +39,22 @@ TICKLE = "tickle"
 _COMPETING_HINT = "Another IBKR session of this username holds the brokerage session"
 _RELATIVE_API_PATH = re.compile(r"[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*")
 _SESSION_STATES = (
-    "unknown", "unreachable", "login_required", "competing", "brokerage_pending", "ready", "rate_limited",
+    "unknown",
+    "unreachable",
+    "login_required",
+    "competing",
+    "brokerage_pending",
+    "ready",
+    "rate_limited",
 )
-SessionState = Literal["unknown", "unreachable", "login_required", "competing", "brokerage_pending", "ready"]
+SessionState = Literal[
+    "unknown",
+    "unreachable",
+    "login_required",
+    "competing",
+    "brokerage_pending",
+    "ready",
+]
 _Payload = dict[str, Any] | list[Any]
 
 
@@ -50,7 +63,9 @@ _SHARED_PENALTIES: dict[str, float] = {}
 # Only the newest session may write the state gauge; a closed predecessor must not reset it.
 _gauge_owner: "IbkrWebSession | None" = None
 _RECHECK_INTERVAL_SECONDS = 30.0
-_HUNG_TICKLES = 2  # consecutive keep-alive timeouts before the gateway counts as unreachable
+_HUNG_TICKLES = (
+    2  # consecutive keep-alive timeouts before the gateway counts as unreachable
+)
 
 
 class GatewayPacer:
@@ -71,14 +86,20 @@ class GatewayPacer:
         penalty_key: str | None = None,
     ) -> None:
         if not 0 < rate <= 10:
-            raise ValueError("ibkrweb rate_limit_per_sec must be greater than 0 and at most 10")
+            raise ValueError(
+                "ibkrweb rate_limit_per_sec must be greater than 0 and at most 10"
+            )
         self._clock = clock
         self._sleep = sleep
         self._spacing = 1 / rate
         self._next = -math.inf
         self._penalty_key = penalty_key
-        self._penalty_until = _SHARED_PENALTIES.get(penalty_key, -math.inf) if penalty_key else -math.inf
-        self._windows: dict[str, deque[float]] = {path: deque() for path in self._LIMITS}
+        self._penalty_until = (
+            _SHARED_PENALTIES.get(penalty_key, -math.inf) if penalty_key else -math.inf
+        )
+        self._windows: dict[str, deque[float]] = {
+            path: deque() for path in self._LIMITS
+        }
 
     @property
     def retry_after_seconds(self) -> int:
@@ -87,7 +108,9 @@ class GatewayPacer:
 
     def check_penalty(self) -> None:
         if remaining := self.retry_after_seconds:
-            raise ProviderTimeoutError(PROVIDER, {"reason": "rate_limited", "retry_after_seconds": remaining})
+            raise ProviderTimeoutError(
+                PROVIDER, {"reason": "rate_limited", "retry_after_seconds": remaining}
+            )
 
     def penalize(self, seconds: float) -> None:
         self._penalty_until = max(self._penalty_until, self._clock() + seconds)
@@ -170,13 +193,18 @@ class IbkrWebSession:
             "base_url": self.config.origin,
             "login_url": self.config.browser_login_url,
             "state": self.state,
-            **{key: self._auth.get(key, False) for key in ("authenticated", "connected", "competing")},
+            **{
+                key: self._auth.get(key, False)
+                for key in ("authenticated", "connected", "competing")
+            },
             "server_version": self._server_version,
             "account_count": self._account_count,
             "username": self._username,
             "account_mode": self._account_mode,
             "sso_expires_seconds": (
-                max(0, math.ceil(self._expires_at - time.monotonic())) if self._expires_at is not None else None
+                max(0, math.ceil(self._expires_at - time.monotonic()))
+                if self._expires_at is not None
+                else None
             ),
             "last_tickle": self._last_tickle.isoformat() if self._last_tickle else None,
             "last_error": self._last_error,
@@ -187,7 +215,9 @@ class IbkrWebSession:
     def start(self) -> None:
         if not self._closed and self._keep_alive is None:
             self._publish_state()
-            self._keep_alive = asyncio.create_task(self._run_keep_alive(), name="ibkrweb-keep-alive")
+            self._keep_alive = asyncio.create_task(
+                self._run_keep_alive(), name="ibkrweb-keep-alive"
+            )
 
     async def close(self) -> None:
         self._closed = True
@@ -205,14 +235,19 @@ class IbkrWebSession:
                 PROVIDER_SESSION_STATE.labels(PROVIDER, label).set(0)
 
     async def request(
-        self, path: str, *, params: Mapping[str, Any] | None = None,
+        self,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
         expected: type | tuple[type, ...] = dict,
     ) -> Any:
         """Send a read-only data request without retrying an upstream failure."""
         await self.ensure_ready()
         result = await self._send(path, params=params, require_ready=True)
         if not isinstance(result, expected):
-            raise ProviderError("Unexpected IBKR Web API response shape", details={"endpoint": path})
+            raise ProviderError(
+                "Unexpected IBKR Web API response shape", details={"endpoint": path}
+            )
         return result
 
     async def ensure_ready(self) -> None:
@@ -247,7 +282,10 @@ class IbkrWebSession:
     async def admin_status(self) -> dict[str, Any]:
         if self.state == "ready" and time.monotonic() >= self._sso_checked_at + 60:
             async with self._lock:
-                if self.state == "ready" and time.monotonic() >= self._sso_checked_at + 60:
+                if (
+                    self.state == "ready"
+                    and time.monotonic() >= self._sso_checked_at + 60
+                ):
                     self._sso_checked_at = time.monotonic()
                     try:
                         details = await self._session_json("sso/validate")
@@ -257,7 +295,13 @@ class IbkrWebSession:
                         username = details.get("USER_NAME")
                         self._username = username if isinstance(username, str) else None
                         login_type = details.get("LOGIN_TYPE")
-                        self._account_mode = "live" if login_type == 1 else "paper" if login_type == 2 else None
+                        self._account_mode = (
+                            "live"
+                            if login_type == 1
+                            else "paper"
+                            if login_type == 2
+                            else None
+                        )
         return self.status()
 
     async def logout(self) -> dict[str, Any]:
@@ -269,7 +313,9 @@ class IbkrWebSession:
                 if exc.details.get("reason") != "login_required":
                     raise
             self._client.cookies.clear()
-            self._set_state("login_required", "Logged out by an administrator", alert=False)
+            self._set_state(
+                "login_required", "Logged out by an administrator", alert=False
+            )
             return self.status()
 
     async def test_connection(self) -> dict[str, Any]:
@@ -279,15 +325,34 @@ class IbkrWebSession:
             except AppError as exc:
                 reason = exc.details.get("reason", "")
                 by_reason = {
-                    "login_required": (401, "Login required at the Client Portal Gateway"),
+                    "login_required": (
+                        401,
+                        "Login required at the Client Portal Gateway",
+                    ),
                     "competing_session": (409, _COMPETING_HINT),
                     "rate_limited": (429, "IBKR Web API is rate limited"),
                 }
-                status_code, message = by_reason.get(reason, (503, "Client Portal Gateway not reachable" if self._state == "unreachable" else exc.message))
-                return {"status_code": status_code, "success": False, "message": message,
-                        "details": {**self.status(), **exc.details, "error": exc.message}}
-        return {"status_code": 200, "success": True, "message": "Connected to IBKR Web API",
-                "details": self.status()}
+                status_code, message = by_reason.get(
+                    reason,
+                    (
+                        503,
+                        "Client Portal Gateway not reachable"
+                        if self._state == "unreachable"
+                        else exc.message,
+                    ),
+                )
+                return {
+                    "status_code": status_code,
+                    "success": False,
+                    "message": message,
+                    "details": {**self.status(), **exc.details, "error": exc.message},
+                }
+        return {
+            "status_code": 200,
+            "success": True,
+            "message": "Connected to IBKR Web API",
+            "details": self.status(),
+        }
 
     async def tickle(self) -> None:
         async with self._lock:
@@ -319,12 +384,17 @@ class IbkrWebSession:
                 self._tickle_timeouts += 1
                 if self._tickle_timeouts >= _HUNG_TICKLES and self._state == "ready":
                     # The next request re-checks the session instead of trusting a stale "ready".
-                    self._set_state("unreachable", "Client Portal Gateway did not answer the keep-alive")
+                    self._set_state(
+                        "unreachable",
+                        "Client Portal Gateway did not answer the keep-alive",
+                    )
                 self._log_keep_alive_failure(exc.message)
             except AppError as exc:
                 self._last_error = exc.message
                 self._log_keep_alive_failure(exc.message)
-            except Exception as exc:  # the task must survive anything a single tickle raises
+            except (
+                Exception
+            ) as exc:  # the task must survive anything a single tickle raises
                 self._last_error = f"Keep-alive failed: {type(exc).__name__}"
                 self._log_keep_alive_failure(self._last_error, unexpected=True)
             else:
@@ -333,7 +403,9 @@ class IbkrWebSession:
                     logger.info("IBKR Web API keep-alive recovered")
                 self._keep_alive_error = None
 
-    def _log_keep_alive_failure(self, message: str, *, unexpected: bool = False) -> None:
+    def _log_keep_alive_failure(
+        self, message: str, *, unexpected: bool = False
+    ) -> None:
         # One line per distinct failure; state transitions are logged separately.
         if message == self._keep_alive_error:
             return
@@ -347,10 +419,17 @@ class IbkrWebSession:
         auth = await self._session_json(AUTH_STATUS, post={})
         await self._apply_auth(auth, accounts_once=accounts_once)
 
-    async def _apply_auth(self, auth: dict[str, Any], *, accounts_once: bool = False) -> None:
-        if not all(type(auth.get(key)) is bool for key in ("connected", "authenticated", "competing")):
+    async def _apply_auth(
+        self, auth: dict[str, Any], *, accounts_once: bool = False
+    ) -> None:
+        if not all(
+            type(auth.get(key)) is bool
+            for key in ("connected", "authenticated", "competing")
+        ):
             raise ProviderError("Invalid IBKR Web API auth status")
-        self._auth = {key: auth[key] for key in ("connected", "authenticated", "competing")}
+        self._auth = {
+            key: auth[key] for key in ("connected", "authenticated", "competing")
+        }
         info = auth.get("serverInfo")
         if isinstance(info, dict) and isinstance(info.get("serverVersion"), str):
             self._server_version = info["serverVersion"]
@@ -358,7 +437,9 @@ class IbkrWebSession:
             self._set_state("competing", _COMPETING_HINT)
             raise self._not_available()
         if not auth["connected"]:
-            self._set_state("login_required", "Login required at the Client Portal Gateway")
+            self._set_state(
+                "login_required", "Login required at the Client Portal Gateway"
+            )
             raise self._not_available()
         init_required = not auth["authenticated"] or auth["competing"]
         if not init_required and self._state == "ready" and not accounts_once:
@@ -369,12 +450,16 @@ class IbkrWebSession:
         try:
             async with asyncio.timeout(settings.IBKRWEB_SESSION_INIT_TIMEOUT_SECONDS):
                 if init_required:
-                    await self._session_json(INIT, post={"publish": True, "compete": self.config.compete})
+                    await self._session_json(
+                        INIT, post={"publish": True, "compete": self.config.compete}
+                    )
                     await self._sleep(2)
                 await self._load_accounts(once=accounts_once)
         except TimeoutError as exc:
             self._last_error = "IBKR Web API brokerage initialisation timed out"
-            raise ProviderTimeoutError(PROVIDER, {"reason": "session_init_timeout"}) from exc
+            raise ProviderTimeoutError(
+                PROVIDER, {"reason": "session_init_timeout"}
+            ) from exc
         self._auth.update(authenticated=True, competing=False)
         if renew:
             self.generation += 1
@@ -384,22 +469,33 @@ class IbkrWebSession:
         while True:
             body = await self._session_json(ACCOUNTS)
             accounts = body.get("accounts")
-            if not isinstance(accounts, list) or not all(isinstance(value, str) for value in accounts):
+            if not isinstance(accounts, list) or not all(
+                isinstance(value, str) for value in accounts
+            ):
                 raise ProviderError("Invalid IBKR Web API accounts payload")
             if accounts:
                 self._account_count = len(accounts)
                 if self.config.account_id and self.config.account_id not in accounts:
-                    logger.warning("IBKR Web API account_id is not in the brokerage session account list")
+                    logger.warning(
+                        "IBKR Web API account_id is not in the brokerage session account list"
+                    )
                 return
             if once:
-                self._set_state("brokerage_pending", "No brokerage accounts returned by the gateway")
+                self._set_state(
+                    "brokerage_pending", "No brokerage accounts returned by the gateway"
+                )
                 raise self._not_available()
             await self._sleep(0.5)
 
-    async def _session_json(self, path: str, *, post: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _session_json(
+        self, path: str, *, post: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         body = await self._send(path, post=post)
         if not isinstance(body, dict):
-            raise ProviderError("Unexpected IBKR Web API session response shape", details={"endpoint": path})
+            raise ProviderError(
+                "Unexpected IBKR Web API session response shape",
+                details={"endpoint": path},
+            )
         return body
 
     async def _send(
@@ -440,13 +536,17 @@ class IbkrWebSession:
             self._publish_state()
             self._pacer.check_penalty()
         if code == 401:
-            self._set_state("login_required", "Login required at the Client Portal Gateway")
+            self._set_state(
+                "login_required", "Login required at the Client Portal Gateway"
+            )
             raise self._not_available()
         body: Any = None
         with suppress(ValueError):
             body = response.json()
         error = body.get("error") if isinstance(body, dict) else None
-        message = error[:500] if isinstance(error, str) else f"Gateway returned HTTP {code}"
+        message = (
+            error[:500] if isinstance(error, str) else f"Gateway returned HTTP {code}"
+        )
         if code == 400:
             raise DataValidationError(message)
         if code == 404:
@@ -455,22 +555,38 @@ class IbkrWebSession:
             # A 5xx may be the nightly IServer reset or an ordinary per-request failure. Keep the
             # session usable for requests in flight and re-check the status before the next one.
             now = time.monotonic()
-            if self._state == "ready" and now >= self._last_recheck + _RECHECK_INTERVAL_SECONDS:
+            if (
+                self._state == "ready"
+                and now >= self._last_recheck + _RECHECK_INTERVAL_SECONDS
+            ):
                 self._last_recheck = now
                 self._recheck_due = True
             raise ProviderConnectionError(message)
         if not response.is_success or not isinstance(body, (dict, list)):
-            raise ProviderError("Unexpected IBKR Web API response", details={"endpoint": path, "status": code})
+            raise ProviderError(
+                "Unexpected IBKR Web API response",
+                details={"endpoint": path, "status": code},
+            )
         return body
 
     def _not_available(self) -> ProviderNotAvailableError:
         if self._state == "login_required":
-            return ProviderNotAvailableError(PROVIDER, {"reason": "login_required", "login_url": self.config.browser_login_url})
+            return ProviderNotAvailableError(
+                PROVIDER,
+                {
+                    "reason": "login_required",
+                    "login_url": self.config.browser_login_url,
+                },
+            )
         if self._state == "competing":
-            return ProviderNotAvailableError(PROVIDER, {"reason": "competing_session", "hint": _COMPETING_HINT})
+            return ProviderNotAvailableError(
+                PROVIDER, {"reason": "competing_session", "hint": _COMPETING_HINT}
+            )
         return ProviderNotAvailableError(PROVIDER, {"reason": "brokerage_pending"})
 
-    def _set_state(self, state: SessionState, error: str | None = None, *, alert: bool = True) -> None:
+    def _set_state(
+        self, state: SessionState, error: str | None = None, *, alert: bool = True
+    ) -> None:
         previous = self._state
         self._state, self._last_error = state, error
         if state != "ready":
@@ -482,10 +598,15 @@ class IbkrWebSession:
             self._account_mode = None
         self._publish_state()
         if (
-            state == "login_required" and previous != state and alert
-            and settings.IBKRWEB_ALERT_WEBHOOK_URL and not self._closed
+            state == "login_required"
+            and previous != state
+            and alert
+            and settings.IBKRWEB_ALERT_WEBHOOK_URL
+            and not self._closed
         ):
-            task = asyncio.create_task(self._send_alert(settings.IBKRWEB_ALERT_WEBHOOK_URL))
+            task = asyncio.create_task(
+                self._send_alert(settings.IBKRWEB_ALERT_WEBHOOK_URL)
+            )
             self._alerts.add(task)
             task.add_done_callback(self._alerts.discard)
 
@@ -513,9 +634,12 @@ class IbkrWebSession:
         try:
             await asyncio.to_thread(validate_webhook_url, webhook_url)
             async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
-                response = await client.post(webhook_url, json={
-                    "text": f"IBKR Client Portal Gateway login required — log in at {self.config.browser_login_url}",
-                })
+                response = await client.post(
+                    webhook_url,
+                    json={
+                        "text": f"IBKR Client Portal Gateway login required — log in at {self.config.browser_login_url}",
+                    },
+                )
                 response.raise_for_status()
         except (ValueError, httpx.HTTPError) as exc:
             logger.warning("IBKR Web API login alert failed (%s)", type(exc).__name__)

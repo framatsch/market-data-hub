@@ -73,7 +73,12 @@ def tws_trading_hours_open(trading_hours: str, now: datetime) -> bool | None:
         if len(parts) != 2:
             return None
         start_fields, end_fields = (part.split(":") for part in parts)
-        if len(start_fields) < 2 or len(end_fields) < 2 or not start_fields[1] or not end_fields[1]:
+        if (
+            len(start_fields) < 2
+            or len(end_fields) < 2
+            or not start_fields[1]
+            or not end_fields[1]
+        ):
             return None
         return in_trading_session(current_time, start_fields[1], end_fields[1])
 

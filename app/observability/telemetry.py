@@ -23,13 +23,24 @@ StoreOutcome = Literal["hit", "partial", "miss", "stale"]
 DataSource = Literal["redis", "postgres", "provider", "postgres+provider"]
 _TIMED_LAYERS: tuple[Layer, ...] = ("redis", "db", "provider", "redis-write")
 
-PROVIDER_OPERATIONS = frozenset({
-    "get_historical_prices", "get_last_price", "get_market_status",
-    "get_company_profile", "search_companies", "get_option_chain", "get_option_quote",
-    "get_company_news", "get_upcoming_earnings", "get_symbol_earnings",
-    "get_earnings_for_date", "get_earnings_history", "get_implied_volatility",
-    "get_implied_volatility_history",
-})
+PROVIDER_OPERATIONS = frozenset(
+    {
+        "get_historical_prices",
+        "get_last_price",
+        "get_market_status",
+        "get_company_profile",
+        "search_companies",
+        "get_option_chain",
+        "get_option_quote",
+        "get_company_news",
+        "get_upcoming_earnings",
+        "get_symbol_earnings",
+        "get_earnings_for_date",
+        "get_earnings_history",
+        "get_implied_volatility",
+        "get_implied_volatility_history",
+    }
+)
 
 DATA_ROUTES = {
     "/prices/{symbol}/history": "prices:history",
@@ -108,7 +119,8 @@ class RequestTelemetry:
                 elapsed=until - self.start,
                 layers={
                     layer: union_ms(self.spans[layer], self.start, until)
-                    for layer in _TIMED_LAYERS if layer in self.spans
+                    for layer in _TIMED_LAYERS
+                    if layer in self.spans
                 },
             )
         return self.response_timing
@@ -123,7 +135,9 @@ class RequestTiming:
         entries = []
         if success:
             for layer in _TIMED_LAYERS:
-                if layer not in self.layers or (layer == "db" and telemetry.store_outcome is None):
+                if layer not in self.layers or (
+                    layer == "db" and telemetry.store_outcome is None
+                ):
                     continue
                 desc = ""
                 if layer == "redis":
@@ -163,16 +177,22 @@ def current_telemetry() -> RequestTelemetry | None:
 
 def bind_data_provider(*names: str) -> None:
     """Record answer provenance without changing the existing `provider` log field."""
-    structlog.contextvars.bind_contextvars(provider=names[0] if len(names) == 1 else ",".join(names))
+    structlog.contextvars.bind_contextvars(
+        provider=names[0] if len(names) == 1 else ",".join(names)
+    )
     if (telemetry := current_telemetry()) is not None:
-        telemetry.data_provider = "+".join(name for name in names if isinstance(name, str)) or None
+        telemetry.data_provider = (
+            "+".join(name for name in names if isinstance(name, str)) or None
+        )
 
 
 def canonical_telemetry_symbol(raw: Any, sec_type: Any = None) -> str | None:
     if not isinstance(raw, str):
         return None
     try:
-        return parse_symbol(raw, sec_type if isinstance(sec_type, str) else None).canonical
+        return parse_symbol(
+            raw, sec_type if isinstance(sec_type, str) else None
+        ).canonical
     except DataValidationError:
         return None
 
@@ -200,8 +220,12 @@ async def span(
             if operation is not None:
                 from app.observability.metrics import record_operation
 
-                endpoint = telemetry.endpoint_key() if telemetry is not None else "other"
-                record_operation(layer, endpoint, operation, provider, end - start, error)
+                endpoint = (
+                    telemetry.endpoint_key() if telemetry is not None else "other"
+                )
+                record_operation(
+                    layer, endpoint, operation, provider, end - start, error
+                )
 
 
 def union_ms(spans: Iterable[Interval], start: float, until: float) -> float:

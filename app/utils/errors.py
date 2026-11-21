@@ -50,13 +50,21 @@ class ProviderQuotaExhaustedError(ProviderError):
     """A metered provider request was refused by its daily or monthly budget."""
 
     def __init__(
-        self, provider: str, period: str, budget: int,
+        self,
+        provider: str,
+        period: str,
+        budget: int,
         details: dict[str, Any] | None = None,
     ):
         super().__init__(
             f"Request budget for provider '{provider}' exhausted ({period}: {budget}).",
             "PROVIDER_QUOTA_EXHAUSTED",
-            {"provider": provider, "period": period, "budget": budget, **(details or {})},
+            {
+                "provider": provider,
+                "period": period,
+                "budget": budget,
+                **(details or {}),
+            },
         )
 
 

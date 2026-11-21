@@ -37,9 +37,7 @@ from app.utils.symbols import VOLATILITY_TYPES, ParsedSymbol
 
 router = APIRouter(prefix="/volatility", tags=["Volatility"])
 
-VolatilitySymbol = Annotated[
-    ParsedSymbol, Depends(symbol_param(VOLATILITY_TYPES))
-]
+VolatilitySymbol = Annotated[ParsedSymbol, Depends(symbol_param(VOLATILITY_TYPES))]
 
 
 def _csv_response(data: Any, symbol: str, suffix: str) -> Response:
@@ -56,7 +54,8 @@ def _csv_response(data: Any, symbol: str, suffix: str) -> Response:
 
 
 @router.get(
-    "/{symbol}", response_model=ResponseEnvelope[VolatilitySnapshot],
+    "/{symbol}",
+    response_model=ResponseEnvelope[VolatilitySnapshot],
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:snapshot")
@@ -103,7 +102,8 @@ async def get_implied_volatility(
 
 
 @router.get(
-    "/{symbol}/history", response_model=ResponseEnvelope[VolatilityHistory],
+    "/{symbol}/history",
+    response_model=ResponseEnvelope[VolatilityHistory],
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:history")
@@ -162,7 +162,8 @@ async def get_implied_volatility_history(
 
 
 @router.get(
-    "/{symbol}/stats", response_model=ResponseEnvelope[VolatilityStats],
+    "/{symbol}/stats",
+    response_model=ResponseEnvelope[VolatilityStats],
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_VOLATILITY_SECONDS, key="volatility:stats")

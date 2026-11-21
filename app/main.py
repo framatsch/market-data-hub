@@ -289,7 +289,9 @@ async def general_error_handler(request: Request, exc: Exception) -> Any:
     """Handle unexpected errors."""
     # Starlette sends unhandled 500s outside user middleware, after context reset.
     telemetry = request.scope.get("mdh_telemetry")
-    request_id = telemetry.request_id if telemetry is not None else request_id_for(request)
+    request_id = (
+        telemetry.request_id if telemetry is not None else request_id_for(request)
+    )
     with bound_contextvars(request_id=request_id):
         logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(

@@ -95,7 +95,9 @@ async def get_historical_prices(
     extended_hours: bool = Query(
         False, description="Include extended trading hours (pre-market/after-hours)"
     ),
-    provider: str | None = Query(None, description="Price provider (e.g. ibkr, ibkrweb, lseg)."),
+    provider: str | None = Query(
+        None, description="Price provider (e.g. ibkr, ibkrweb, lseg)."
+    ),
     format: str = "json",
 ) -> Any:
     """

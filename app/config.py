@@ -71,7 +71,9 @@ class Settings(BaseSettings):
 
     # IBKR Web API (Client Portal Gateway; browser-managed login)
     IBKRWEB_BASE_URL: str = "https://127.0.0.1:5000"
-    IBKRWEB_LOGIN_URL: str = ""  # browser-facing gateway URL when base_url is not reachable from the browser
+    IBKRWEB_LOGIN_URL: str = (
+        ""  # browser-facing gateway URL when base_url is not reachable from the browser
+    )
     IBKRWEB_VERIFY_TLS: bool = False
     IBKRWEB_CA_BUNDLE: str = ""
     IBKRWEB_ACCOUNT_ID: str = ""

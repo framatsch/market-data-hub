@@ -23,7 +23,20 @@ from app.utils.errors import DataNotFoundError, DataValidationError, ProviderErr
 
 _DAY = 86400
 _WEB_INDEX_EXCHANGES = {**INDEX_EXCHANGES, "INDU": "CME"}
-_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+_MONTHS = (
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+)
 _T = TypeVar("_T")
 _Object = dict[str, Any]
 _OptionKey = tuple[Decimal, str]
@@ -67,7 +80,9 @@ class _ContractCache:
                 return result
         return None
 
-    async def put(self, key: str, adapter: TypeAdapter[_T], value: _T, ttl: int) -> None:
+    async def put(
+        self, key: str, adapter: TypeAdapter[_T], value: _T, ttl: int
+    ) -> None:
         if ttl <= 0:
             return
         raw = adapter.dump_json(value)
@@ -117,18 +132,31 @@ def stock_root(root: str) -> str:
 
 def _date(value: object) -> date | None:
     try:
-        return datetime.strptime(str(value), "%Y%m%d").date() if len(str(value)) == 8 else None
+        return (
+            datetime.strptime(str(value), "%Y%m%d").date()
+            if len(str(value)) == 8
+            else None
+        )
     except ValueError:
         return None
 
 
 def _ttl(day: date) -> int:
-    return max(0, int((datetime.combine(day, day_time.min, UTC) - datetime.now(UTC)).total_seconds()))
+    return max(
+        0,
+        int(
+            (
+                datetime.combine(day, day_time.min, UTC) - datetime.now(UTC)
+            ).total_seconds()
+        ),
+    )
 
 
 def _objects(raw: object, endpoint: str) -> list[_Object]:
     if not isinstance(raw, list) or any(not isinstance(row, dict) for row in raw):
-        raise ProviderError("Invalid IBKR Web API response shape", details={"endpoint": endpoint})
+        raise ProviderError(
+            "Invalid IBKR Web API response shape", details={"endpoint": endpoint}
+        )
     return raw
 
 
@@ -141,7 +169,9 @@ def _conid(row: _Object) -> int:
 
 def _section(row: _Object, sec_type: str) -> _Object | None:
     sections = row.get("sections") or []
-    if not isinstance(sections, list) or any(not isinstance(item, dict) for item in sections):
+    if not isinstance(sections, list) or any(
+        not isinstance(item, dict) for item in sections
+    ):
         raise ProviderError("Invalid IBKR Web API security definition sections")
     return next((item for item in sections if item.get("secType") == sec_type), None)
 
@@ -151,7 +181,12 @@ def _month(expiry: date) -> str:
 
 
 class IbkrWebContracts:
-    def __init__(self, session: IbkrWebSession, *, redis_backend: Callable[[], Any] = _redis_backend) -> None:
+    def __init__(
+        self,
+        session: IbkrWebSession,
+        *,
+        redis_backend: Callable[[], Any] = _redis_backend,
+    ) -> None:
         self._session = session
         self._cache = _ContractCache(redis_backend)
         self._search_lock = asyncio.Lock()
@@ -160,7 +195,9 @@ class IbkrWebContracts:
     async def resolve(self, root: str, sec_type: str) -> WebContract:
         root = root.upper()
         if sec_type not in {"stock", "etf", "index", "future"}:
-            raise DataValidationError(f"Unsupported IBKR Web API security type: {sec_type}")
+            raise DataValidationError(
+                f"Unsupported IBKR Web API security type: {sec_type}"
+            )
         key = f"mdh:ibkrweb:conid:{sec_type}:{root}"
         if cached := await self._cache.get(key, _CONTRACT):
             return cached
@@ -172,11 +209,24 @@ class IbkrWebContracts:
             native = INDEX_ROOT_OVERRIDES.get(root, root)
             exchange = _WEB_INDEX_EXCHANGES.get(native, "CBOE")
             rows = await self._search(native, sec_type="IND")
-            match = next((row for row in rows if row.get("symbol") == native
-                          and row.get("description") == exchange and _section(row, "IND") is not None), None)
+            match = next(
+                (
+                    row
+                    for row in rows
+                    if row.get("symbol") == native
+                    and row.get("description") == exchange
+                    and _section(row, "IND") is not None
+                ),
+                None,
+            )
             if match is None:
                 raise DataNotFoundError("Contract", root)
-            contract = WebContract(conid=_conid(match), symbol=native, exchange=exchange, name=match.get("companyName"))
+            contract = WebContract(
+                conid=_conid(match),
+                symbol=native,
+                exchange=exchange,
+                name=match.get("companyName"),
+            )
         else:
             contract = await self._resolve_stock(stock_root(root))
         await self._cache.put(key, _CONTRACT, contract, ttl)
@@ -187,9 +237,16 @@ class IbkrWebContracts:
         if "error" in data:
             raise ProviderError("IBKR Web API stock lookup failed")
         candidates = [
-            WebContract(conid=_conid(contract), symbol=symbol, exchange=contract["exchange"], name=row.get("name"))
-            for row in _objects(data.get(symbol, []), "trsrv/stocks") if row.get("assetClass") == "STK"
-            for contract in _objects(row.get("contracts"), "trsrv/stocks") if contract.get("isUS") is True
+            WebContract(
+                conid=_conid(contract),
+                symbol=symbol,
+                exchange=contract["exchange"],
+                name=row.get("name"),
+            )
+            for row in _objects(data.get(symbol, []), "trsrv/stocks")
+            if row.get("assetClass") == "STK"
+            for contract in _objects(row.get("contracts"), "trsrv/stocks")
+            if contract.get("isUS") is True
         ]
         if not candidates:
             raise DataNotFoundError("Contract", symbol)
@@ -197,7 +254,11 @@ class IbkrWebContracts:
             rows = await self._search(symbol, sec_type="STK")
             valid = {contract.conid: contract for contract in candidates}
             for row in rows:
-                if row.get("symbol") == symbol and _section(row, "STK") is not None and _conid(row) in valid:
+                if (
+                    row.get("symbol") == symbol
+                    and _section(row, "STK") is not None
+                    and _conid(row) in valid
+                ):
                     return valid[_conid(row)]
         return candidates[0]
 
@@ -206,7 +267,11 @@ class IbkrWebContracts:
         today = date.today()
         candidates = []
         for row in _objects(data.get(root, []), "trsrv/futures"):
-            dates = [day for field in ("ltd", "expirationDate") if (day := _date(row.get(field))) is not None]
+            dates = [
+                day
+                for field in ("ltd", "expirationDate")
+                if (day := _date(row.get(field))) is not None
+            ]
             if dates and min(dates) >= today + FRONT_MONTH_BUFFER:
                 candidates.append((min(dates), _conid(row)))
         exchange = FUTURES_EXCHANGES.get(root)
@@ -221,8 +286,12 @@ class IbkrWebContracts:
                 continue
             exchanges.add(actual)
             contract = WebContract(
-                conid=conid, symbol=root, exchange=actual, local_symbol=info.get("local_symbol"),
-                name=info.get("company_name"), currency=info.get("currency") or "USD",
+                conid=conid,
+                symbol=root,
+                exchange=actual,
+                local_symbol=info.get("local_symbol"),
+                name=info.get("company_name"),
+                currency=info.get("currency") or "USD",
             )
             verified.append((last_trade, (contract, last_trade)))
             if exchange is not None:
@@ -247,7 +316,9 @@ class IbkrWebContracts:
         await self._cache.put(key, _INFO, data, _DAY)
         return data
 
-    async def _search(self, symbol: str, *, sec_type: str | None = None, by_name: bool = False) -> list[_Object]:
+    async def _search(
+        self, symbol: str, *, sec_type: str | None = None, by_name: bool = False
+    ) -> list[_Object]:
         path = "iserver/secdef/search"
         params = {"symbol": symbol}
         if sec_type:
@@ -255,7 +326,9 @@ class IbkrWebContracts:
         if by_name:
             params["name"] = "true"
         try:
-            data = await self._session.request(path, params=params, expected=(dict, list))
+            data = await self._session.request(
+                path, params=params, expected=(dict, list)
+            )
         except DataNotFoundError:
             return []
         if isinstance(data, dict) and data.get("error") == "No symbol found":
@@ -267,7 +340,8 @@ class IbkrWebContracts:
             # name=true may invalidate the server's strike lookup for the same root.
             self._option_search.clear()
             return [
-                row for row in await self._search(query, by_name=True)
+                row
+                for row in await self._search(query, by_name=True)
                 if row.get("secType") == "STK" or _section(row, "STK") is not None
             ]
 
@@ -279,15 +353,25 @@ class IbkrWebContracts:
             return cached[1:]
         # Non-name lookup must take place even if conids already came from Redis.
         rows = await self._search(root)
-        candidates = [row for row in rows if row.get("symbol") == root and _section(row, "STK") is not None]
+        candidates = [
+            row
+            for row in rows
+            if row.get("symbol") == root and _section(row, "STK") is not None
+        ]
         if not candidates:
             raise DataNotFoundError("Contract", root)
         match = candidates[0]
         if len(candidates) > 1:
             stock = await self.resolve(root, "stock")
-            match = next((row for row in candidates if _conid(row) == stock.conid), match)
+            match = next(
+                (row for row in candidates if _conid(row) == stock.conid), match
+            )
         option = _section(match, "OPT") or {}
-        contract = WebContract(conid=_conid(match), symbol=root, exchange=match.get("description") or "SMART")
+        contract = WebContract(
+            conid=_conid(match),
+            symbol=root,
+            exchange=match.get("description") or "SMART",
+        )
         months = frozenset(option.get("months", "").split(";")) - {""}
         if len(self._option_search) >= 1024:
             self._option_search.clear()
@@ -295,18 +379,30 @@ class IbkrWebContracts:
         return contract, months
 
     async def option_chain(
-        self, root: str, expiry: date, lower: Decimal | None, upper: Decimal | None, rights: Iterable[str],
+        self,
+        root: str,
+        expiry: date,
+        lower: Decimal | None,
+        upper: Decimal | None,
+        rights: Iterable[str],
     ) -> dict[_OptionKey, int]:
         await self._session.ensure_ready()
         async with self._search_lock:
             underlying, months = await self._option_underlying(root)
             if _month(expiry) not in months:
                 return {}
-            params = {"conid": underlying.conid, "sectype": "OPT", "month": _month(expiry), "exchange": "SMART"}
+            params = {
+                "conid": underlying.conid,
+                "sectype": "OPT",
+                "month": _month(expiry),
+                "exchange": "SMART",
+            }
             strike_key = f"mdh:ibkrweb:strikes:{underlying.conid}:{_month(expiry)}"
             rows = await self._cache.get(strike_key, _STRIKES)
             if rows is None:
-                raw = await self._session.request("iserver/secdef/strikes", params=params)
+                raw = await self._session.request(
+                    "iserver/secdef/strikes", params=params
+                )
                 try:
                     rows = _STRIKES.validate_python(raw)
                 except ValidationError as exc:
@@ -318,14 +414,20 @@ class IbkrWebContracts:
                 if values is None:
                     raise ProviderError("Invalid IBKR Web API strikes payload")
                 for strike in values:
-                    if (lower is None or lower <= strike) and (upper is None or strike <= upper):
+                    if (lower is None or lower <= strike) and (
+                        upper is None or strike <= upper
+                    ):
                         keys.append((strike, right))
             return await self._option_ids(underlying, expiry, sorted(set(keys)))
 
-    async def option_quote(self, root: str, expiry: date, strike: Decimal, right: str) -> int | None:
+    async def option_quote(
+        self, root: str, expiry: date, strike: Decimal, right: str
+    ) -> int | None:
         await self._session.ensure_ready()
         key = (strike, right)
-        cached = await self._cache.get(self._option_key(stock_root(root), expiry, *key), _CONID)
+        cached = await self._cache.get(
+            self._option_key(stock_root(root), expiry, *key), _CONID
+        )
         if cached is not None:
             return cached
         async with self._search_lock:
@@ -339,22 +441,34 @@ class IbkrWebContracts:
         return f"mdh:ibkrweb:optconid:{root}:{expiry:%Y%m%d}:{right}:{strike.normalize():f}"
 
     @staticmethod
-    def _missing_key(root: str, expiry: date, strike: Decimal | None = None, right: str | None = None) -> str:
+    def _missing_key(
+        root: str, expiry: date, strike: Decimal | None = None, right: str | None = None
+    ) -> str:
         suffix = "" if strike is None else f":{right}:{strike.normalize():f}"
         return f"mdh:ibkrweb:optmissing:{root}:{expiry:%Y%m%d}{suffix}"
 
-    async def _option_ids(self, underlying: WebContract, expiry: date, keys: list[_OptionKey]) -> dict[_OptionKey, int]:
+    async def _option_ids(
+        self, underlying: WebContract, expiry: date, keys: list[_OptionKey]
+    ) -> dict[_OptionKey, int]:
         root = underlying.symbol
         if keys:
-            expiry_missing: bool | None = await self._cache.get(self._missing_key(root, expiry), _MISSING)
+            expiry_missing: bool | None = await self._cache.get(
+                self._missing_key(root, expiry), _MISSING
+            )
             if expiry_missing:
                 return {}
         found: dict[_OptionKey, int] = {}
         missing: dict[Decimal, set[str]] = {}
         for strike, right in keys:
-            if (conid := await self._cache.get(self._option_key(root, expiry, strike, right), _CONID)) is not None:
+            if (
+                conid := await self._cache.get(
+                    self._option_key(root, expiry, strike, right), _CONID
+                )
+            ) is not None:
                 found[strike, right] = conid
-            elif not await self._cache.get(self._missing_key(root, expiry, strike, right), _MISSING):
+            elif not await self._cache.get(
+                self._missing_key(root, expiry, strike, right), _MISSING
+            ):
                 missing.setdefault(strike, set()).add(right)
         ttl = _ttl(expiry + timedelta(days=1))
         path = "iserver/secdef/info"
@@ -362,27 +476,40 @@ class IbkrWebContracts:
 
         async def lookup(strike: Decimal, rights: set[str]) -> list[_Object]:
             params: dict[str, Any] = {
-                "conid": underlying.conid, "sectype": "OPT", "month": _month(expiry),
-                "strike": f"{strike:f}", "exchange": "SMART",
+                "conid": underlying.conid,
+                "sectype": "OPT",
+                "month": _month(expiry),
+                "strike": f"{strike:f}",
+                "exchange": "SMART",
             }
             if len(rights) == 1:
                 params["right"] = next(iter(rights))
             async with limit:
                 try:
-                    return _objects(await self._session.request(path, params=params, expected=list), path)
+                    return _objects(
+                        await self._session.request(path, params=params, expected=list),
+                        path,
+                    )
                 except (DataNotFoundError, DataValidationError):
                     return []  # the gateway rejects strikes it does not list; skip only this strike
 
         # A TaskGroup cancels the remaining lookups as soon as one fails with a real error.
         async with asyncio.TaskGroup() as group:
-            tasks = {strike: group.create_task(lookup(strike, rights)) for strike, rights in missing.items()}
+            tasks = {
+                strike: group.create_task(lookup(strike, rights))
+                for strike, rights in missing.items()
+            }
         for strike, rights in missing.items():
             rows = tasks[strike].result()
             # Prefer the standard trading class to adjusted contracts with the same strike.
             rows.sort(key=lambda row: row.get("tradingClass") != root)
             for row in rows:
                 side = row.get("right")
-                if not isinstance(side, str) or side not in rights or _date(row.get("maturityDate")) != expiry:
+                if (
+                    not isinstance(side, str)
+                    or side not in rights
+                    or _date(row.get("maturityDate")) != expiry
+                ):
                     continue
                 try:
                     actual_strike = _STRIKE.validate_python(row.get("strike"))
@@ -391,11 +518,20 @@ class IbkrWebContracts:
                 if actual_strike == strike and (strike, side) not in found:
                     conid = _conid(row)
                     found[strike, side] = conid
-                    await self._cache.put(self._option_key(root, expiry, strike, side), _CONID, conid, ttl)
+                    await self._cache.put(
+                        self._option_key(root, expiry, strike, side), _CONID, conid, ttl
+                    )
             for side in rights:
                 if (strike, side) not in found:
-                    await self._cache.put(self._missing_key(root, expiry, strike, side), _MISSING, True, _MISSING_TTL)
+                    await self._cache.put(
+                        self._missing_key(root, expiry, strike, side),
+                        _MISSING,
+                        True,
+                        _MISSING_TTL,
+                    )
         if missing and not found:
             # The month is listed but this expiry is not: answer repeated requests without a strike walk.
-            await self._cache.put(self._missing_key(root, expiry), _MISSING, True, _MISSING_EXPIRY_TTL)
+            await self._cache.put(
+                self._missing_key(root, expiry), _MISSING, True, _MISSING_EXPIRY_TTL
+            )
         return {key: found[key] for key in keys if key in found}

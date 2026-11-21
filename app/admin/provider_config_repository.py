@@ -11,8 +11,22 @@ from app.config import settings
 from app.providers.ibkr_web_config import IbkrWebConnectionConfig
 
 STORABLE_INTERVALS = ("1h", "4h", "1d", "1w")
-KNOWN_PROVIDERS = ("ibkr", "ibkrweb", "lseg", "schwab", "mock", "finnhub", "polygon", "prixe", "alphavantage", "financialdatasets", "earningsapi")
-OPT_IN_PROVIDERS = frozenset({"ibkrweb", "alphavantage", "financialdatasets", "earningsapi"})
+KNOWN_PROVIDERS = (
+    "ibkr",
+    "ibkrweb",
+    "lseg",
+    "schwab",
+    "mock",
+    "finnhub",
+    "polygon",
+    "prixe",
+    "alphavantage",
+    "financialdatasets",
+    "earningsapi",
+)
+OPT_IN_PROVIDERS = frozenset(
+    {"ibkrweb", "alphavantage", "financialdatasets", "earningsapi"}
+)
 
 CONNECTION_CONFIG_ALLOWLIST: dict[str, set[str]] = {
     "ibkr": {"host", "port", "client_id", "account_id", "env", "market_data_type"},
@@ -140,14 +154,18 @@ class ProviderConfigRepository:
         candidate = replace(candidate, updated_at=datetime.now(UTC).isoformat())
         self._validate_config(candidate)
         if provider_name == "ibkrweb" and (
-            candidate.enabled or isinstance(config, ProviderRuntimeConfig) or "connection_config" in config
+            candidate.enabled
+            or isinstance(config, ProviderRuntimeConfig)
+            or "connection_config" in config
         ):
             gateway = IbkrWebConnectionConfig.from_settings(candidate.connection_config)
             if gateway.ca_bundle:
                 try:
                     gateway.verification()
                 except (OSError, ssl.SSLError) as exc:
-                    raise ValueError("ca_bundle must point to a readable CA certificate file") from exc
+                    raise ValueError(
+                        "ca_bundle must point to a readable CA certificate file"
+                    ) from exc
         with self._connect() as conn:
             conn.execute(
                 """
@@ -330,8 +348,13 @@ class ProviderConfigRepository:
             raise ValueError("retry_backoff_seconds must be non-negative")
         if config.rate_limit_per_sec < 0:
             raise ValueError("rate_limit_per_sec must be non-negative")
-        if config.provider_name == "ibkrweb" and not 0 < config.rate_limit_per_sec <= 10:
-            raise ValueError("ibkrweb rate_limit_per_sec must be greater than 0 and at most 10")
+        if (
+            config.provider_name == "ibkrweb"
+            and not 0 < config.rate_limit_per_sec <= 10
+        ):
+            raise ValueError(
+                "ibkrweb rate_limit_per_sec must be greater than 0 and at most 10"
+            )
         if config.circuit_breaker_failure_threshold < 1:
             raise ValueError("circuit_breaker_failure_threshold must be at least 1")
         if config.circuit_breaker_reset_seconds <= 0:

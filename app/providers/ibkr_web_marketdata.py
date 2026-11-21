@@ -40,15 +40,23 @@ HISTORY_WINDOWS = {
 # Calendar span of one window; used to bound how many history requests one call may spend
 # (the gateway allows 50 history requests per minute, shared with last-price fallbacks).
 _WINDOW_SPANS = {
-    "12h": timedelta(hours=12), "1d": timedelta(days=1), "3d": timedelta(days=3), "1w": timedelta(weeks=1),
-    "2w": timedelta(weeks=2), "1m": timedelta(days=30), "2y": timedelta(days=730), "10y": timedelta(days=3650),
+    "12h": timedelta(hours=12),
+    "1d": timedelta(days=1),
+    "3d": timedelta(days=3),
+    "1w": timedelta(weeks=1),
+    "2w": timedelta(weeks=2),
+    "1m": timedelta(days=30),
+    "2y": timedelta(days=730),
+    "10y": timedelta(days=3650),
 }
 MAX_HISTORY_WINDOWS = 40
 QUOTE_FIELDS = "31,84,86,87,7762,70,71,7295,7296,7741,6509"
 OPTION_FIELDS = "31,84,86,87,7762,7296,7633,7308,7309,7310,7311,7638,6509"
 
 
-def number(value: object, *, last: bool = False, compact: bool = False) -> Decimal | None:
+def number(
+    value: object, *, last: bool = False, compact: bool = False
+) -> Decimal | None:
     if not isinstance(value, (str, int, float, Decimal)) or isinstance(value, bool):
         return None
     text = str(value).strip().replace(",", "")
@@ -81,7 +89,9 @@ def quantity(value: object, *, fallback: object = None) -> int | None:
 def price(row: _Row, fields: Sequence[str] = ("31", "7296", "7741")) -> Decimal | None:
     for field in fields:
         value = number(row.get(field), last=field == "31")
-        if value is not None and value != -1:  # IBKR sentinel (negative futures prices remain valid)
+        if (
+            value is not None and value != -1
+        ):  # IBKR sentinel (negative futures prices remain valid)
             return value
     return None
 
@@ -100,19 +110,32 @@ def availability(value: object) -> str:
 
 
 def entitlement_error(
-    value: object, root: str, sec_type: str, instrument: str, *, market_data_type: int | None = None,
+    value: object,
+    root: str,
+    sec_type: str,
+    instrument: str,
+    *,
+    market_data_type: int | None = None,
 ) -> ProviderNotEntitledError | None:
     code = availability(value)
     if code == "O":
         hint = "Complete the Market Data API Acknowledgement in IBKR Client Portal settings."
     elif code == "N":
         hint = "The IBKR account is not subscribed to market data for this instrument."
-    elif market_data_type is not None and (not code or code not in _TYPES[market_data_type]):
-        hint = "Live data needs a market data subscription." if market_data_type == 1 else "The gateway returned a different market data type."
+    elif market_data_type is not None and (
+        not code or code not in _TYPES[market_data_type]
+    ):
+        hint = (
+            "Live data needs a market data subscription."
+            if market_data_type == 1
+            else "The gateway returned a different market data type."
+        )
     else:
         return None
     return ProviderNotEntitledError(
-        PROVIDER, symbol=canonical_symbol(root, sec_type), instrument=instrument,
+        PROVIDER,
+        symbol=canonical_symbol(root, sec_type),
+        instrument=instrument,
         details={"availability": value, "hint": hint},
     )
 
@@ -134,19 +157,28 @@ class SnapshotEngine:
         self._condition = asyncio.Condition()
 
     async def get(
-        self, conids: Sequence[int], fields: str, *, timeout: float,
-        complete: Callable[[_Row], bool], required_fraction: float = 1,
+        self,
+        conids: Sequence[int],
+        fields: str,
+        *,
+        timeout: float,
+        complete: Callable[[_Row], bool],
+        required_fraction: float = 1,
         terminal: Callable[[_Row], bool] | None = None,
     ) -> dict[int, _Row]:
         size = min(settings.IBKRWEB_SNAPSHOT_BATCH_SIZE, self._max_streams)
         unique = list(dict.fromkeys(conids))
         result: dict[int, _Row] = {}
         for i in range(0, len(unique), size):
-            batch = unique[i:i + size]
+            batch = unique[i : i + size]
             await self._session.ensure_ready()
             await self._reserve(batch)
             try:
-                result.update(await self._poll(batch, fields, timeout, complete, required_fraction, terminal))
+                result.update(
+                    await self._poll(
+                        batch, fields, timeout, complete, required_fraction, terminal
+                    )
+                )
             finally:
                 async with self._condition:
                     self._active -= 1
@@ -162,7 +194,10 @@ class SnapshotEngine:
                         self._draining = True
                     else:
                         self._generation = self._session.generation
-                if not self._draining and len(self._streams.union(batch)) <= self._max_streams:
+                if (
+                    not self._draining
+                    and len(self._streams.union(batch)) <= self._max_streams
+                ):
                     break
                 self._draining = True  # stop new polls so that the budget can be reset
                 if self._active == 0:
@@ -180,8 +215,12 @@ class SnapshotEngine:
             self._active += 1
 
     async def _poll(
-        self, batch: list[int], fields: str, timeout: float,
-        complete: Callable[[_Row], bool], required_fraction: float,
+        self,
+        batch: list[int],
+        fields: str,
+        timeout: float,
+        complete: Callable[[_Row], bool],
+        required_fraction: float,
         terminal: Callable[[_Row], bool] | None,
     ) -> dict[int, _Row]:
         params = {"conids": ",".join(map(str, batch)), "fields": fields}
@@ -190,7 +229,9 @@ class SnapshotEngine:
         try:
             async with asyncio.timeout(timeout):
                 while True:
-                    raw = await self._session.request(_SNAPSHOT, params=params, expected=list)
+                    raw = await self._session.request(
+                        _SNAPSHOT, params=params, expected=list
+                    )
                     for row in raw:
                         if not isinstance(row, dict):
                             raise ProviderError("Invalid IBKR Web API snapshot entry")
@@ -199,8 +240,11 @@ class SnapshotEngine:
                             latest.setdefault(conid, {}).update(row)
                     filled = sum(complete(row) for row in latest.values())
                     if filled >= len(batch) * required_fraction or (
-                        terminal is not None and len(latest) == len(batch)
-                        and all(complete(row) or terminal(row) for row in latest.values())
+                        terminal is not None
+                        and len(latest) == len(batch)
+                        and all(
+                            complete(row) or terminal(row) for row in latest.values()
+                        )
                     ):
                         break
                     await asyncio.sleep(0.5)
@@ -218,14 +262,29 @@ class WebHistory:
         self._session = session
 
     async def _page(
-        self, contract: WebContract, root: str, sec_type: str, *, bar: str, period: str,
-        extended: bool, cursor: datetime | None = None,
+        self,
+        contract: WebContract,
+        root: str,
+        sec_type: str,
+        *,
+        bar: str,
+        period: str,
+        extended: bool,
+        cursor: datetime | None = None,
     ) -> tuple[list[tuple[datetime, _Row]], Decimal]:
-        params: _Row = {"conid": contract.conid, "period": period, "bar": bar, "outsideRth": str(extended).lower(), "source": "Last"}
+        params: _Row = {
+            "conid": contract.conid,
+            "period": period,
+            "bar": bar,
+            "outsideRth": str(extended).lower(),
+            "source": "Last",
+        }
         if cursor is not None:
             params.update(startTime=cursor.strftime("%Y%m%d-%H:%M:%S"), direction=-1)
         data = await self._session.request(_HISTORY, params=params)
-        if error := entitlement_error(data.get("mdAvailability"), root, sec_type, contract.instrument):
+        if error := entitlement_error(
+            data.get("mdAvailability"), root, sec_type, contract.instrument
+        ):
             raise error
         rows = data.get("data")
         if not isinstance(rows, list):
@@ -236,23 +295,37 @@ class WebHistory:
             if stamp is None:
                 raise ProviderError("Invalid IBKR Web API bar timestamp")
             parsed.append((stamp, row))
-        factor = number(data.get("volumeFactor")) if "volumeFactor" in data else Decimal(1)
+        factor = (
+            number(data.get("volumeFactor")) if "volumeFactor" in data else Decimal(1)
+        )
         if factor is None or factor <= 0:
             raise ProviderError("Invalid IBKR Web API volume factor")
         return parsed, factor
 
     async def last_daily(
-        self, contract: WebContract, root: str, sec_type: str,
+        self,
+        contract: WebContract,
+        root: str,
+        sec_type: str,
     ) -> tuple[datetime, PriceBar] | None:
-        rows, factor = await self._page(contract, root, sec_type, bar="1d", period="1w", extended=False)
+        rows, factor = await self._page(
+            contract, root, sec_type, bar="1d", period="1w", extended=False
+        )
         if not rows:
             return None
         stamp, row = max(rows, key=lambda pair: pair[0])
         return stamp, self._bar(contract, root, sec_type, stamp, row, factor)
 
     async def bars(
-        self, contract: WebContract, root: str, sec_type: str, interval: str,
-        start: datetime, end: datetime, extended: bool, zone: tzinfo,
+        self,
+        contract: WebContract,
+        root: str,
+        sec_type: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended: bool,
+        zone: tzinfo,
     ) -> list[PriceBar]:
         try:
             bar, period, step = HISTORY_WINDOWS[interval]
@@ -264,11 +337,18 @@ class WebHistory:
         start, end = _utc(start), _utc(end)
         if start > end:
             return []
-        windows = math.ceil((min(end, datetime.now(UTC)) - start) / _WINDOW_SPANS[period]) + 1
+        windows = (
+            math.ceil((min(end, datetime.now(UTC)) - start) / _WINDOW_SPANS[period]) + 1
+        )
         if windows > MAX_HISTORY_WINDOWS:
             raise DataValidationError(
                 f"Requested range is too long for interval '{interval}' on the IBKR Web API provider.",
-                details={"interval": interval, "max_span_days": (_WINDOW_SPANS[period] * (MAX_HISTORY_WINDOWS - 1)).days},
+                details={
+                    "interval": interval,
+                    "max_span_days": (
+                        _WINDOW_SPANS[period] * (MAX_HISTORY_WINDOWS - 1)
+                    ).days,
+                },
             )
         is_calendar_bar = interval in {"1d", "1w"}
         # Include the session containing the range end. The gateway treated
@@ -280,20 +360,36 @@ class WebHistory:
         for _ in range(windows + MAX_HISTORY_WINDOWS // 4):
             if cursor < start:
                 break
-            rows, factor = await self._page(contract, root, sec_type, bar=bar, period=period, extended=extended, cursor=cursor)
+            rows, factor = await self._page(
+                contract,
+                root,
+                sec_type,
+                bar=bar,
+                period=period,
+                extended=extended,
+                cursor=cursor,
+            )
             if not rows:
                 break
             for stamp, row in rows:
                 normalized = stamp
                 if interval == "1d":
-                    normalized = datetime.combine(stamp.astimezone(zone).date(), day_time.min)
+                    normalized = datetime.combine(
+                        stamp.astimezone(zone).date(), day_time.min
+                    )
                 elif interval == "1w":
                     normalized = datetime.combine(stamp.date(), day_time.min)
                 if start <= _utc(normalized) <= end and stamp not in collected:
-                    collected[stamp] = self._bar(contract, root, sec_type, normalized, row, factor)
+                    collected[stamp] = self._bar(
+                        contract, root, sec_type, normalized, row, factor
+                    )
             earliest = min(stamp for stamp, _ in rows)
             if is_calendar_bar:
-                earliest_day = earliest.astimezone(zone).date() if interval == "1d" else earliest.date()
+                earliest_day = (
+                    earliest.astimezone(zone).date()
+                    if interval == "1d"
+                    else earliest.date()
+                )
                 covers_start = earliest_day <= start.date()
             else:
                 covers_start = earliest <= start
@@ -303,17 +399,36 @@ class WebHistory:
             candidate = earliest + (timedelta(days=1) if is_calendar_bar else step * 2)
             cursor = candidate if candidate < cursor else earliest
         else:
-            raise ProviderError("IBKR Web API history did not cover the requested range", details={"interval": interval})
+            raise ProviderError(
+                "IBKR Web API history did not cover the requested range",
+                details={"interval": interval},
+            )
         return [collected[stamp] for stamp in sorted(collected)]
 
     @staticmethod
-    def _bar(contract: WebContract, root: str, sec_type: str, stamp: datetime, row: _Row, factor: Decimal) -> PriceBar:
-        opening, high, low, close = (number(row.get(field)) for field in ("o", "h", "l", "c"))
+    def _bar(
+        contract: WebContract,
+        root: str,
+        sec_type: str,
+        stamp: datetime,
+        row: _Row,
+        factor: Decimal,
+    ) -> PriceBar:
+        opening, high, low, close = (
+            number(row.get(field)) for field in ("o", "h", "l", "c")
+        )
         if opening is None or high is None or low is None or close is None:
             raise ProviderError("Invalid IBKR Web API history price")
         volume = number(row.get("v"))
         return PriceBar(
-            symbol=canonical_symbol(root, sec_type), start=stamp, end=stamp,
-            open=opening, high=high, low=low, close=close, volume=int((volume or Decimal(0)) * factor),
-            provider=PROVIDER, source_instrument=contract.source(root),
+            symbol=canonical_symbol(root, sec_type),
+            start=stamp,
+            end=stamp,
+            open=opening,
+            high=high,
+            low=low,
+            close=close,
+            volume=int((volume or Decimal(0)) * factor),
+            provider=PROVIDER,
+            source_instrument=contract.source(root),
         )

@@ -49,13 +49,17 @@ ProfileSymbol = Annotated[ParsedSymbol, Depends(symbol_param(PROFILE_TYPES))]
 
 
 @router.get(
-    "/search", response_model=ResponseEnvelope[list[CompanySummary]],
+    "/search",
+    response_model=ResponseEnvelope[list[CompanySummary]],
     responses={200: {"headers": DATA_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_COMPANY_SEARCH_SECONDS, key="companies:search")
 async def search_companies(
-    q: str, service: CompanyServiceDep,
-    provider: str | None = Query(None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."),
+    q: str,
+    service: CompanyServiceDep,
+    provider: str | None = Query(
+        None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."
+    ),
 ) -> Any:
     """Search for companies by query string."""
     provider = provider.lower() if provider else None
@@ -64,7 +68,8 @@ async def search_companies(
 
 
 @router.get(
-    "/{symbol}/earnings", response_model=ResponseEnvelope[list[EarningsEvent]],
+    "/{symbol}/earnings",
+    response_model=ResponseEnvelope[list[EarningsEvent]],
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_EARNINGS_SECONDS, key="companies:earnings")
@@ -72,7 +77,9 @@ async def get_company_earnings(
     symbol: CompanySymbol,
     service: EarningsServiceDep,
     from_date: date | None = Query(
-        None, alias="from", description="First report date (default: today - 1095 days)."
+        None,
+        alias="from",
+        description="First report date (default: today - 1095 days).",
     ),
     to_date: date | None = Query(
         None, alias="to", description="Last report date (default: today + 400 days)."
@@ -112,13 +119,17 @@ async def get_company_earnings(
 
 
 @router.get(
-    "/{symbol}", response_model=ResponseEnvelope[CompanyProfile],
+    "/{symbol}",
+    response_model=ResponseEnvelope[CompanyProfile],
     responses={200: {"headers": DATA_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
-    symbol: ProfileSymbol, service: CompanyServiceDep,
-    provider: str | None = Query(None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."),
+    symbol: ProfileSymbol,
+    service: CompanyServiceDep,
+    provider: str | None = Query(
+        None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."
+    ),
 ) -> Any:
     """Get profile information of a stock, ETF or well-known index.
 
@@ -132,7 +143,8 @@ async def get_company_profile(
 
 
 @router.get(
-    "/{symbol}/news", response_model=NewsResponse,
+    "/{symbol}/news",
+    response_model=NewsResponse,
     responses={200: {"headers": CSV_RESPONSE_HEADERS}},
 )
 @cache(expire=settings.CACHE_TTL_COMPANY_NEWS_SECONDS, key="companies:news")

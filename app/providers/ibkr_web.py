@@ -60,7 +60,9 @@ _CENTRAL_EXCHANGES = {"CME", "CBOT", "ECBOT", "CFE"}
 _Payload = dict[str, Any]
 
 
-class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseVolatilityProvider):
+class IbkrWebProvider(
+    BasePriceProvider, BaseCompanyProvider, BaseOptionsProvider, BaseVolatilityProvider
+):
     name = PROVIDER
     native_intervals = frozenset(NATIVE_INTERVALS)
     price_sec_types = frozenset({"stock", "etf", "index", "future"})
@@ -78,19 +80,27 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
         self._history_reader: WebHistory | None = None
 
     @staticmethod
-    def _transport_settings(config: Any) -> tuple[IbkrWebConnectionConfig, float, float]:
+    def _transport_settings(
+        config: Any,
+    ) -> tuple[IbkrWebConnectionConfig, float, float]:
         return (
-            IbkrWebConnectionConfig.from_settings(getattr(config, "connection_config", None)),
+            IbkrWebConnectionConfig.from_settings(
+                getattr(config, "connection_config", None)
+            ),
             getattr(config, "timeout_seconds", settings.PROVIDER_REQUEST_TIMEOUT),
             getattr(config, "rate_limit_per_sec", 6.0),
         )
 
     def requires_replacement(self, config: Any) -> bool:
-        return self._gateway is not None and self._transport_settings(self._runtime_config) != self._transport_settings(config)
+        return self._gateway is not None and self._transport_settings(
+            self._runtime_config
+        ) != self._transport_settings(config)
 
     def configure(self, config: Any) -> None:
         if self.requires_replacement(config):
-            raise RuntimeError("Replace the IBKR Web API provider when its gateway settings change")
+            raise RuntimeError(
+                "Replace the IBKR Web API provider when its gateway settings change"
+            )
         super().configure(config)
 
     @property
@@ -109,7 +119,9 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
     @property
     def snapshots(self) -> SnapshotEngine:
         if self._snapshot_engine is None:
-            self._snapshot_engine = SnapshotEngine(self.session, self.session.config.max_streams)
+            self._snapshot_engine = SnapshotEngine(
+                self.session, self.session.config.max_streams
+            )
         return self._snapshot_engine
 
     @property
@@ -136,7 +148,9 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
 
     @staticmethod
     def _default_zone(contract: WebContract) -> tzinfo:
-        return exchange_timezone("US/Central" if contract.exchange in _CENTRAL_EXCHANGES else "US/Eastern")
+        return exchange_timezone(
+            "US/Central" if contract.exchange in _CENTRAL_EXCHANGES else "US/Eastern"
+        )
 
     async def _schedule(self, contract: WebContract) -> tuple[tzinfo, _Payload] | None:
         cached = self._schedule_cache.get(contract.conid)
@@ -144,7 +158,9 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
         if cached is not None and now.astimezone(cached[0]).date() == cached[1]:
             return cached[0], cached[2]
         try:
-            body = await self.session.request("contract/trading-schedule", params={"conid": contract.conid})
+            body = await self.session.request(
+                "contract/trading-schedule", params={"conid": contract.conid}
+            )
             zone = exchange_timezone(body["exchange_time_zone"])
             schedules = body["schedules"]
             if not isinstance(schedules, dict):
@@ -153,7 +169,11 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
             return None
         if len(self._schedule_cache) >= 1024:
             self._schedule_cache.clear()
-        self._schedule_cache[contract.conid] = (zone, now.astimezone(zone).date(), schedules)
+        self._schedule_cache[contract.conid] = (
+            zone,
+            now.astimezone(zone).date(),
+            schedules,
+        )
         return zone, schedules
 
     async def _market_open(self, contract: WebContract) -> bool | None:
@@ -175,24 +195,41 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
         except (KeyError, ValueError, TypeError, OverflowError, OSError):
             return None
 
-    async def get_last_price(self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock") -> PriceQuote:
+    async def get_last_price(
+        self, symbol: str, market_data_type: int | None = None, sec_type: str = "stock"
+    ) -> PriceQuote:
         effective = self._market_data_type(market_data_type)
         root = symbol.upper()
         contract = await self.contracts.resolve(root, sec_type)
         snapshots = await self.snapshots.get(
-            [contract.conid], QUOTE_FIELDS, timeout=settings.IBKRWEB_SNAPSHOT_TIMEOUT_SECONDS,
-            complete=lambda row: bool(availability(row.get("6509"))) and (
-                price(row) is not None or availability(row.get("6509")) in {"N", "O"}
+            [contract.conid],
+            QUOTE_FIELDS,
+            timeout=settings.IBKRWEB_SNAPSHOT_TIMEOUT_SECONDS,
+            complete=lambda row: (
+                bool(availability(row.get("6509")))
+                and (
+                    price(row) is not None
+                    or availability(row.get("6509")) in {"N", "O"}
+                )
             ),
         )
         row = snapshots.get(contract.conid, {})
         current = price(row)
         code = availability(row.get("6509"))
         denied = entitlement_error(
-            row.get("6509"), root, sec_type, contract.instrument,
-            market_data_type=effective if code or effective == 1 or current is not None else None,
+            row.get("6509"),
+            root,
+            sec_type,
+            contract.instrument,
+            market_data_type=effective
+            if code or effective == 1 or current is not None
+            else None,
         )
-        if denied and (code == "O" or effective == 1 or not settings.IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR):
+        if denied and (
+            code == "O"
+            or effective == 1
+            or not settings.IBKR_FALLBACK_ON_SUBSCRIPTION_ERROR
+        ):
             raise denied
         if current is None or denied is not None:
             try:
@@ -207,62 +244,118 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
                 raise DataNotFoundError("MarketData", canonical_symbol(root, sec_type))
             stamp, bar = fallback
             return PriceQuote(
-                symbol=canonical_symbol(root, sec_type), price=bar.close, currency=contract.currency,
-                timestamp=stamp, open=bar.open, high=bar.high, low=bar.low, volume=bar.volume,
-                provider=self.name, is_market_open=await self._market_open(contract), source_instrument=contract.source(root),
+                symbol=canonical_symbol(root, sec_type),
+                price=bar.close,
+                currency=contract.currency,
+                timestamp=stamp,
+                open=bar.open,
+                high=bar.high,
+                low=bar.low,
+                volume=bar.volume,
+                provider=self.name,
+                is_market_open=await self._market_open(contract),
+                source_instrument=contract.source(root),
             )
         return PriceQuote(
-            symbol=canonical_symbol(root, sec_type), price=current, currency=contract.currency,
+            symbol=canonical_symbol(root, sec_type),
+            price=current,
+            currency=contract.currency,
             timestamp=timestamp_ms(row.get("_updated")) or datetime.now(UTC),
-            bid=price(row, ("84",)), ask=price(row, ("86",)), open=price(row, ("7295",)),
-            high=price(row, ("70",)), low=price(row, ("71",)), volume=quantity(row.get("7762"), fallback=row.get("87")),
-            provider=self.name, is_market_open=await self._market_open(contract), source_instrument=contract.source(root),
+            bid=price(row, ("84",)),
+            ask=price(row, ("86",)),
+            open=price(row, ("7295",)),
+            high=price(row, ("70",)),
+            low=price(row, ("71",)),
+            volume=quantity(row.get("7762"), fallback=row.get("87")),
+            provider=self.name,
+            is_market_open=await self._market_open(contract),
+            source_instrument=contract.source(root),
         )
 
     async def get_historical_prices(
-        self, symbol: str, interval: str, start: datetime, end: datetime, extended_hours: bool = False,
+        self,
+        symbol: str,
+        interval: str,
+        start: datetime,
+        end: datetime,
+        extended_hours: bool = False,
         sec_type: str = "stock",
     ) -> list[PriceBar]:
         if interval not in HISTORY_WINDOWS:
-            raise ProviderError(f"Unsupported interval '{interval}' for IBKR Web API provider.",
-                                details={"supported_intervals": list(NATIVE_INTERVALS)})
+            raise ProviderError(
+                f"Unsupported interval '{interval}' for IBKR Web API provider.",
+                details={"supported_intervals": list(NATIVE_INTERVALS)},
+            )
         root = symbol.upper()
         contract = await self.contracts.resolve(root, sec_type)
-        return await self.history.bars(contract, root, sec_type, interval, start, end, extended_hours, self._default_zone(contract))
+        return await self.history.bars(
+            contract,
+            root,
+            sec_type,
+            interval,
+            start,
+            end,
+            extended_hours,
+            self._default_zone(contract),
+        )
 
     @staticmethod
     def _has_option_price(row: _Payload) -> bool:
         return price(row, ("31", "7296", "84", "86")) is not None
 
-    async def _option_snapshots(self, conids: list[int], *, fraction: float) -> dict[int, _Payload]:
+    async def _option_snapshots(
+        self, conids: list[int], *, fraction: float
+    ) -> dict[int, _Payload]:
         return await self.snapshots.get(
-            conids, OPTION_FIELDS, timeout=settings.IBKRWEB_OPTION_SNAPSHOT_TIMEOUT_SECONDS,
+            conids,
+            OPTION_FIELDS,
+            timeout=settings.IBKRWEB_OPTION_SNAPSHOT_TIMEOUT_SECONDS,
             required_fraction=fraction,
-            complete=lambda row: bool(availability(row.get("6509"))) and self._has_option_price(row),
+            complete=lambda row: (
+                bool(availability(row.get("6509"))) and self._has_option_price(row)
+            ),
             terminal=lambda row: availability(row.get("6509")) in {"N", "O"},
         )
 
     @staticmethod
-    def _option_model(root: str, expiry: date, strike: Decimal, right: str, row: _Payload) -> OptionQuote:
+    def _option_model(
+        root: str, expiry: date, strike: Decimal, right: str, row: _Payload
+    ) -> OptionQuote:
         identifier = format_occ_symbol(stock_root(root), expiry, right, strike)
         return OptionQuote(
-            symbol=identifier, underlying_symbol=root, strike=strike, expiry=expiry,
-            type="call" if right == "C" else "put", price=price(row, ("31", "7296")) or Decimal(0),
-            bid=price(row, ("84",)), ask=price(row, ("86",)),
-            volume=quantity(row.get("7762"), fallback=row.get("87")) or 0, open_interest=quantity(row.get("7638")),
-            implied_volatility=_float(percentage(row.get("7633"))), delta=_float(number(row.get("7308"))),
-            gamma=_float(number(row.get("7309"))), theta=_float(number(row.get("7310"))),
-            vega=_float(number(row.get("7311"))), provider=PROVIDER,
+            symbol=identifier,
+            underlying_symbol=root,
+            strike=strike,
+            expiry=expiry,
+            type="call" if right == "C" else "put",
+            price=price(row, ("31", "7296")) or Decimal(0),
+            bid=price(row, ("84",)),
+            ask=price(row, ("86",)),
+            volume=quantity(row.get("7762"), fallback=row.get("87")) or 0,
+            open_interest=quantity(row.get("7638")),
+            implied_volatility=_float(percentage(row.get("7633"))),
+            delta=_float(number(row.get("7308"))),
+            gamma=_float(number(row.get("7309"))),
+            theta=_float(number(row.get("7310"))),
+            vega=_float(number(row.get("7311"))),
+            provider=PROVIDER,
         )
 
     async def get_option_chain(
-        self, symbol: str, expiry: date, min_strike: Decimal | None = None, max_strike: Decimal | None = None,
-        right: Literal["call", "put"] | None = None, market_data_type: int | None = None,
+        self,
+        symbol: str,
+        expiry: date,
+        min_strike: Decimal | None = None,
+        max_strike: Decimal | None = None,
+        right: Literal["call", "put"] | None = None,
+        market_data_type: int | None = None,
     ) -> OptionChain:
         effective = self._market_data_type(market_data_type)
         root = symbol.upper()
         rights = ("C", "P") if right is None else ("C" if right == "call" else "P",)
-        ids = await self.contracts.option_chain(root, expiry, min_strike, max_strike, rights)
+        ids = await self.contracts.option_chain(
+            root, expiry, min_strike, max_strike, rights
+        )
         snapshots = await self._option_snapshots(list(ids.values()), fraction=0.5)
         options = []
         usable = 0
@@ -270,8 +363,15 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
         for (strike, side), conid in ids.items():
             row = snapshots.get(conid, {})
             code = availability(row.get("6509"))
-            denied = entitlement_error(row.get("6509"), root, "stock", str(conid),
-                                      market_data_type=effective if code or self._has_option_price(row) else None)
+            denied = entitlement_error(
+                row.get("6509"),
+                root,
+                "stock",
+                str(conid),
+                market_data_type=effective
+                if code or self._has_option_price(row)
+                else None,
+            )
             if denied is not None:
                 if code == "O":
                     raise denied
@@ -282,9 +382,13 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
             options.append(self._option_model(root, expiry, strike, side, row))
         if denial is not None and not usable:
             raise denial
-        return OptionChain(underlying_symbol=root, expiry=expiry, options=options, provider=self.name)
+        return OptionChain(
+            underlying_symbol=root, expiry=expiry, options=options, provider=self.name
+        )
 
-    async def get_option_quote(self, symbol: str, option_id: str, market_data_type: int | None = None) -> OptionQuote:
+    async def get_option_quote(
+        self, symbol: str, option_id: str, market_data_type: int | None = None
+    ) -> OptionQuote:
         try:
             root, expiry, right, strike = parse_occ_symbol(option_id)
         except ValueError as exc:
@@ -297,56 +401,93 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
         if conid is None:
             raise DataNotFoundError("OptionContract", option_id)
         row = (await self._option_snapshots([conid], fraction=1)).get(conid, {})
-        if error := entitlement_error(row.get("6509"), root, "stock", option_id,
-                                      market_data_type=effective if availability(row.get("6509")) or self._has_option_price(row) else None):
+        if error := entitlement_error(
+            row.get("6509"),
+            root,
+            "stock",
+            option_id,
+            market_data_type=effective
+            if availability(row.get("6509")) or self._has_option_price(row)
+            else None,
+        ):
             raise error
         if not self._has_option_price(row):
             raise DataNotFoundError("MarketData", option_id)
         return self._option_model(symbol, expiry, strike, right, row)
 
     async def get_implied_volatility(
-        self, symbol: str, sec_type: VolatilitySecType = "stock", ric: str | None = None,
+        self,
+        symbol: str,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
     ) -> VolatilitySnapshot:
         if ric is not None:
             raise DataValidationError("The ric override is only supported by LSEG")
         root = symbol.upper()
         contract = await self.contracts.resolve(root, sec_type)
         rows = await self.snapshots.get(
-            [contract.conid], "7283,6509", timeout=settings.IBKRWEB_IV_TIMEOUT_SECONDS,
-            complete=lambda row: quantize_iv(percentage(row.get("7283"))) is not None
-            or availability(row.get("6509")) in {"N", "O"},
+            [contract.conid],
+            "7283,6509",
+            timeout=settings.IBKRWEB_IV_TIMEOUT_SECONDS,
+            complete=lambda row: (
+                quantize_iv(percentage(row.get("7283"))) is not None
+                or availability(row.get("6509")) in {"N", "O"}
+            ),
         )
         row = rows.get(contract.conid, {})
-        if error := entitlement_error(row.get("6509"), root, sec_type, contract.instrument):
+        if error := entitlement_error(
+            row.get("6509"), root, sec_type, contract.instrument
+        ):
             raise error
         iv = quantize_iv(percentage(row.get("7283")))
         if iv is None:
-            raise DataNotFoundError("ImpliedVolatility", root, details={"reason": "no_iv_data"})
+            raise DataNotFoundError(
+                "ImpliedVolatility", root, details={"reason": "no_iv_data"}
+            )
         info = await self.contracts.info(contract.conid)
         stamp = timestamp_ms(row.get("_updated"))
         return VolatilitySnapshot(
-            symbol=canonical_symbol(root, sec_type), sec_type=sec_type, method="provider_model_30d",
+            symbol=canonical_symbol(root, sec_type),
+            sec_type=sec_type,
+            method="provider_model_30d",
             source_instrument=info.get("local_symbol") or contract.instrument,
-            underlying=contract.symbol, underlying_name=info.get("company_name") or contract.name,
-            market=contract.exchange, as_of=stamp.astimezone(self._default_zone(contract)).date() if stamp else None,
-            implied=[ImpliedVolatilityTenor(tenor_days=30, iv=iv)], provider=self.name,
+            underlying=contract.symbol,
+            underlying_name=info.get("company_name") or contract.name,
+            market=contract.exchange,
+            as_of=stamp.astimezone(self._default_zone(contract)).date()
+            if stamp
+            else None,
+            implied=[ImpliedVolatilityTenor(tenor_days=30, iv=iv)],
+            provider=self.name,
         )
 
     async def get_implied_volatility_history(
-        self, symbol: str, start: date, end: date, tenor_days: VolatilityTenorDays = 30,
-        sec_type: VolatilitySecType = "stock", ric: str | None = None,
+        self,
+        symbol: str,
+        start: date,
+        end: date,
+        tenor_days: VolatilityTenorDays = 30,
+        sec_type: VolatilitySecType = "stock",
+        ric: str | None = None,
     ) -> VolatilityHistory:
         if ric is not None:
             raise DataValidationError("The ric override is only supported by LSEG")
-        raise CapabilityNotSupportedError(self.name, "history", sec_type=sec_type, tenor_days=tenor_days, supported=[])
+        raise CapabilityNotSupportedError(
+            self.name, "history", sec_type=sec_type, tenor_days=tenor_days, supported=[]
+        )
 
     async def get_company_profile(self, symbol: str) -> CompanyProfile:
         root = symbol.upper()
         contract = await self.contracts.resolve(root, "stock")
         info = await self.contracts.info(contract.conid)
         return CompanyProfile(
-            symbol=root, name=info.get("company_name") or contract.name or root, exchange=contract.exchange,
-            currency=info.get("currency") or contract.currency, industry=info.get("industry"), sector=info.get("category"), provider=self.name,
+            symbol=root,
+            name=info.get("company_name") or contract.name or root,
+            exchange=contract.exchange,
+            currency=info.get("currency") or contract.currency,
+            industry=info.get("industry"),
+            sector=info.get("category"),
+            provider=self.name,
         )
 
     async def search_companies(self, query: str) -> list[CompanySummary]:
@@ -358,10 +499,15 @@ class IbkrWebProvider(BasePriceProvider, BaseCompanyProvider, BaseOptionsProvide
                 continue
             header = row.get("companyHeader") or ""
             label, separator, exchange = header.removesuffix(")").rpartition(" (")
-            companies.append(CompanySummary(
-                symbol=symbol, name=row.get("companyName") or label or header or symbol,
-                exchange=row.get("description") or (exchange if separator else "SMART"), provider=self.name,
-            ))
+            companies.append(
+                CompanySummary(
+                    symbol=symbol,
+                    name=row.get("companyName") or label or header or symbol,
+                    exchange=row.get("description")
+                    or (exchange if separator else "SMART"),
+                    provider=self.name,
+                )
+            )
         return companies
 
 

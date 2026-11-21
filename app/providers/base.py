@@ -221,7 +221,9 @@ class BaseNewsProvider(_ObservedProvider):
 
 
 def _upcoming_unsupported(provider: str) -> CapabilityNotSupportedError:
-    return CapabilityNotSupportedError(provider, "upcoming earnings", sec_type="stock", supported=[])
+    return CapabilityNotSupportedError(
+        provider, "upcoming earnings", sec_type="stock", supported=[]
+    )
 
 
 class BaseEarningsProvider(_ObservedProvider):

@@ -84,6 +84,7 @@ from app.utils.symbols import canonical_symbol
 # Ensure event loop compatibility
 # ib_async.util.patchAsyncio()
 
+
 class IBKRProvider(
     BasePriceProvider,
     BaseOptionsProvider,
@@ -97,6 +98,7 @@ class IBKRProvider(
     ``INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
     price, ``ContFuture`` for history). Option underlyings stay stock/ETF.
     """
+
     native_intervals = frozenset(NATIVE_INTERVALS)
 
     price_sec_types = frozenset({"stock", "etf", "index", "future"})
@@ -838,7 +840,9 @@ class IBKRProvider(
                 await self.ib.qualifyContractsAsync(contract)
                 if not getattr(contract, "conId", 0):
                     # Unknown contract (e.g. bare SPX as a stock): not a provider fault.
-                    raise DataNotFoundError("Symbol", canonical_symbol(symbol, sec_type))
+                    raise DataNotFoundError(
+                        "Symbol", canonical_symbol(symbol, sec_type)
+                    )
             logger.debug(f"Resolved contract for {symbol}: {contract}")
 
             self.ib.errorEvent += on_entitlement_error

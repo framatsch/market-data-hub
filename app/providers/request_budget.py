@@ -12,7 +12,11 @@ from app.observability.metrics import UPSTREAM_REQUESTS
 from app.utils.errors import ProviderQuotaExhaustedError
 
 logger = logging.getLogger(__name__)
-BUDGET_DEFAULTS = {"alphavantage": (25, 0), "financialdatasets": (0, 1000), "earningsapi": (100, 1000)}
+BUDGET_DEFAULTS = {
+    "alphavantage": (25, 0),
+    "financialdatasets": (0, 1000),
+    "earningsapi": (100, 1000),
+}
 
 # Check both limits before either increment. The block key also handles an
 # upstream daily notice when the administrator configured an unlimited budget.
@@ -83,7 +87,9 @@ class RequestBudget:
         day = local.date().isoformat()
         month = now.strftime("%Y-%m")
         day_reset = datetime.combine(local.date() + timedelta(days=1), time(), ET)
-        month_reset = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1, tzinfo=UTC)
+        month_reset = datetime(
+            now.year + (now.month == 12), now.month % 12 + 1, 1, tzinfo=UTC
+        )
         keys = [
             f"mdh:quota:{self.provider}:d:{day}",
             f"mdh:quota:{self.provider}:m:{month}",
@@ -104,7 +110,9 @@ class RequestBudget:
         return counters
 
     def _warning(self, period: str, used: int, budget: int) -> None:
-        logger.warning("Provider %s %s budget at 80%% (%s/%s)", self.provider, period, used, budget)
+        logger.warning(
+            "Provider %s %s budget at 80%% (%s/%s)", self.provider, period, used, budget
+        )
 
     async def consume(self, now: datetime | None = None) -> None:
         """Reserve one actual upstream attempt; refusals never increment counters."""
@@ -117,12 +125,19 @@ class RequestBudget:
             if redis is not None:
                 try:
                     result = await redis.eval(
-                        _RESERVE, 5, *keys, self.day_budget, self.month_budget,
+                        _RESERVE,
+                        5,
+                        *keys,
+                        self.day_budget,
+                        self.month_budget,
                         max(1, math.ceil((day_reset - now).total_seconds())),
                         max(1, math.ceil((month_reset - now).total_seconds())),
                     )
                     self.shared = True
-                    counters.day_used, counters.month_used = int(result[1]), int(result[2])
+                    counters.day_used, counters.month_used = (
+                        int(result[1]),
+                        int(result[2]),
+                    )
                     if result[3]:
                         counters.warned.add("day")
                         self._warning("day", counters.day_used, self.day_budget)
@@ -135,19 +150,33 @@ class RequestBudget:
                 self.shared = False
             if result is not None and int(result[0]):
                 period = "day" if int(result[0]) == 1 else "month"
-                raise ProviderQuotaExhaustedError(self.provider, period, self.day_budget if period == "day" else self.month_budget)
+                raise ProviderQuotaExhaustedError(
+                    self.provider,
+                    period,
+                    self.day_budget if period == "day" else self.month_budget,
+                )
             if result is None:
-                if counters.blocked or (self.day_budget and counters.day_used >= self.day_budget):
-                    raise ProviderQuotaExhaustedError(self.provider, "day", self.day_budget)
+                if counters.blocked or (
+                    self.day_budget and counters.day_used >= self.day_budget
+                ):
+                    raise ProviderQuotaExhaustedError(
+                        self.provider, "day", self.day_budget
+                    )
                 if self.month_budget and counters.month_used >= self.month_budget:
-                    raise ProviderQuotaExhaustedError(self.provider, "month", self.month_budget)
+                    raise ProviderQuotaExhaustedError(
+                        self.provider, "month", self.month_budget
+                    )
                 counters.day_used += 1
                 counters.month_used += 1
                 for period, used, budget in (
                     ("day", counters.day_used, self.day_budget),
                     ("month", counters.month_used, self.month_budget),
                 ):
-                    if budget and used >= budget * 0.8 and period not in counters.warned:
+                    if (
+                        budget
+                        and used >= budget * 0.8
+                        and period not in counters.warned
+                    ):
                         counters.warned.add(period)
                         self._warning(period, used, budget)
         UPSTREAM_REQUESTS.labels(self.provider).inc()
@@ -163,8 +192,14 @@ class RequestBudget:
             redis = budget_redis()
             if redis is not None:
                 try:
-                    await redis.eval(_EXHAUST, 2, keys[0], keys[2], self.day_budget,
-                                     max(1, math.ceil((reset - now).total_seconds())))
+                    await redis.eval(
+                        _EXHAUST,
+                        2,
+                        keys[0],
+                        keys[2],
+                        self.day_budget,
+                        max(1, math.ceil((reset - now).total_seconds())),
+                    )
                     self.shared = True
                 except Exception:
                     self.shared = False
@@ -187,8 +222,16 @@ class RequestBudget:
                     pass
             return {
                 "provider": self.provider,
-                "day": {"used": counters.day_used, "budget": self.day_budget, "resets_at": day_reset.isoformat()},
-                "month": {"used": counters.month_used, "budget": self.month_budget, "resets_at": month_reset.isoformat()},
+                "day": {
+                    "used": counters.day_used,
+                    "budget": self.day_budget,
+                    "resets_at": day_reset.isoformat(),
+                },
+                "month": {
+                    "used": counters.month_used,
+                    "budget": self.month_budget,
+                    "resets_at": month_reset.isoformat(),
+                },
                 "shared": self.shared,
                 "day_exhausted": counters.blocked,
             }
@@ -197,6 +240,9 @@ class RequestBudget:
         usage = await self.usage(now)
         if usage["day_exhausted"]:
             return 0
-        limits = [max(0, usage[p]["budget"] - usage[p]["used"])
-                  for p in ("day", "month") if usage[p]["budget"]]
+        limits = [
+            max(0, usage[p]["budget"] - usage[p]["used"])
+            for p in ("day", "month")
+            if usage[p]["budget"]
+        ]
         return min(limits) if limits else None

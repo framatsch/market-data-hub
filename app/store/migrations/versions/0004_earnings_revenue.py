@@ -14,9 +14,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("earnings_events", sa.Column("revenue_estimate", sa.Numeric(), nullable=True))
-    op.add_column("earnings_events", sa.Column("revenue_actual", sa.Numeric(), nullable=True))
-    op.add_column("earnings_sync", sa.Column("invalidated_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "earnings_events", sa.Column("revenue_estimate", sa.Numeric(), nullable=True)
+    )
+    op.add_column(
+        "earnings_events", sa.Column("revenue_actual", sa.Numeric(), nullable=True)
+    )
+    op.add_column(
+        "earnings_sync",
+        sa.Column("invalidated_at", sa.DateTime(timezone=True), nullable=True),
+    )
 
 
 def downgrade() -> None:

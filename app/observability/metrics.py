@@ -20,7 +20,21 @@ from app.utils.errors import DataNotFoundError, ProviderTimeoutError
 
 REGISTRY = CollectorRegistry()
 
-PROVIDERS = frozenset({"ibkr", "ibkrweb", "lseg", "finnhub", "polygon", "prixe", "schwab", "none", "alphavantage", "financialdatasets", "earningsapi"})
+PROVIDERS = frozenset(
+    {
+        "ibkr",
+        "ibkrweb",
+        "lseg",
+        "finnhub",
+        "polygon",
+        "prixe",
+        "schwab",
+        "none",
+        "alphavantage",
+        "financialdatasets",
+        "earningsapi",
+    }
+)
 ENDPOINTS = frozenset(
     {
         "prices",
@@ -91,7 +105,22 @@ HISTORY_STORE_READS = Counter(
     registry=REGISTRY,
 )
 
-DATA_BUCKETS = (0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
+DATA_BUCKETS = (
+    0.001,
+    0.0025,
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+)
 DATA_PROVIDERS = PROVIDERS | {"multiple"}
 DATA_ENDPOINTS = frozenset(DATA_ROUTES.values()) | {"other"}
 DATA_SOURCES = frozenset({"redis", "postgres", "provider", "postgres+provider"})
@@ -103,28 +132,44 @@ _DATA_LABELS = ("channel", "endpoint", "source", "provider")
 _LAYER_LABELS = ("endpoint", "operation", "status")
 
 DATA_REQUESTS = Counter(
-    "mdh_data_requests_total", "Successful market data requests by answer provenance.",
-    (*_DATA_LABELS, "cache_status"), registry=REGISTRY,
+    "mdh_data_requests_total",
+    "Successful market data requests by answer provenance.",
+    (*_DATA_LABELS, "cache_status"),
+    registry=REGISTRY,
 )
 DATA_DURATION = Histogram(
-    "mdh_data_request_duration_seconds", "Market data duration to response start.",
-    _DATA_LABELS, buckets=DATA_BUCKETS, registry=REGISTRY,
+    "mdh_data_request_duration_seconds",
+    "Market data duration to response start.",
+    _DATA_LABELS,
+    buckets=DATA_BUCKETS,
+    registry=REGISTRY,
 )
 CACHE_DURATION = Histogram(
-    "mdh_cache_operation_duration_seconds", "Redis cache operation duration.",
-    _LAYER_LABELS, buckets=DATA_BUCKETS, registry=REGISTRY,
+    "mdh_cache_operation_duration_seconds",
+    "Redis cache operation duration.",
+    _LAYER_LABELS,
+    buckets=DATA_BUCKETS,
+    registry=REGISTRY,
 )
 DB_DURATION = Histogram(
-    "mdh_db_operation_duration_seconds", "History store transaction duration.",
-    _LAYER_LABELS, buckets=DATA_BUCKETS, registry=REGISTRY,
+    "mdh_db_operation_duration_seconds",
+    "History store transaction duration.",
+    _LAYER_LABELS,
+    buckets=DATA_BUCKETS,
+    registry=REGISTRY,
 )
 PROVIDER_DURATION = Histogram(
-    "mdh_provider_request_duration_seconds", "Outermost provider interface call duration.",
-    ("provider", "operation", "status"), buckets=DATA_BUCKETS, registry=REGISTRY,
+    "mdh_provider_request_duration_seconds",
+    "Outermost provider interface call duration.",
+    ("provider", "operation", "status"),
+    buckets=DATA_BUCKETS,
+    registry=REGISTRY,
 )
 CONCURRENT_MISSES = Counter(
-    "mdh_cache_concurrent_miss_total", "Cache misses overlapping another miss for the same key.",
-    ("endpoint",), registry=REGISTRY,
+    "mdh_cache_concurrent_miss_total",
+    "Cache misses overlapping another miss for the same key.",
+    ("endpoint",),
+    registry=REGISTRY,
 )
 _inflight_misses: KeyCounter[str] = KeyCounter()
 _miss_lock = Lock()
@@ -133,33 +178,46 @@ _miss_lock = Lock()
 def record_data_request(telemetry: RequestTelemetry, elapsed: float) -> None:
     provider = telemetry.data_provider
     if provider and "+" in provider:
-        provider = "multiple" if all(name in PROVIDERS for name in provider.split("+")) else "none"
+        provider = (
+            "multiple"
+            if all(name in PROVIDERS for name in provider.split("+"))
+            else "none"
+        )
     labels = (
         _label_value(telemetry.channel, DATA_CHANNELS, "http"),
         _label_value(telemetry.endpoint_key(), DATA_ENDPOINTS, "other"),
         _label_value(telemetry.source(), DATA_SOURCES, "provider"),
         _label_value(provider, DATA_PROVIDERS, "none"),
     )
-    DATA_REQUESTS.labels(*labels, _label_value(telemetry.cache_status, CACHE_STATUSES, "bypass")).inc()
+    DATA_REQUESTS.labels(
+        *labels, _label_value(telemetry.cache_status, CACHE_STATUSES, "bypass")
+    ).inc()
     DATA_DURATION.labels(*labels).observe(elapsed)
 
 
 def record_operation(
-    layer: Layer, endpoint: str, operation: str, provider: str | None,
-    elapsed: float, error: BaseException | None,
+    layer: Layer,
+    endpoint: str,
+    operation: str,
+    provider: str | None,
+    elapsed: float,
+    error: BaseException | None,
 ) -> None:
     if layer == "provider":
         if error is None:
             status = "success"
         elif isinstance(error, DataNotFoundError):
             status = "not_found"
-        elif isinstance(error, (ProviderTimeoutError, TimeoutError, httpx.TimeoutException)):
+        elif isinstance(
+            error, (ProviderTimeoutError, TimeoutError, httpx.TimeoutException)
+        ):
             status = "timeout"
         else:
             status = "error"
         PROVIDER_DURATION.labels(
             _label_value(provider, PROVIDERS, "none"),
-            _label_value(operation, PROVIDER_METRIC_OPERATIONS, "other"), status,
+            _label_value(operation, PROVIDER_METRIC_OPERATIONS, "other"),
+            status,
         ).observe(elapsed)
         return
     histogram = DB_DURATION if layer == "db" else CACHE_DURATION

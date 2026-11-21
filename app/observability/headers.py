@@ -3,8 +3,12 @@
 from typing import Any
 
 EXPOSED_HEADERS = [
-    "Server-Timing", "X-FastAPI-Cache", "X-Data-Source", "X-Data-Provider",
-    "X-Request-ID", "X-MDH-Data-As-Of",
+    "Server-Timing",
+    "X-FastAPI-Cache",
+    "X-Data-Source",
+    "X-Data-Provider",
+    "X-Request-ID",
+    "X-MDH-Data-As-Of",
 ]
 
 DATA_RESPONSE_HEADERS: dict[str, Any] = {
@@ -14,7 +18,10 @@ DATA_RESPONSE_HEADERS: dict[str, Any] = {
     },
     "X-Data-Source": {
         "description": "Layer or layers that supplied the response data.",
-        "schema": {"type": "string", "enum": ["redis", "postgres", "provider", "postgres+provider"]},
+        "schema": {
+            "type": "string",
+            "enum": ["redis", "postgres", "provider", "postgres+provider"],
+        },
     },
     "X-Data-Provider": {
         "description": "Data provider, or upcoming+history for composed earnings.",

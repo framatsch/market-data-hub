@@ -76,7 +76,9 @@ class ObservabilityMiddleware:
         status_code = HTTPStatus.INTERNAL_SERVER_ERROR.value
         completed = False
         request = Request(scope)
-        telemetry = RequestTelemetry(request_id_for(request), "http", start=start, http_scope=scope)
+        telemetry = RequestTelemetry(
+            request_id_for(request), "http", start=start, http_scope=scope
+        )
         scope["mdh_telemetry"] = telemetry
         token = request_telemetry.set(telemetry)
         structlog.contextvars.bind_contextvars(request_id=telemetry.request_id)
@@ -103,15 +105,20 @@ class ObservabilityMiddleware:
                 endpoint = self._classify_endpoint(request.url.path)
                 provider = self._provider_context(request)
 
-                record_request(provider, endpoint, response_status_class, duration_seconds)
+                record_request(
+                    provider, endpoint, response_status_class, duration_seconds
+                )
                 if (
-                    completed and (200 <= status_code < 300 or status_code == 304)
+                    completed
+                    and (200 <= status_code < 300 or status_code == 304)
                     and telemetry.response_timing is not None
                 ):
                     record_data_request(telemetry, telemetry.response_timing.elapsed)
 
                 if not self._skip_audit(request.url.path):
-                    self._audit_request(request, provider, status_code, duration_seconds)
+                    self._audit_request(
+                        request, provider, status_code, duration_seconds
+                    )
             finally:
                 release_cache_misses(telemetry)
                 telemetry.endpoint = telemetry.endpoint_key()
@@ -177,10 +184,13 @@ class ObservabilityMiddleware:
         if telemetry.endpoint_key() != "other":
             if telemetry.symbol is None:
                 telemetry.symbol = canonical_telemetry_symbol(
-                    request.path_params.get("symbol"), request.query_params.get("sec_type")
+                    request.path_params.get("symbol"),
+                    request.query_params.get("sec_type"),
                 )
             timing = telemetry.finish(time.perf_counter())
-            fields = timing.log_fields(telemetry, 200 <= status_code < 300 or status_code == 304)
+            fields = timing.log_fields(
+                telemetry, 200 <= status_code < 300 or status_code == 304
+            )
         log(
             "request_completed",
             request_id=telemetry.request_id,

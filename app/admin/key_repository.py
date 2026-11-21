@@ -124,7 +124,14 @@ class KeyRepository:
                 """
             ).fetchall()
         credentials: list[CredentialMetadata] = []
-        for provider_name, credential_name, updated_at, ciphertext, iv, auth_tag in rows:
+        for (
+            provider_name,
+            credential_name,
+            updated_at,
+            ciphertext,
+            iv,
+            auth_tag,
+        ) in rows:
             try:
                 self._crypto.decrypt(ciphertext, iv, auth_tag)
             except ValueError:
