@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `GET /companies/{symbol}` (and the MCP tool `get_company_profile`) now answers well-known indices (`I:SPX`, `I:NDX`, `I:DJX`, `I:RUT`, `I:VIX`) and fills missing sector and description of the SPDR sector ETFs (`XLK`, `XLF`, `XLE`, `XLV`, `XLI`, `XLY`, `XLP`, `XLU`, `XLB`, `XLRE`, `XLC`) and `SPY`, `QQQ`, `DIA`, `IWM` from a curated reference table (`app/utils/instrument_reference.py`). Index profiles need no provider and report `provider: "reference"`; provider values always win over the table, which also answers when the provider does not know the ETF. Unknown indices answer 404.
+
+### Fixed
+
+- Financial Datasets company profiles of ETFs answered HTTP 500; a ticker without a company name is now a 404 and a missing exchange no longer breaks the profile.
+
 ## [1.7.1] - 2026-11-21
 
 ### Fixed

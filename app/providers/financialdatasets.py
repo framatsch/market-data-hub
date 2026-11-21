@@ -222,8 +222,13 @@ class FinancialDatasetsProvider(
         row = (await self._request("/company/facts", {"ticker": symbol}, symbol)).get("company_facts")
         if not row:
             raise DataNotFoundError("Company", symbol)
-        return CompanyProfile(symbol=symbol, name=row["name"], exchange=row.get("exchange", ""), currency="USD",
-                              sector=row.get("sector"), industry=row.get("industry"), provider=self.name)
+        name = row.get("name")
+        if not isinstance(name, str) or not name.strip():
+            # ETFs and other non-company tickers carry no company name.
+            raise DataNotFoundError("Company", symbol)
+        return CompanyProfile(symbol=symbol, name=name, exchange=row.get("exchange") or "", currency="USD",
+                              sector=row.get("sector") or None, industry=row.get("industry") or None,
+                              provider=self.name)
 
     async def search_companies(self, query: str):
         raise CapabilityNotSupportedError(self.name, "company search", sec_type="stock", supported=[])

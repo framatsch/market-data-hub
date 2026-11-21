@@ -40,11 +40,12 @@ from app.models.earnings import EarningsEvent, earnings_today
 from app.models.news import NewsMetadata, NewsResponse
 from app.observability.headers import CSV_RESPONSE_HEADERS, DATA_RESPONSE_HEADERS
 from app.utils.csv_export import to_csv
-from app.utils.symbols import COMPANY_TYPES, ParsedSymbol
+from app.utils.symbols import COMPANY_TYPES, PROFILE_TYPES, ParsedSymbol
 
 router = APIRouter(prefix="/companies", tags=["Companies"])
 
 CompanySymbol = Annotated[ParsedSymbol, Depends(symbol_param(COMPANY_TYPES))]
+ProfileSymbol = Annotated[ParsedSymbol, Depends(symbol_param(PROFILE_TYPES))]
 
 
 @router.get(
@@ -116,10 +117,15 @@ async def get_company_earnings(
 )
 @cache(expire=settings.CACHE_TTL_COMPANY_PROFILE_SECONDS, key="companies:profile")
 async def get_company_profile(
-    symbol: CompanySymbol, service: CompanyServiceDep,
+    symbol: ProfileSymbol, service: CompanyServiceDep,
     provider: str | None = Query(None, description="Company data provider (e.g. ibkr, ibkrweb, lseg)."),
 ) -> Any:
-    """Get company profile information (stocks and ETFs only; others are 422)."""
+    """Get profile information of a stock, ETF or well-known index.
+
+    Index profiles (`I:SPX`, `I:NDX`, ...) and sector/description of ETFs such as `XLK`
+    come from a curated reference table (`provider: "reference"` when no provider data
+    exists); `provider` is ignored for indices. Futures and options are 422.
+    """
     provider = provider.lower() if provider else None
     profile = await service.get_company_profile(symbol, provider)
     return ResponseEnvelope(data=profile)

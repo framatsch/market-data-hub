@@ -64,6 +64,7 @@ from app.services.volatility_service import VolatilityService
 from app.utils.errors import AppError, DataValidationError
 from app.utils.symbols import (
     COMPANY_TYPES,
+    PROFILE_TYPES,
     OPTION_UNDERLYING_TYPES,
     PRICE_TYPES,
     VOLATILITY_TYPES,
@@ -438,7 +439,7 @@ async def _tool_get_option_quote(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _tool_get_company_profile(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = _symbol(args, COMPANY_TYPES)
+    symbol = _symbol(args, PROFILE_TYPES)
     provider = args.get("provider")
 
     async def load() -> Any:
@@ -726,6 +727,10 @@ _SYMBOL_COMPANY = {
     "type": "string",
     "description": "Stock or ETF ticker, e.g. AAPL; index and future symbols are rejected.",
 }
+_SYMBOL_PROFILE = {
+    "type": "string",
+    "description": "Stock, ETF or well-known index, e.g. AAPL, XLK or I:SPX; futures are rejected.",
+}
 _SEC_TYPE = {
     "type": "string",
     "enum": ["stock", "etf", "index", "future"],
@@ -832,7 +837,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
     },
     {
         "name": "get_company_profile",
-        "description": "Get a company profile (name, exchange, currency, sector, industry, employees).",
+        "description": "Get a profile of a stock, ETF or well-known index (name, description, exchange, currency, sector, industry, employees). Indices and ETF sector/description come from a curated reference table.",
         "inputSchema": {
             "type": "object",
             "required": ["symbol"],
@@ -842,7 +847,7 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": _SYMBOL_COMPANY,
+                "symbol": _SYMBOL_PROFILE,
                 "provider": {
                     "type": "string",
                     "description": "Company data provider override (e.g. ibkr, ibkrweb, lseg)",

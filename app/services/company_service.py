@@ -17,6 +17,8 @@
 from app.models.company import CompanyProfile, CompanySummary
 from app.observability.telemetry import bind_data_provider
 from app.providers.registry import ProviderRegistry, get_registry
+from app.utils.errors import DataNotFoundError
+from app.utils.instrument_reference import REFERENCE_PROVIDER, reference_for
 from app.utils.symbols import ParsedSymbol
 
 
@@ -27,9 +29,31 @@ class CompanyService:
     async def get_company_profile(
         self, symbol: ParsedSymbol, provider_name: str | None = None
     ) -> CompanyProfile:
-        async with self.registry.use_company_provider(provider_name) as provider:
-            bind_data_provider(provider.name)
-            return await provider.get_company_profile(symbol.root)
+        reference = reference_for(symbol)
+        if symbol.sec_type == "index":
+            # No provider serves index profiles; the curated table is the only source.
+            if reference is None:
+                raise DataNotFoundError("Index", symbol.canonical)
+            bind_data_provider(REFERENCE_PROVIDER)
+            return reference.profile(symbol.canonical)
+        try:
+            async with self.registry.use_company_provider(provider_name) as provider:
+                bind_data_provider(provider.name)
+                profile = await provider.get_company_profile(symbol.root)
+        except DataNotFoundError:
+            if reference is None:
+                raise
+            bind_data_provider(REFERENCE_PROVIDER)
+            return reference.profile(symbol.canonical)
+        if reference is None:
+            return profile
+        # Providers leave sector and description empty for ETFs; fill only the gaps.
+        return profile.model_copy(
+            update={
+                "description": profile.description or reference.description,
+                "sector": profile.sector or reference.sector,
+            }
+        )
 
     async def search_companies(
         self, query: str, provider_name: str | None = None
