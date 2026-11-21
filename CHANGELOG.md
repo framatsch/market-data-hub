@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-21
+
 ### Added
 
 - `GET /companies/{symbol}` (and the MCP tool `get_company_profile`) now answers well-known indices (`I:SPX`, `I:NDX`, `I:DJX`, `I:RUT`, `I:VIX`) and fills missing sector and description of the SPDR sector ETFs (`XLK`, `XLF`, `XLE`, `XLV`, `XLI`, `XLY`, `XLP`, `XLU`, `XLB`, `XLRE`, `XLC`) and `SPY`, `QQQ`, `DIA`, `IWM` from a curated reference table (`app/utils/instrument_reference.py`). Index profiles need no provider and report `provider: "reference"`; provider values always win over the table, which also answers when the provider does not know the ETF. Unknown indices answer 404.
@@ -383,4 +385,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration with IBKR, LSEG, Schwab, and Finnhub providers.
 - Basic price, company, and options endpoints.
 
+[1.8.0]: https://github.com/framatsch/market-data-hub/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/framatsch/market-data-hub/compare/v1.7.0...v1.7.1
