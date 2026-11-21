@@ -92,6 +92,8 @@ class FinancialDatasetsProvider(
             except ValueError:
                 message = "Missing key or exhausted credit"
             return ProviderError(str(message), "PROVIDER_NOT_AVAILABLE", {"provider": self.name, "status_code": error.response.status_code})
+        if error.response.status_code == 400 and "invalid ticker" in error.response.text.lower():
+            return DataNotFoundError("Ticker", symbol or self.name, {"provider": self.name, "status_code": 400})
         return super()._http_error(error, symbol)
 
     async def _pages(self, path: str, params: dict[str, Any], symbol: str, field: str) -> list[dict[str, Any]]:

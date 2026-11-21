@@ -12,7 +12,7 @@ from ib_async.objects import BarData
 
 from app.providers import ibkr
 from app.providers.ibkr import IBKRProvider
-from app.utils.errors import ProviderError, ProviderNotEntitledError
+from app.utils.errors import DataNotFoundError, ProviderNotEntitledError
 
 NOW = datetime(2026, 11, 6, 15, tzinfo=UTC)
 
@@ -106,9 +106,21 @@ async def test_future_without_eligible_contract_is_not_found(provider):
     provider.ib.reqContractDetailsAsync.return_value = [
         future_details("ES", "20261112", "CME", "ESX6")
     ]
-    with pytest.raises(ProviderError) as error:
+    with pytest.raises(DataNotFoundError) as error:
         await provider.get_last_price("ES", sec_type="future")
     assert "MarketData" in error.value.message
+    provider._get_tickers_snapshot.assert_not_awaited()
+
+
+async def test_unqualifiable_stock_is_not_found_not_provider_error(provider):
+    """Bare SPX is a stock to IBKR; failed qualification must be a 404, not a 500."""
+
+    async def no_match(contract):
+        return []
+
+    provider.ib.qualifyContractsAsync.side_effect = no_match
+    with pytest.raises(DataNotFoundError):
+        await provider.get_last_price("SPX")
     provider._get_tickers_snapshot.assert_not_awaited()
 
 

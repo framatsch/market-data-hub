@@ -836,6 +836,9 @@ class IBKRProvider(
             if sec_type.lower() != "future":
                 # Qualify contract to get conId etc specific to SMART
                 await self.ib.qualifyContractsAsync(contract)
+                if not getattr(contract, "conId", 0):
+                    # Unknown contract (e.g. bare SPX as a stock): not a provider fault.
+                    raise DataNotFoundError("Symbol", canonical_symbol(symbol, sec_type))
             logger.debug(f"Resolved contract for {symbol}: {contract}")
 
             self.ib.errorEvent += on_entitlement_error
@@ -932,6 +935,8 @@ class IBKRProvider(
 
         except ProviderNotEntitledError as exc:
             exc.details.setdefault("symbol", canonical_symbol(symbol, sec_type))
+            raise
+        except DataNotFoundError:
             raise
         except Exception as e:
             logger.error(f"Error getting last price for {symbol}: {e}")

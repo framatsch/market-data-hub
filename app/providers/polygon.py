@@ -16,6 +16,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -34,13 +35,33 @@ from app.providers.base import (
 )
 from app.providers.credentials import get_provider_credential_sync
 from app.utils.errors import (
+    AppError,
     DataNotFoundError,
     ProviderError,
     ProviderNotEntitledError,
+    map_httpx_http_error,
     not_entitled,
 )
 
 logger = logging.getLogger(__name__)
+
+_API_KEY_PARAM = re.compile(r"(apiKey=)[^&\s'\"]+", re.IGNORECASE)
+
+
+def _wrap_error(context: str, exc: Exception, identifier: str) -> AppError:
+    """Map an unexpected Polygon failure to an `AppError` without leaking the API key.
+
+    HTTP status errors use the shared mapping (404 -> not found, 429 -> 503), so a
+    rate limit is no longer reported as an internal 500.
+    """
+    if isinstance(exc, AppError):
+        return exc
+    if isinstance(exc, httpx.HTTPStatusError):
+        return map_httpx_http_error(
+            provider="polygon", error=exc, entity="Ticker", identifier=identifier
+        )
+    message = _API_KEY_PARAM.sub(r"\1***", str(exc))
+    return ProviderError(f"{context}: {message}")
 
 
 def _is_not_entitled(resp: Any) -> bool:
@@ -262,7 +283,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon API error: {e}", exc_info=True)
-            raise ProviderError(f"Polygon API error: {e!s}")
+            raise _wrap_error("Polygon API error", e, symbol) from e
 
     async def _get_last_price_fallback(
         self, symbol: str, ticker: str, sec_type: str = "stock"
@@ -303,7 +324,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon fallback failed: {e}")
-            raise ProviderError(f"Polygon fallback failed: {e!s}")
+            raise _wrap_error("Polygon fallback failed", e, symbol) from e
 
     async def get_historical_prices(
         self,
@@ -382,7 +403,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon Aggs error: {e}")
-            raise ProviderError(f"Polygon Aggs error: {e!s}")
+            raise _wrap_error("Polygon Aggs error", e, symbol) from e
 
     def _filter_rth(self, bars: list[PriceBar]) -> list[PriceBar]:
         """Filter out extended trading hours. Keeps only 09:30-16:00 ET."""
@@ -479,7 +500,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon Snapshot error: {e}")
-            raise ProviderError(f"Polygon Snapshot error: {e!s}")
+            raise _wrap_error("Polygon Snapshot error", e, symbol) from e
 
     async def get_option_quote(
         self,
@@ -534,7 +555,7 @@ class PolygonProvider(BasePriceProvider, BaseOptionsProvider, BaseCompanyProvide
             raise
         except Exception as e:
             logger.error(f"Polygon Snapshot error for specific quote: {e}")
-            raise ProviderError(f"Polygon Snapshot error: {e!s}")
+            raise _wrap_error("Polygon Snapshot error", e, symbol) from e
 
     async def get_market_status(self) -> MarketStatus:
         """Fetch current market status from Polygon."""

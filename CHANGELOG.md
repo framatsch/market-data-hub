@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider failures no longer surface as HTTP 500: a Polygon rate limit (429) is reported as 503 and HTTP errors map through the shared provider error mapping, IBKR answers 404 when a contract cannot be qualified (for example a bare `SPX`, which is a stock; indices need `I:SPX` or `sec_type=index`), and Financial Datasets "Invalid ticker" answers 404.
+- Polygon error messages no longer contain the `apiKey` query parameter. Rotate any Polygon key that was served by an earlier version.
+
 ## [1.7.0] - 2026-11-20
 
 ### Added
