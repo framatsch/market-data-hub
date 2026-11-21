@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-22
+
+### Fixed
+
+- The 1.8.0 build failed in the CI lint step (`ruff` I001, unsorted imports in `app/api/mcp.py`), so no 1.8.0 image was published; 1.8.1 contains everything of 1.8.0.
+- `mypy --strict app/` passes again (25 errors in 10 files): missing annotations, untyped lambdas in the earnings store calls, loosely typed earnings symbol status values and stale `type: ignore` comments. No behaviour change.
+
+### Changed
+
+- `app/` is formatted with `ruff format` (formatting only).
+
 ## [1.8.0] - 2026-11-21
 
 ### Added
