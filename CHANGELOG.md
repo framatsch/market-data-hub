@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-21
+
 ### Fixed
 
 - Provider failures no longer surface as HTTP 500: a Polygon rate limit (429) is reported as 503 and HTTP errors map through the shared provider error mapping, IBKR answers 404 when a contract cannot be qualified (for example a bare `SPX`, which is a stock; indices need `I:SPX` or `sec_type=index`), and Financial Datasets "Invalid ticker" answers 404.
@@ -372,3 +374,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial project setup with FastAPI and MCP support.
 - Integration with IBKR, LSEG, Schwab, and Finnhub providers.
 - Basic price, company, and options endpoints.
+
+[1.7.1]: https://github.com/framatsch/market-data-hub/compare/v1.7.0...v1.7.1
