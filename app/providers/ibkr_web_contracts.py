@@ -310,7 +310,7 @@ class IbkrWebContracts:
         key = f"mdh:ibkrweb:contract_info:{conid}"
         if cached := await self._cache.get(key, _INFO):
             return cached
-        data = await self._session.request(f"iserver/contract/{conid}/info")
+        data: _Object = await self._session.request(f"iserver/contract/{conid}/info")
         if not data or "error" in data:
             raise ProviderError("Invalid IBKR Web API contract info")
         await self._cache.put(key, _INFO, data, _DAY)

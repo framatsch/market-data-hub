@@ -81,8 +81,10 @@ def _is_not_entitled(resp: Any) -> bool:
 def _message(resp: Any) -> str | None:
     try:
         body = resp.json()
-        if isinstance(body, dict) and isinstance(body.get("message"), str):
-            return body["message"]
+        if isinstance(body, dict):
+            message = body.get("message")
+            if isinstance(message, str):
+                return message
     except Exception:
         pass
     text = getattr(resp, "text", None)

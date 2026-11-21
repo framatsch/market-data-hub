@@ -81,7 +81,7 @@ class RequestBudget:
         self.day_budget = connection_config.get("request_budget_per_day", day)
         self.month_budget = connection_config.get("request_budget_per_month", month)
 
-    def _periods(self, now: datetime):
+    def _periods(self, now: datetime) -> tuple[str, str, datetime, datetime, list[str]]:
         now = as_utc(now)
         local = now.astimezone(ET)
         day = local.date().isoformat()

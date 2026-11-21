@@ -232,7 +232,7 @@ def union_ms(spans: Iterable[Interval], start: float, until: float) -> float:
     """Return the wall time covered by the intervals within the request window."""
     if isinstance(spans, list) and len(spans) == 1:
         first, last = spans[0]
-        return max(0.0, min(last, until) - max(first, start)) * 1000
+        return float(max(0.0, min(last, until) - max(first, start)) * 1000)
     covered = 0.0
     right = start
     for left, end in sorted(spans):

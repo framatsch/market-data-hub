@@ -12,6 +12,7 @@ from app.models.common import EnvelopeMeta
 ReportTime = Literal["bmo", "amc", "during", "unknown"]
 DateStatus = Literal["confirmed", "projected", "unknown"]
 HistoryStatus = Literal["complete", "pending", "not_requested"]
+SymbolStatusCode = Literal["ok", "not_applicable", "not_found", "error"]
 
 
 def earnings_today() -> date:
@@ -56,7 +57,7 @@ class EarningsEvent(BaseModel):
 
 class EarningsSymbolStatus(BaseModel):
     symbol: str
-    status: Literal["ok", "not_applicable", "not_found", "error"] = "ok"
+    status: SymbolStatusCode = "ok"
     history: HistoryStatus = "not_requested"
     message: str | None = None
 

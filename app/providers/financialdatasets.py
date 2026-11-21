@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.market_hours import ET, as_utc, week_monday
-from app.models.company import CompanyProfile
+from app.models.company import CompanyProfile, CompanySummary
 from app.models.earnings import EarningsEvent, ReportTime
 from app.models.news import NewsArticle
 from app.models.price import PriceBar, PriceQuote
@@ -24,6 +24,7 @@ from app.providers.base import (
 from app.providers.metered import MeteredHttpProvider
 from app.providers.news_categories import detect_category
 from app.utils.errors import (
+    AppError,
     CapabilityNotSupportedError,
     DataNotFoundError,
     DataValidationError,
@@ -95,7 +96,7 @@ class FinancialDatasetsProvider(
     native_intervals = frozenset({"1d", "1w"})
     price_adjustment = "unknown"
 
-    def _http_error(self, error: httpx.HTTPStatusError, symbol: str | None):
+    def _http_error(self, error: httpx.HTTPStatusError, symbol: str | None) -> AppError:
         if error.response.status_code in (401, 402):
             try:
                 message = error.response.json().get(
@@ -206,7 +207,10 @@ class FinancialDatasetsProvider(
                     published_at=datetime.combine(day, time(), UTC),
                     source=source if isinstance(source, str) else "",
                     url=url,
+                    full_text=None,
                     category=detected,
+                    image=None,
+                    sentiment=None,
                 )
             )
 
@@ -345,7 +349,7 @@ class FinancialDatasetsProvider(
             provider=self.name,
         )
 
-    async def search_companies(self, query: str):
+    async def search_companies(self, query: str) -> list[CompanySummary]:
         raise CapabilityNotSupportedError(
             self.name, "company search", sec_type="stock", supported=[]
         )

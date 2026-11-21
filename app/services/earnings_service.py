@@ -34,7 +34,9 @@ from app.config import settings
 from app.models.earnings import (
     EarningsEvent,
     EarningsSymbolStatus,
+    HistoryStatus,
     NextEarnings,
+    SymbolStatusCode,
     earnings_today,
 )
 from app.observability.telemetry import bind_data_provider, current_telemetry
@@ -904,19 +906,25 @@ class EarningsService:
                         quota_hit = True
                         break
                     if store:
-                        await self._store_call(
-                            lambda s, d=day: repo.mark_failed(
-                                s, name, repo.day_scope(d), now
-                            )  # type: ignore[misc]
-                        )
+
+                        async def mark_day_failed(
+                            s: AsyncSession, d: date = day
+                        ) -> None:
+                            await repo.mark_failed(s, name, repo.day_scope(d), now)
+
+                        await self._store_call(mark_day_failed)
                     continue
                 fetched_days[day] = events
                 if store:
-                    wrote |= await self._store_call(
-                        lambda s, d=day, e=events: repo.replace_day(
-                            s, name, d, e, today, now
-                        )  # type: ignore[misc]
-                    )
+
+                    async def store_day(
+                        s: AsyncSession,
+                        d: date = day,
+                        e: list[EarningsEvent] = events,
+                    ) -> None:
+                        await repo.replace_day(s, name, d, e, today, now)
+
+                    wrote |= await self._store_call(store_day)
                 else:
                     await self._cache_ephemeral(
                         DAY_KEY.format(provider=name, day=day.isoformat()),
@@ -966,9 +974,13 @@ class EarningsService:
                         )
                         break
                     if store:
-                        await self._store_call(
-                            lambda s, r=root: repo.mark_failed(s, name, r, now)
-                        )  # type: ignore[misc]
+
+                        async def mark_root_failed(
+                            s: AsyncSession, r: str = root
+                        ) -> None:
+                            await repo.mark_failed(s, name, r, now)
+
+                        await self._store_call(mark_root_failed)
                     continue
                 fetched_symbols[root] = events
                 if store:
@@ -1206,6 +1218,8 @@ class EarningsService:
         else:
             result = []
             for u, h in zip(up, hist, strict=True):
+                status: SymbolStatusCode
+                message: str | None
                 if h.status == "not_applicable":
                     result.append(h)
                     continue
@@ -1221,7 +1235,7 @@ class EarningsService:
                         symbol=h.symbol,
                         status=status,
                         history=h.history,
-                        message=message,  # type: ignore[arg-type]
+                        message=message,
                     )
                 )
         if missing:
@@ -1296,9 +1310,14 @@ class EarningsService:
                         read_end=end,
                     )
                 _record_sources(up_g, hist_g)
-                in_range = lambda g: [
-                    e for e in (g.events if g else []) if start <= e.report_date <= end
-                ]
+
+                def in_range(g: _Gathered | None) -> list[EarningsEvent]:
+                    return [
+                        e
+                        for e in (g.events if g else [])
+                        if start <= e.report_date <= end
+                    ]
+
                 events = self._compose_events(in_range(up_g), in_range(hist_g))
                 statuses = self._merge_statuses(
                     self._statuses(symbols, up_g, up, start) if up_g and up else None,
@@ -1385,8 +1404,9 @@ class EarningsService:
             error = gathered.errors.get(root)
             if root in gathered.pending_reason:
                 error = None
-            history = gathered.history.get(root, "not_requested")
+            history = cast(HistoryStatus, gathered.history.get(root, "not_requested"))
             message = gathered.pending_reason.get(root)
+            status: SymbolStatusCode
             if error is not None and root not in have:
                 status, message = "error", error.message
             elif calendar_down and root not in have:
@@ -1405,7 +1425,7 @@ class EarningsService:
                     symbol=symbol.canonical,
                     status=status,
                     history=history,
-                    message=message,  # type: ignore[arg-type]
+                    message=message,
                 )
             )
         return statuses

@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from app import response_meta
 from app.admin.runtime import get_provider_config_repository
@@ -265,7 +265,7 @@ class PriceService:
         if (telemetry := current_telemetry()) is not None:
             telemetry.store_outcome = "stale"
             telemetry.data_provider = series.key.provider
-        return bars
+        return cast(list[PriceBar], bars)
 
     async def get_market_status(self, provider_name: str | None = None) -> MarketStatus:
         async with self.registry.use_price_provider(provider_name) as provider:

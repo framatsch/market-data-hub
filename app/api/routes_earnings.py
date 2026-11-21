@@ -99,7 +99,7 @@ def order_by_request(result: Any, requested: list[str]) -> Any:
         return result
 
     def name(row: Any) -> str:
-        return row["symbol"] if cached else row.symbol
+        return str(row["symbol"] if cached else row.symbol)
 
     by_symbol = {name(row): row for row in rows}
     ordered = [by_symbol[symbol] for symbol in requested if symbol in by_symbol]

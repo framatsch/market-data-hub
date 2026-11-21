@@ -68,7 +68,9 @@ class AlphaVantageProvider(
     price_adjustment = "none"
     upcoming_mode = "calendar"
 
-    async def _auth(self, params):
+    async def _auth(
+        self, params: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         key = await asyncio.to_thread(
             get_provider_credential_sync, self.name, "api_key"
         )
