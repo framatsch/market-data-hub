@@ -34,6 +34,7 @@ _LEGACY_SEC_TYPES = {"stk": "stock"}
 PRICE_TYPES: frozenset[SecType] = frozenset({"stock", "etf", "index", "future"})
 VOLATILITY_TYPES: frozenset[SecType] = PRICE_TYPES
 OPTION_UNDERLYING_TYPES: frozenset[SecType] = frozenset({"stock", "etf", "index"})
+OPTION_CHAIN_TYPES: frozenset[SecType] = OPTION_UNDERLYING_TYPES | {"future"}
 COMPANY_TYPES: frozenset[SecType] = frozenset({"stock", "etf"})
 PROFILE_TYPES: frozenset[SecType] = COMPANY_TYPES | {"index"}
 STREAM_TYPES: frozenset[SecType] = PRICE_TYPES

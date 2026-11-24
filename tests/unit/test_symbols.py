@@ -3,6 +3,7 @@ import pytest
 from app.utils.errors import DataValidationError
 from app.utils.symbols import (
     COMPANY_TYPES,
+    OPTION_CHAIN_TYPES,
     OPTION_UNDERLYING_TYPES,
     PRICE_TYPES,
     STREAM_TYPES,
@@ -132,6 +133,7 @@ def test_endpoint_type_sets():
     assert VOLATILITY_TYPES == PRICE_TYPES
     assert STREAM_TYPES == PRICE_TYPES
     assert OPTION_UNDERLYING_TYPES == {"stock", "etf", "index"}
+    assert OPTION_CHAIN_TYPES == {"stock", "etf", "index", "future"}
     assert COMPANY_TYPES == {"stock", "etf"}
     with pytest.raises(DataValidationError):
         parse_symbol("O:AAPL250117C00150000", allowed=PRICE_TYPES)

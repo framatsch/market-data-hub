@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import csv
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -111,6 +112,35 @@ def test_get_option_chain(client, mock_options_service):
     response = client.get("/options/AAPL/chain?expiry=2024-01-19")
     assert response.status_code == 200
     assert response.json()["data"]["underlying_symbol"] == "AAPL"
+    assert response.json()["data"]["underlying_contract"] is None
+
+
+def test_futures_option_chain_metadata_and_csv(client, mock_options_service):
+    expiry = date(2026, 12, 18)
+    options = [
+        OptionQuote(
+            symbol=f"ESZ6 {side[0].upper()}7250", underlying_symbol="F:ES",
+            strike=Decimal(7250), expiry=expiry, type=side, price=Decimal(50), provider="ibkrweb",
+        )
+        for side in ("call", "put")
+    ]
+    metadata = dict(
+        underlying_contract="ESZ6", underlying_price="7245.50", multiplier="50",
+        trading_class="ES", exchange="CME",
+    )
+    mock_options_service.get_option_chain = AsyncMock(return_value=OptionChain(
+        underlying_symbol="F:ES", expiry=expiry, options=options, provider="ibkrweb", **metadata,
+    ))
+    path = "/options/F:ES/chain?expiry=2026-12-18&trading_class=es"
+    response = client.get(path)
+    assert response.status_code == 200
+    assert {key: response.json()["data"][key] for key in metadata} == metadata
+    assert mock_options_service.get_option_chain.call_args.kwargs["trading_class"] == "es"
+    response = client.get(f"{path}&format=csv")
+    assert response.status_code == 200
+    rows = list(csv.DictReader(response.text.splitlines()))
+    assert [row["symbol"] for row in rows] == [quote.symbol for quote in options]
+    assert all({key: row[key] for key in metadata} == metadata for row in rows)
 
 def test_get_option_quote(client, mock_options_service):
     mock_options_service.get_option_quote = AsyncMock(return_value=OptionQuote(

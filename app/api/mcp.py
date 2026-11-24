@@ -64,6 +64,7 @@ from app.services.volatility_service import VolatilityService
 from app.utils.errors import AppError, DataValidationError
 from app.utils.symbols import (
     COMPANY_TYPES,
+    OPTION_CHAIN_TYPES,
     OPTION_UNDERLYING_TYPES,
     PRICE_TYPES,
     PROFILE_TYPES,
@@ -415,21 +416,24 @@ async def _tool_get_historical_prices(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _tool_get_option_chain(args: dict[str, Any]) -> dict[str, Any]:
-    symbol = _symbol(args, OPTION_UNDERLYING_TYPES)
+    symbol = _symbol(args, OPTION_CHAIN_TYPES)
     expiry_str = args.get("expiry")
+    if not expiry_str and symbol.sec_type == "future":
+        raise DataValidationError("expiry is required for a futures option chain")
     expiry = date.fromisoformat(expiry_str) if expiry_str else date.today()
     provider = args.get("provider")
+    trading_class = args.get("trading_class") if symbol.sec_type == "future" else None
 
     async def load() -> Any:
         chain = await _options_service().get_option_chain(
-            symbol, expiry, provider_name=provider
+            symbol, expiry, provider_name=provider, trading_class=trading_class
         )
         return _cache_data(chain.model_dump())
 
     chain = await cached_call(
         "options:chain",
         symbol,
-        {"expiry": expiry_str, "provider": provider},
+        {"expiry": expiry_str, "provider": provider, "trading_class": trading_class},
         load,
         refresh=args.get("refresh", False),
     )
@@ -811,11 +815,19 @@ TOOL_REGISTRY: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Fetch live data and overwrite the cache.",
                 },
-                "symbol": _SYMBOL_UNDERLYING,
+                "symbol": {
+                    "type": "string",
+                    "description": "Underlying: AAPL (stock/ETF), I:SPX / ^SPX (index), or F:ES (futures root). "
+                    "501 when the provider does not support the underlying type.",
+                },
                 "expiry": {
                     "type": "string",
                     "format": "date",
                     "description": "Option expiry date (ISO format, e.g. 2024-01-19)",
+                },
+                "trading_class": {
+                    "type": "string",
+                    "description": "Futures option class (case-insensitive); ignored for other underlyings.",
                 },
                 "provider": {
                     "type": "string",

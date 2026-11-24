@@ -59,10 +59,14 @@ class OptionsService:
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
+        trading_class: str | None = None,
     ) -> OptionChain:
         async with self.registry.use_options_provider(provider_name) as provider:
             bind_data_provider(provider.name)
             _check_support(provider, "option_chain", symbol)
+            provider_args = _type_kwargs(symbol)
+            if symbol.sec_type == "future" and trading_class:
+                provider_args["trading_class"] = trading_class.upper()
             chain = await provider.get_option_chain(
                 symbol.root,
                 expiry,
@@ -70,7 +74,7 @@ class OptionsService:
                 max_strike=max_strike,
                 right=right,
                 market_data_type=market_data_type,
-                **_type_kwargs(symbol),
+                **provider_args,
             )
             response_meta.current().record_fetch()
             return chain.model_copy(

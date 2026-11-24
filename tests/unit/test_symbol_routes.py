@@ -33,7 +33,11 @@ from app.providers.base import (
     BasePriceProvider,
     BaseVolatilityProvider,
 )
+from app.providers.ibkr import IBKRProvider
+from app.providers.ibkr_web import IbkrWebProvider
+from app.providers.polygon import PolygonProvider
 from app.providers.registry import ProviderRegistry
+from app.providers.schwab import SchwabProvider
 from app.services.company_service import CompanyService
 from app.services.options_service import OptionsService
 from app.services.price_service import PriceService
@@ -43,8 +47,8 @@ from app.utils.errors import AppError
 NOW = datetime(2026, 11, 6, 12, 30)
 
 
-def _price_provider(name, types):
-    provider = Mock(spec=BasePriceProvider)
+def _price_provider(name, types, spec=BasePriceProvider):
+    provider = Mock(spec=spec)
     provider.name = name
     provider.price_sec_types = frozenset(types)
     provider.price_history_sec_types = frozenset(types)
@@ -101,7 +105,8 @@ def env(monkeypatch):
     monkeypatch.setattr(ProviderRegistry, "_initialize_providers", lambda self: None)
     registry = ProviderRegistry()
     ibkr = _price_provider("ibkr", {"stock", "etf", "index", "future"})
-    polygon = _price_provider("polygon", {"stock", "etf", "index"})
+    polygon = _price_provider("polygon", {"stock", "etf", "index"}, spec=PolygonProvider)
+    polygon.option_underlying_sec_types = PolygonProvider.option_underlying_sec_types
     volatility = _volatility_provider()
     company = Mock(spec=BaseCompanyProvider)
     company.name = "finnhub"
@@ -110,7 +115,7 @@ def env(monkeypatch):
     ))
     options = Mock(spec=BaseOptionsProvider)
     options.name = "schwab"
-    options.option_underlying_sec_types = frozenset({"stock", "etf", "index"})
+    options.option_underlying_sec_types = SchwabProvider.option_underlying_sec_types
     options.get_option_chain = AsyncMock(return_value=OptionChain(
         underlying_symbol="SPX", expiry=date(2026, 12, 18), options=[], provider="schwab",
     ))
@@ -242,16 +247,68 @@ def test_csv_filename_url_encodes_canonical_symbol(env):
 
 
 def test_option_chain_on_index_passes_root_and_type(env):
-    response = env.client.get("/options/I:SPX/chain?expiry=2026-12-18")
+    response = env.client.get("/options/I:SPX/chain?expiry=2026-12-18&trading_class=unused")
     assert response.status_code == 200
     assert response.json()["data"]["underlying_symbol"] == "I:SPX"
     assert env.options.get_option_chain.call_args.args[0] == "SPX"
     assert env.options.get_option_chain.call_args.kwargs["sec_type"] == "index"
+    assert "trading_class" not in env.options.get_option_chain.call_args.kwargs
 
 
-def test_option_underlying_rejects_future(env):
-    assert env.client.get("/options/F:ES/chain").status_code == 422
+def test_futures_option_chain_requires_expiry_and_quotes_reject_futures(env):
+    response = env.client.get("/options/F:ES/chain")
+    assert response.status_code == 422
+    assert "expiry" in response.json()["error"]["message"]
+    response = env.client.get("/options/F:ES/quote/ESZ6")
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DATA_VALIDATION_ERROR"
     assert env.client.get("/options/O:AAPL250117C00150000/chain").status_code == 422
+    env.options.get_option_chain.assert_not_awaited()
+    env.options.get_option_quote.assert_not_awaited()
+
+
+@pytest.mark.parametrize("provider_name,provider_attr", [("schwab", "options"), ("polygon", "polygon")])
+def test_futures_option_chain_passes_namespace_but_provider_without_mapping_returns_501(
+    env, provider_name, provider_attr
+):
+    response = env.client.get(f"/options/F:ES/chain?provider={provider_name}&expiry=2026-12-18")
+    assert response.status_code == 501
+    error = response.json()["error"]
+    assert error["code"] == "CAPABILITY_NOT_SUPPORTED"
+    assert error["details"]["operation"] == "option_chain"
+    assert error["details"]["sec_type"] == "future"
+    assert error["details"]["supported"] == ["etf", "index", "stock"]
+    getattr(env, provider_attr).get_option_chain.assert_not_awaited()
+
+
+@pytest.mark.parametrize("provider_name,provider_type", [("ibkr", IBKRProvider), ("ibkrweb", IbkrWebProvider)])
+def test_futures_option_chain_trading_class_is_forwarded_and_isolates_cache(env, cache_redis, provider_name, provider_type):
+    service = env.client.app.dependency_overrides[get_options_service]()
+    futures_provider = Mock(spec=provider_type)
+    futures_provider.name = provider_name
+    futures_provider.option_underlying_sec_types = provider_type.option_underlying_sec_types
+
+    async def chain(symbol, expiry, *, trading_class, **kwargs):
+        return OptionChain(
+            underlying_symbol=symbol, expiry=expiry, provider=provider_name, options=[],
+            trading_class=trading_class,
+        )
+
+    futures_provider.get_option_chain = AsyncMock(side_effect=chain)
+    service.registry._providers[provider_name] = futures_provider
+    path = f"/options/F:ES/chain?provider={provider_name}&expiry=2026-12-18"
+    first = env.client.get(f"{path}&trading_class=ew3")
+    second = env.client.get(f"{path}&trading_class=EW3")
+    third = env.client.get(f"{path}&trading_class=ES")
+
+    assert first.status_code == second.status_code == third.status_code == 200
+    assert second.headers["x-fastapi-cache"] == "HIT"
+    assert second.json()["data"]["trading_class"] == "EW3"
+    assert third.json()["data"]["trading_class"] == "ES"
+    assert third.json()["data"]["underlying_symbol"] == "F:ES"
+    assert futures_provider.get_option_chain.await_count == 2
+    assert all(call.args[0] == "ES" and call.kwargs["sec_type"] == "future"
+               for call in futures_provider.get_option_chain.call_args_list)
 
 
 def test_option_quote_strips_option_prefix(env):

@@ -11,6 +11,11 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, PositiveInt, TypeAdapter, ValidationError
 
+from app.providers.futures_options import (
+    FuturesOptionTerms,
+    futures_option_exchange,
+    select_trading_class,
+)
 from app.providers.ibkr_common import (
     FRONT_MONTH_BUFFER,
     FUTURES_EXCHANGES,
@@ -18,7 +23,7 @@ from app.providers.ibkr_common import (
     INDEX_ROOT_OVERRIDES,
     select_front_month,
 )
-from app.providers.ibkr_web_session import IbkrWebSession
+from app.providers.ibkr_web_session import PROVIDER, IbkrWebSession
 from app.utils.errors import DataNotFoundError, DataValidationError, ProviderError
 
 _DAY = 86400
@@ -112,12 +117,31 @@ class WebContract(BaseModel, frozen=True):
         return self.instrument if self.instrument != root else None
 
 
+class WebFopListing(BaseModel, frozen=True):
+    conid: PositiveInt
+    expiry: str
+    trading_class: str
+    strike: Decimal
+    right: str
+    exchange: str
+    multiplier: Decimal | None = None
+
+
+class WebFopIdentity(BaseModel, frozen=True):
+    conid: PositiveInt
+    local_symbol: str
+    underlying_conid: PositiveInt | None
+
+
 _CONTRACT = TypeAdapter(WebContract)
 _CONID = TypeAdapter(PositiveInt)
 _INFO = TypeAdapter(dict[str, Any])
 _STRIKE = TypeAdapter(Decimal)
 _STRIKES = TypeAdapter(dict[str, list[Decimal]])
 _MISSING = TypeAdapter(bool)
+_FOP_IDENTITY = TypeAdapter(WebFopIdentity)
+_FOP_LISTINGS = TypeAdapter(list[WebFopListing])
+_FOP_LISTING_TTL = 3600
 # Strikes without a contract for an expiry (e.g. outside the weekly strike range) are looked up again only after this.
 _MISSING_TTL = 6 * 3600
 _MISSING_EXPIRY_TTL = 3600
@@ -191,6 +215,7 @@ class IbkrWebContracts:
         self._cache = _ContractCache(redis_backend)
         self._search_lock = asyncio.Lock()
         self._option_search: dict[str, tuple[int, WebContract, frozenset[str]]] = {}
+        self._fop_search: dict[str, tuple[int, WebContract, frozenset[str]]] = {}
 
     async def resolve(self, root: str, sec_type: str) -> WebContract:
         root = root.upper()
@@ -339,6 +364,7 @@ class IbkrWebContracts:
         async with self._search_lock:
             # name=true may invalidate the server's strike lookup for the same root.
             self._option_search.clear()
+            self._fop_search.clear()
             return [
                 row
                 for row in await self._search(query, by_name=True)
@@ -419,6 +445,171 @@ class IbkrWebContracts:
                     ):
                         keys.append((strike, right))
             return await self._option_ids(underlying, expiry, sorted(set(keys)))
+
+    async def _fop_underlying(
+        self, root: str, exchange: str
+    ) -> tuple[WebContract, frozenset[str]]:
+        generation = self._session.generation
+        cached = self._fop_search.get(root)
+        if cached is not None and cached[0] == generation:
+            return cached[1:]
+        for row in await self._search(root):
+            if row.get("symbol") != root or (section := _section(row, "FOP")) is None:
+                continue
+            if exchange not in (section.get("exchange") or "").split(";"):
+                continue
+            underlying = WebContract(conid=_conid(row), symbol=root, exchange=exchange)
+            months = frozenset((section.get("months") or "").split(";")) - {""}
+            self._fop_search[root] = (generation, underlying, months)
+            return underlying, months
+        raise DataNotFoundError("FuturesOptionRoot", root)
+
+    async def _fop_listings(
+        self, underlying: WebContract, month: str, right: str
+    ) -> list[WebFopListing]:
+        key = f"mdh:ibkrweb:foplist:{underlying.conid}:{month}:{right}"
+        cached = await self._cache.get(key, _FOP_LISTINGS)
+        if cached is not None:
+            return cached
+        path = "iserver/secdef/info"
+        # The month-wide result must be scoped to one side; the gateway's
+        # two-sided ES response can be malformed. No strike filter here, as it
+        # would hide classes needed to choose the correct series for the date.
+        try:
+            raw = await self._session.request(
+                path,
+                params={
+                    "conid": underlying.conid,
+                    "sectype": "FOP",
+                    "month": month,
+                    "exchange": underlying.exchange,
+                    "right": right,
+                },
+                expected=list,
+            )
+        except DataNotFoundError:
+            raw = []
+        try:
+            listings = _FOP_LISTINGS.validate_python(
+                [
+                    {
+                        "conid": row.get("conid"),
+                        "expiry": row.get("maturityDate"),
+                        "trading_class": row["tradingClass"].upper(),
+                        "strike": row.get("strike"),
+                        "right": right,
+                        "exchange": row.get("listingExchange") or row.get("exchange"),
+                        "multiplier": row.get("multiplier"),
+                    }
+                    for row in _objects(raw, path)
+                    if row.get("secType") == "FOP" and row.get("right") == right
+                ]
+            )
+        except (ValidationError, KeyError, AttributeError) as exc:
+            raise ProviderError("Invalid IBKR Web API futures option listing") from exc
+        await self._cache.put(key, _FOP_LISTINGS, listings, _FOP_LISTING_TTL)
+        return listings
+
+    async def _fop_identity(
+        self, root: str, expiry: date, listing: WebFopListing
+    ) -> WebFopIdentity:
+        key = (
+            f"mdh:ibkrweb:fopconid:{root}:{listing.trading_class}:{expiry:%Y%m%d}:"
+            f"{listing.right}:{listing.strike.normalize():f}"
+        )
+        cached = await self._cache.get(key, _FOP_IDENTITY)
+        if cached is not None and cached.conid == listing.conid:
+            return cached
+        info = await self.info(listing.conid)
+        local_symbol = info.get("local_symbol")
+        if not isinstance(local_symbol, str) or not local_symbol:
+            raise ProviderError("Missing IBKR Web API futures option local symbol")
+        try:
+            identity = WebFopIdentity(
+                conid=listing.conid,
+                local_symbol=local_symbol,
+                underlying_conid=info.get("underlying_con_id") or None,
+            )
+        except ValidationError as exc:
+            raise ProviderError(
+                "Invalid IBKR Web API futures option underlying"
+            ) from exc
+        await self._cache.put(
+            key, _FOP_IDENTITY, identity, _ttl(expiry + timedelta(days=1))
+        )
+        return identity
+
+    async def futures_option_chain(
+        self,
+        root: str,
+        expiry: date,
+        lower: Decimal | None,
+        upper: Decimal | None,
+        rights: tuple[str, ...],
+        trading_class: str | None,
+    ) -> tuple[FuturesOptionTerms | None, list[tuple[WebFopListing, WebFopIdentity]]]:
+        exchange = futures_option_exchange(root, PROVIDER)
+        await self._session.ensure_ready()
+        exp_str = expiry.strftime("%Y%m%d")
+        buckets = [_month(expiry)]
+        if root == "CL":
+            # For CL, the regular series may be filed in the next month's bucket.
+            next_month = expiry.replace(day=28) + timedelta(days=4)
+            buckets.append(_month(next_month))
+        all_listings: list[WebFopListing] = []
+        async with self._search_lock:
+            underlying, available_months = await self._fop_underlying(root, exchange)
+            for month in buckets:
+                if month not in available_months:
+                    continue
+                # Parallel month-wide queries against one product returned malformed JSON.
+                for side in ("C", "P"):
+                    bucket = await self._fop_listings(underlying, month, side)
+                    all_listings.extend(row for row in bucket if row.expiry == exp_str)
+
+        selected = select_trading_class(
+            root, expiry, (row.trading_class for row in all_listings), trading_class
+        )
+        if selected is None:
+            return None, []  # Includes missing expiries and an unknown explicit class.
+        chosen = [row for row in all_listings if row.trading_class == selected]
+        terms = FuturesOptionTerms(selected, chosen[0].exchange, chosen[0].multiplier)
+        if any(
+            row.exchange != terms.exchange or row.multiplier != terms.multiplier
+            for row in chosen
+        ):
+            raise ProviderError("Inconsistent IBKR Web API futures option terms")
+        listings: dict[_OptionKey, WebFopListing] = {}
+        for row in chosen:
+            if (
+                row.right not in rights
+                or (lower is not None and row.strike < lower)
+                or (upper is not None and row.strike > upper)
+            ):
+                continue
+            quote_key = (row.strike, row.right)
+            existing = listings.setdefault(quote_key, row)
+            if existing.conid != row.conid:
+                raise ProviderError(
+                    "Multiple IBKR Web API futures options for one strike and right"
+                )
+
+        limit = asyncio.Semaphore(_INFO_CONCURRENCY)
+
+        async def resolve(row: WebFopListing) -> tuple[WebFopListing, WebFopIdentity]:
+            async with limit:
+                return row, await self._fop_identity(root, expiry, row)
+
+        resolved = await asyncio.gather(
+            *(resolve(listings[key]) for key in sorted(listings)),
+            return_exceptions=True,
+        )
+        contracts = []
+        for item in resolved:
+            if isinstance(item, BaseException):
+                raise item
+            contracts.append(item)
+        return terms, contracts
 
     async def option_quote(
         self, root: str, expiry: date, strike: Decimal, right: str

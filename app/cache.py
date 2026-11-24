@@ -363,6 +363,11 @@ def _compose_key(
     }
     if symbol is not None and symbol.sec_type == "etf":
         params["sec_type"] = "etf"
+    if route_key == "options:chain" and "trading_class" in params:
+        if symbol is not None and symbol.sec_type == "future":
+            params["trading_class"] = params["trading_class"].upper()
+        else:
+            del params["trading_class"]
     for name in ("provider", "format"):
         if name in params:
             params[name] = params[name].lower()

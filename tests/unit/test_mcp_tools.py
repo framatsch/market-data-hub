@@ -246,16 +246,22 @@ async def test_option_tools_underlying_and_option_prefix():
         assert service.get_option_quote.call_args.args == (
             ParsedSymbol("AAPL", "stock"), "AAPL240119C00150000",
         )
-        await _tool_get_option_chain({"symbol": "^SPX", "expiry": "2024-01-19"})
+        await _tool_get_option_chain({"symbol": "^SPX", "expiry": "2024-01-19", "trading_class": "ignored"})
         assert service.get_option_chain.call_args.args[0] == ParsedSymbol("SPX", "index")
+        assert service.get_option_chain.call_args.kwargs["trading_class"] is None
+        await _tool_get_option_chain({"symbol": "F:ES", "expiry": "2026-12-18", "trading_class": "ew3"})
+        assert service.get_option_chain.call_args.args[0] == ParsedSymbol("ES", "future")
+        assert service.get_option_chain.call_args.kwargs["trading_class"] == "ew3"
         with pytest.raises(DataValidationError):
-            await _tool_get_option_chain({"symbol": "F:ES", "expiry": "2024-01-19"})
+            await _tool_get_option_quote({"symbol": "F:ES", "option_id": "ESZ6"})
 
 
 def test_tool_schemas_document_namespaces_and_share_sec_type_enum():
     from app.api.mcp import TOOL_REGISTRY
 
     tools = {tool["name"]: tool["inputSchema"]["properties"] for tool in TOOL_REGISTRY}
+    assert tools["get_option_chain"]["trading_class"]["type"] == "string"
+    assert "F:ES" in tools["get_option_chain"]["symbol"]["description"]
     for name in (
         "get_last_price", "get_historical_prices", "get_implied_volatility",
         "get_implied_volatility_history", "get_implied_volatility_stats",

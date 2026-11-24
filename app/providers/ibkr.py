@@ -28,6 +28,7 @@ from ib_async import (
     Contract,
     ContractDetails,
     Future,
+    FuturesOption,
     Index,
     Option,
     StartupFetch,
@@ -57,6 +58,11 @@ from app.providers.base import (
     BaseOptionsProvider,
     BasePriceProvider,
     BaseVolatilityProvider,
+)
+from app.providers.futures_options import (
+    FuturesOptionTerms,
+    futures_option_exchange,
+    select_trading_class,
 )
 from app.providers.ibkr_common import (
     FUTURES_EXCHANGES,
@@ -96,7 +102,7 @@ class IBKRProvider(
 
     Instrument types: stocks/ETFs (SMART), indices (``Index`` contract, with the
     ``INDEX_ROOT_OVERRIDES`` table) and futures (front-month ``Future`` for last
-    price, ``ContFuture`` for history). Option underlyings stay stock/ETF.
+    price, ``ContFuture`` for history). Options cover stock/ETF and ES/CL futures.
     """
 
     native_intervals = frozenset(NATIVE_INTERVALS)
@@ -106,6 +112,7 @@ class IBKRProvider(
     volatility_sec_types = frozenset({"stock", "etf", "index", "future"})
     volatility_history_sec_types = frozenset({"stock", "etf", "index"})
     volatility_tenors = frozenset({30})
+    option_underlying_sec_types = frozenset({"stock", "etf", "future"})
 
     def __init__(self) -> None:
         self.ib = IB()
@@ -188,7 +195,7 @@ class IBKRProvider(
         failed_contracts = []
 
         # Determine if we're dealing with options
-        is_option = any(c.secType == "OPT" for c in contracts)
+        is_option = any(c.secType in {"OPT", "FOP"} for c in contracts)
         snapshot_mode = not is_option  # Use streaming for options, snapshot for stocks
 
         logger.debug(
@@ -226,10 +233,18 @@ class IBKRProvider(
         while (datetime.now() - start_wait).total_seconds() < timeout:
             # For options, check for bid/ask or close price
             if is_option:
+                futures = [
+                    t for t in tickers if t.contract and t.contract.secType == "FUT"
+                ]
+                options = [
+                    t
+                    for t in tickers
+                    if not (t.contract and t.contract.secType == "FUT")
+                ]
                 # Check for any valid market data indicator
                 valid_count = sum(
                     1
-                    for t in tickers
+                    for t in options
                     if (self._is_valid(t.bid) and t.bid != -1)
                     or (self._is_valid(t.ask) and t.ask != -1)
                     or self._is_valid(t.last)
@@ -238,10 +253,13 @@ class IBKRProvider(
 
                 if valid_count > 0:
                     logger.debug(
-                        f"Got data for {valid_count}/{len(tickers)} option contracts"
+                        f"Got data for {valid_count}/{len(options)} option contracts"
                     )
 
-                if valid_count >= max(1, len(tickers) * 0.5):  # At least 50% have data
+                if valid_count >= max(1, len(options) * 0.5) and all(
+                    self._futures_option_underlying_price(t) is not None
+                    for t in futures
+                ):
                     break
             else:
                 if all(t.time or t.last or t.close for t in tickers):
@@ -1326,7 +1344,20 @@ class IBKRProvider(
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
+        *,
+        sec_type: str = "stock",
+        trading_class: str | None = None,
     ) -> OptionChain:
+        if sec_type == "future":
+            return await self._get_futures_option_chain(
+                symbol.upper(),
+                expiry,
+                min_strike,
+                max_strike,
+                right,
+                market_data_type,
+                trading_class,
+            )
         try:
             logger.info(
                 f"Fetching option chain for {symbol} expiry {expiry} (market_data_type={market_data_type})"
@@ -1413,43 +1444,9 @@ class IBKRProvider(
 
             tickers = await self._get_tickers_snapshot(valid_contracts)
 
-            options_data = []
-            for t in tickers:
-                opt_contract = t.contract
-                assert opt_contract is not None
-                greeks = self._extract_greeks(t)
-                # open_interest: Use callOpenInterest or putOpenInterest based on contract right
-                # Note: openInterest doesn't exist on Ticker, must use call/put specific fields
-                if opt_contract.right == "C" and self._is_valid(t.callOpenInterest):
-                    open_interest_val = int(t.callOpenInterest)
-                elif opt_contract.right == "P" and self._is_valid(t.putOpenInterest):
-                    open_interest_val = int(t.putOpenInterest)
-                else:
-                    open_interest_val = None
-                options_data.append(
-                    OptionQuote(
-                        symbol=opt_contract.localSymbol,  # e.g. AAPL  230616C00150000
-                        underlying_symbol=symbol,
-                        strike=Decimal(str(opt_contract.strike)),
-                        expiry=expiry,
-                        type="call" if opt_contract.right == "C" else "put",
-                        # Try last, then close as fallback
-                        price=self._to_decimal(t.last)
-                        or self._to_decimal(t.close)
-                        or Decimal("0.0"),
-                        # Only include bid/ask if valid (not -1)
-                        bid=self._to_decimal(t.bid) if t.bid != -1 else None,
-                        ask=self._to_decimal(t.ask) if t.ask != -1 else None,
-                        volume=int(t.volume) if self._is_valid(t.volume) else 0,
-                        open_interest=open_interest_val,
-                        implied_volatility=greeks["implied_volatility"],
-                        delta=greeks["delta"],
-                        gamma=greeks["gamma"],
-                        vega=greeks["vega"],
-                        theta=greeks["theta"],
-                        provider="ibkr",
-                    )
-                )
+            options_data = [
+                self._option_quote_from_ticker(symbol, expiry, t) for t in tickers
+            ]
             logger.info(f"Retrieved {len(options_data)} options for {symbol}")
             return OptionChain(
                 underlying_symbol=symbol,
@@ -1461,9 +1458,189 @@ class IBKRProvider(
         except ProviderNotEntitledError as exc:
             exc.details.setdefault("symbol", canonical_symbol(symbol, "stock"))
             raise
+        except ProviderConnectionError:
+            raise
         except Exception as e:
             logger.error(f"Error getting option chain for {symbol}: {e}")
             raise ProviderError(f"IBKR error: {e}")
+        finally:
+            await self._disconnect()
+
+    def _option_quote_from_ticker(
+        self, symbol: str, expiry: date, ticker: Ticker
+    ) -> OptionQuote:
+        contract = ticker.contract
+        assert contract is not None
+        greeks = self._extract_greeks(ticker)
+        interest = (
+            ticker.callOpenInterest if contract.right == "C" else ticker.putOpenInterest
+        )
+        return OptionQuote(
+            symbol=contract.localSymbol,
+            underlying_symbol=symbol,
+            strike=Decimal(str(contract.strike)),
+            expiry=expiry,
+            type="call" if contract.right == "C" else "put",
+            price=self._to_decimal(ticker.last)
+            or self._to_decimal(ticker.close)
+            or Decimal("0.0"),
+            bid=self._to_decimal(ticker.bid) if ticker.bid != -1 else None,
+            ask=self._to_decimal(ticker.ask) if ticker.ask != -1 else None,
+            volume=int(ticker.volume) if self._is_valid(ticker.volume) else 0,
+            open_interest=int(interest) if self._is_valid(interest) else None,
+            implied_volatility=greeks["implied_volatility"],
+            delta=greeks["delta"],
+            gamma=greeks["gamma"],
+            vega=greeks["vega"],
+            theta=greeks["theta"],
+            provider="ibkr",
+        )
+
+    def _futures_option_underlying_price(self, ticker: Ticker) -> Decimal | None:
+        for value in (ticker.last, ticker.close):
+            price = self._to_decimal(value)
+            if price is not None and price.is_finite() and price != -1:
+                return price
+        return None
+
+    async def _get_futures_option_chain(
+        self,
+        root: str,
+        expiry: date,
+        min_strike: Decimal | None,
+        max_strike: Decimal | None,
+        right: Literal["call", "put"] | None,
+        market_data_type: int | None,
+        trading_class: str | None,
+    ) -> OptionChain:
+        exchange = futures_option_exchange(root, "ibkr")
+        symbol = canonical_symbol(root, "future")
+        try:
+            await self._ensure_connection()
+            if market_data_type is not None:
+                await self._set_market_data_type(market_data_type)
+            exp_str = expiry.strftime("%Y%m%d")
+            side = {"call": "C", "put": "P"}[right] if right else ""
+            query = FuturesOption(root, exp_str, right=side, exchange=exchange)
+            details = await asyncio.wait_for(
+                self.ib.reqContractDetailsAsync(query),
+                timeout=getattr(
+                    self, "timeout_seconds", settings.PROVIDER_REQUEST_TIMEOUT
+                ),
+            )
+            rows = [
+                (row, contract)
+                for row in details
+                if (contract := row.contract) is not None
+                and contract.secType == "FOP"
+                and contract.conId > 0
+                and (row.realExpirationDate or contract.lastTradeDateOrContractMonth)[
+                    :8
+                ]
+                == exp_str
+                and contract.right in {"C", "P"}
+            ]
+            selected = select_trading_class(
+                root,
+                expiry,
+                (contract.tradingClass for _, contract in rows),
+                trading_class,
+            )
+            if selected is None:
+                return OptionChain(
+                    underlying_symbol=symbol, expiry=expiry, options=[], provider="ibkr"
+                )
+            chosen = [
+                (row, contract)
+                for row, contract in rows
+                if contract.tradingClass.upper() == selected
+            ]
+            _, series = chosen[0]
+            terms = FuturesOptionTerms(
+                selected,
+                series.exchange or exchange,
+                Decimal(series.multiplier) if series.multiplier else None,
+            )
+            if any(
+                (contract.exchange or exchange) != terms.exchange
+                or (Decimal(contract.multiplier) if contract.multiplier else None)
+                != terms.multiplier
+                for _, contract in chosen
+            ):
+                raise ProviderError("Inconsistent IBKR futures option terms")
+            contracts: dict[tuple[Decimal, str], Contract] = {}
+            for _, contract in chosen:
+                strike = Decimal(str(contract.strike))
+                if (
+                    (side and contract.right != side)
+                    or (min_strike is not None and strike < min_strike)
+                    or (max_strike is not None and strike > max_strike)
+                ):
+                    continue
+                if not contract.localSymbol:
+                    raise ProviderError("Missing IBKR futures option local symbol")
+                if not contract.exchange:
+                    contract.exchange = terms.exchange
+                existing = contracts.setdefault((strike, contract.right), contract)
+                if existing.conId != contract.conId:
+                    raise ProviderError(
+                        "Multiple IBKR futures options for one strike and right"
+                    )
+            if not contracts:
+                return terms.chain(root, expiry, "ibkr", [])
+
+            underlying_ids = {row.underConId for row, _ in chosen if row.underConId > 0}
+            if len(underlying_ids) > 1:
+                raise ProviderError("Inconsistent IBKR futures option underlyings")
+            conid = next(iter(underlying_ids), None)
+            underlying = None
+            batch = [contracts[key] for key in sorted(contracts)]
+            if conid is not None:
+                future = Future(conId=conid, exchange=terms.exchange)
+                qualified = await self.ib.qualifyContractsAsync(future)
+                underlying = next(
+                    (
+                        item
+                        for item in qualified
+                        if isinstance(item, Contract) and item.conId == conid
+                    ),
+                    None,
+                )
+                if underlying is not None:
+                    batch.insert(0, underlying)
+
+            options = []
+            underlying_price = None
+            for ticker in await self._get_tickers_snapshot(batch):
+                contract = ticker.contract
+                if contract is None:
+                    continue
+                if contract.secType == "FOP":
+                    options.append(
+                        self._option_quote_from_ticker(symbol, expiry, ticker)
+                    )
+                elif conid is not None and contract.conId == conid:
+                    underlying_price = self._futures_option_underlying_price(ticker)
+            return terms.chain(
+                root,
+                expiry,
+                "ibkr",
+                options,
+                underlying_contract=(underlying.localSymbol or None)
+                if underlying
+                else None,
+                underlying_price=underlying_price,
+            )
+        except ProviderNotEntitledError as exc:
+            exc.details.setdefault("symbol", symbol)
+            exc.details.setdefault("sec_type", "future")
+            raise
+        except TimeoutError as exc:
+            raise ProviderTimeoutError("ibkr", {"symbol": symbol}) from exc
+        except AppError:
+            raise
+        except Exception as exc:
+            raise ProviderError(f"IBKR error: {exc}") from exc
         finally:
             await self._disconnect()
 

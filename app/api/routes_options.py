@@ -27,21 +27,33 @@ from app.cache import cache
 from app.config import settings
 from app.dependencies import OptionsServiceDep, symbol_param
 from app.models.common import ResponseEnvelope
+from app.models.options import OptionChain
 from app.observability.headers import CSV_RESPONSE_HEADERS
 from app.utils.csv_export import to_csv
-from app.utils.symbols import OPTION_UNDERLYING_TYPES, ParsedSymbol, strip_option_prefix
+from app.utils.errors import DataValidationError
+from app.utils.symbols import (
+    OPTION_CHAIN_TYPES,
+    OPTION_UNDERLYING_TYPES,
+    ParsedSymbol,
+    strip_option_prefix,
+)
 
 router = APIRouter(prefix="/options", tags=["Options"])
 
-UnderlyingSymbol = Annotated[
+ChainUnderlying = Annotated[ParsedSymbol, Depends(symbol_param(OPTION_CHAIN_TYPES))]
+QuoteUnderlying = Annotated[
     ParsedSymbol, Depends(symbol_param(OPTION_UNDERLYING_TYPES))
 ]
 
 
-@router.get("/{symbol}/chain", responses={200: {"headers": CSV_RESPONSE_HEADERS}})
+@router.get(
+    "/{symbol}/chain",
+    response_model=ResponseEnvelope[OptionChain],
+    responses={200: {"headers": CSV_RESPONSE_HEADERS}},
+)
 @cache(expire=settings.CACHE_TTL_OPTION_CHAIN_SECONDS)
 async def get_option_chain(
-    symbol: UnderlyingSymbol,
+    symbol: ChainUnderlying,
     service: OptionsServiceDep,
     expiry: date | None = None,
     min_strike: Decimal | None = Query(
@@ -60,16 +72,22 @@ async def get_option_chain(
     provider: str | None = Query(
         None, description="Options provider (e.g. ibkr, ibkrweb, schwab)."
     ),
+    trading_class: str | None = Query(
+        None,
+        description="Futures option class (case-insensitive); ignored for other underlyings.",
+    ),
     format: str = "json",
 ) -> Any:
     """Get option chain for a symbol and expiry.
 
-    The underlying may be a stock/ETF (`AAPL`) or an index (`I:SPX`, `^SPX`);
-    the response `underlying_symbol` is canonical. Providers without an index
-    option implementation answer 501.
+    Use a stock/ETF (`AAPL`), index (`I:SPX`, `^SPX`), or futures root (`F:ES`).
+    The response `underlying_symbol` is canonical. For futures, the expiry and
+    trading class determine the underlying contract, not the front month.
+    `ibkr` and `ibkrweb` support `F:ES` and `F:CL`. An unimplemented instrument
+    or futures root returns 501. An ambiguous date returns 422 with the available classes.
 
     Query Parameters:
-    - expiry: Option expiration date (default: today)
+    - expiry: Required for futures; defaults to today for other underlyings
     - min_strike: Filter by minimum strike price
     - max_strike: Filter by maximum strike price
     - right: Filter by option type ("call" or "put")
@@ -81,8 +99,9 @@ async def get_option_chain(
     - Error 10091 warnings are normal if requesting data without proper subscription - system gracefully degrades
     """
     provider = provider.lower() if provider else None
-    if not expiry:
-        # Default to today
+    if expiry is None:
+        if symbol.sec_type == "future":
+            raise DataValidationError("expiry is required for a futures option chain")
         expiry = date.today()
     chain = await service.get_option_chain(
         symbol,
@@ -92,11 +111,17 @@ async def get_option_chain(
         max_strike=max_strike,
         right=right,
         market_data_type=market_data_type,
+        trading_class=trading_class if symbol.sec_type == "future" else None,
     )
 
     if format.lower() == "csv":
         filename = f"{url_quote(symbol.canonical, safe='')}_options_chain_{expiry}.csv"
-        content_type, csv_data = to_csv(chain.model_dump(), filename)
+        if symbol.sec_type == "future":
+            metadata = chain.model_dump(exclude={"options"})
+            rows = [{**option.model_dump(), **metadata} for option in chain.options]
+            content_type, csv_data = to_csv(rows, filename)
+        else:
+            content_type, csv_data = to_csv(chain.model_dump(), filename)
         return Response(
             content=csv_data,
             media_type=content_type,
@@ -113,7 +138,7 @@ async def get_option_chain(
     "/{symbol}/quote/{option_id}", responses={200: {"headers": CSV_RESPONSE_HEADERS}}
 )
 async def get_option_quote(
-    symbol: UnderlyingSymbol,
+    symbol: QuoteUnderlying,
     option_id: str,
     service: OptionsServiceDep,
     market_data_type: int | None = Query(

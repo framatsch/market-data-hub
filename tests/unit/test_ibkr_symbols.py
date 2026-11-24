@@ -57,10 +57,10 @@ def provider(monkeypatch):
     return instance
 
 
-def test_declares_price_support_but_stock_etf_option_underlyings():
+def test_declares_price_and_option_underlyings():
     assert IBKRProvider.price_sec_types == {"stock", "etf", "index", "future"}
     assert IBKRProvider.price_history_sec_types == {"stock", "etf", "index", "future"}
-    assert IBKRProvider.option_underlying_sec_types == {"stock", "etf"}
+    assert IBKRProvider.option_underlying_sec_types == {"stock", "etf", "future"}
 
 
 async def test_stock_has_no_source_instrument(provider):

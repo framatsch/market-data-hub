@@ -1,0 +1,63 @@
+{
+  "search": {
+    "ES": [
+      {"conid":"11004968","symbol":"ES","description":"CME","sections":[{"secType":"FOP","months":"NOV26;DEC26;JAN27;FEB27;MAR27;APR27;MAY27;JUN27;JUL27;AUG27;SEP27;OCT27;NOV27;DEC27;MAR28;JUN28;SEP28;DEC28;DEC29;DEC30","exchange":"CME","showPrips":true}]},
+      {"conid":"182880167","symbol":"ES","description":"NYSE","sections":[{"secType":"STK"},{"secType":"OPT","months":"DEC26;JAN27;APR27;JUL27","exchange":"SMART;AMEX;BATS;BOX;CBOE;CBOE2;EDGX;EMERALD;GEMINI;IBUSOPT;ISE;MEMX;MERCURY;MIAX;MX2;NASDAQBX;NASDAQOM;PEARL;PHLX;PSE;SAPPHIRE"}]}
+    ],
+    "CL": [
+      {"conid":"17340715","symbol":"CL","description":"NYMEX","sections":[{"secType":"FOP","months":"NOV26;DEC26;JAN27;FEB27;MAR27;APR27;MAY27;JUN27;JUL27;AUG27;SEP27;OCT27;NOV27;DEC27;JAN28;FEB28;MAR28;APR28;MAY28;JUN28;JUL28;AUG28;SEP28;OCT28;NOV28;DEC28;JAN29;FEB29;MAR29;APR29;MAY29;JUN29;JUL29;AUG29;SEP29;OCT29;NOV29;DEC29;JAN30;FEB30;MAR30;APR30;MAY30;JUN30;JUL30;AUG30;SEP30;OCT30;NOV30;DEC30;JAN31;FEB31;MAR31;APR31;MAY31;JUN31;JUL31;AUG31;SEP31;OCT31;NOV31;DEC31;JAN32;FEB32;MAR32;APR32;MAY32;JUN32;JUL32;AUG32;SEP32;OCT32;NOV32;DEC32;JUN33;DEC33;JUN34;SEP34;OCT34;DEC34;JUN35;DEC35;JUN36;SEP36;DEC36;JUN37;DEC37","exchange":"NYMEX","showPrips":true}]},
+      {"conid":"5749","symbol":"CL","description":"NYSE","sections":[{"secType":"STK"},{"secType":"OPT","months":"NOV26;DEC26;JAN27;FEB27;MAR27;MAY27;JUN27;SEP27;DEC27;JAN28;JAN29","exchange":"SMART;AMEX;BATS;BOX;CBOE;CBOE2;EDGX;EMERALD;GEMINI;IBUSOPT;IEX;ISE;MEMX;MERCURY;MIAX;MX2;NASDAQBX;NASDAQOM;PEARL;PHLX;PSE;SAPPHIRE"}]}
+    ]
+  },
+  "strikes": {
+    "ES:NOV26": {"call":[7245.0,7250.0,7255.0],"put":[7245.0,7250.0,7255.0]},
+    "ES:DEC26": {"call":[7245.0,7250.0,7255.0],"put":[7245.0,7250.0,7255.0]},
+    "ES:JAN27": {"call":[7250.0],"put":[7250.0]},
+    "CL:DEC26": {"call":[57.5,60.0,62.5],"put":[57.5,60.0,62.5]},
+    "CL:JAN27": {"call":[59.5,60.0,60.5],"put":[59.5,60.0,60.5]},
+    "CL:FEB27": {"call":[59.5,60.0,60.5],"put":[59.5,60.0,60.5]}
+  },
+  "secdef_info": {
+    "ES:NOV26:7250": [
+      {"conid":934255697,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"C","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"(EW4) Nov27'26 7250 Call Fut.Option(50) @CME","maturityDate":"20261127","multiplier":"50","tradingClass":"EW4","validExchanges":"CME","showPrips":true},
+      {"conid":934256025,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"P","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"(EW4) Nov27'26 7250 Put Fut.Option(50) @CME","maturityDate":"20261127","multiplier":"50","tradingClass":"EW4","validExchanges":"CME","showPrips":true}
+    ],
+    "ES:DEC26:7250": [
+      {"conid":944077740,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"C","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"(E3C) Dec16'26 7250 Call Fut.Option(50) @CME","maturityDate":"20261216","multiplier":"50","tradingClass":"E3C","validExchanges":"CME","showPrips":true},
+      {"conid":745214374,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"C","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"Dec18'26 7250 Call Fut.Option(50) @CME","maturityDate":"20261218","multiplier":"50","tradingClass":"ES","validExchanges":"CME","showPrips":true},
+      {"conid":745214392,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"P","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"Dec18'26 7250 Put Fut.Option(50) @CME","maturityDate":"20261218","multiplier":"50","tradingClass":"ES","validExchanges":"CME","showPrips":true},
+      {"conid":745215370,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"P","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"(EW3) Dec18'26 7250 Put Fut.Option(50) @CME","maturityDate":"20261218","multiplier":"50","tradingClass":"EW3","validExchanges":"CME","showPrips":true},
+      {"conid":745215462,"symbol":"ES","secType":"FOP","exchange":"CME","listingExchange":null,"right":"C","strike":7250.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"ES","desc2":"(EW3) Dec18'26 7250 Call Fut.Option(50) @CME","maturityDate":"20261218","multiplier":"50","tradingClass":"EW3","validExchanges":"CME","showPrips":true}
+    ],
+    "CL:DEC26:60": [
+      {"conid":946518891,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"C","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(WL3) Dec16'26 60 Call Fut.Option(1000) @NYMEX","maturityDate":"20261216","multiplier":"1000","tradingClass":"WL3","validExchanges":"NYMEX","showPrips":true},
+      {"conid":946519091,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"P","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(WL3) Dec16'26 60 Put Fut.Option(1000) @NYMEX","maturityDate":"20261216","multiplier":"1000","tradingClass":"WL3","validExchanges":"NYMEX","showPrips":true}
+    ],
+    "CL:JAN27:60": [
+      {"conid":637550982,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"C","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(LO) Dec16'26 60 Call Fut.Option(1000) @NYMEX","maturityDate":"20261216","multiplier":"1000","tradingClass":"LO","validExchanges":"NYMEX","showPrips":true},
+      {"conid":637550985,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"P","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(LO) Dec16'26 60 Put Fut.Option(1000) @NYMEX","maturityDate":"20261216","multiplier":"1000","tradingClass":"LO","validExchanges":"NYMEX","showPrips":true}
+    ],
+    "CL:FEB27:60": [
+      {"conid":637551000,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"P","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(LO) Jan14'27 60 Put Fut.Option(1000) @NYMEX","maturityDate":"20270114","multiplier":"1000","tradingClass":"LO","validExchanges":"NYMEX","showPrips":true},
+      {"conid":637551039,"symbol":"CL","secType":"FOP","exchange":"NYMEX","listingExchange":null,"right":"C","strike":60.0,"currency":"USD","cusip":null,"coupon":"No Coupon","desc1":"CL","desc2":"(LO) Jan14'27 60 Call Fut.Option(1000) @NYMEX","maturityDate":"20270114","multiplier":"1000","tradingClass":"LO","validExchanges":"NYMEX","showPrips":true}
+    ]
+  },
+  "contract_info": {
+    "934255697":{"con_id":934255697,"local_symbol":"EW4X6 C7250","underlying_con_id":515416632,"trading_class":"EW4","exchange":"CME"},
+    "934256025":{"con_id":934256025,"local_symbol":"EW4X6 P7250","underlying_con_id":515416632,"trading_class":"EW4","exchange":"CME"},
+    "745214374":{"con_id":745214374,"local_symbol":"ESZ6 C7250","underlying_con_id":515416632,"trading_class":"ES","exchange":"CME"},
+    "745214392":{"con_id":745214392,"local_symbol":"ESZ6 P7250","underlying_con_id":515416632,"trading_class":"ES","exchange":"CME"},
+    "745215370":{"con_id":745215370,"local_symbol":"EW3Z6 P7250","underlying_con_id":649180684,"trading_class":"EW3","exchange":"CME"},
+    "745215462":{"con_id":745215462,"local_symbol":"EW3Z6 C7250","underlying_con_id":649180684,"trading_class":"EW3","exchange":"CME"},
+    "946518891":{"con_id":946518891,"local_symbol":"WL3Z6 C6000","underlying_con_id":304037415,"trading_class":"WL3","exchange":"NYMEX"},
+    "946519091":{"con_id":946519091,"local_symbol":"WL3Z6 P6000","underlying_con_id":304037415,"trading_class":"WL3","exchange":"NYMEX"},
+    "637550982":{"con_id":637550982,"local_symbol":"LOF7 C6000","underlying_con_id":304037396,"trading_class":"LO","exchange":"NYMEX"},
+    "637550985":{"con_id":637550985,"local_symbol":"LOF7 P6000","underlying_con_id":304037396,"trading_class":"LO","exchange":"NYMEX"},
+    "637551000":{"con_id":637551000,"local_symbol":"LOG27 P6000","underlying_con_id":304037415,"trading_class":"LO","exchange":"NYMEX"},
+    "637551039":{"con_id":637551039,"local_symbol":"LOG27 C6000","underlying_con_id":304037415,"trading_class":"LO","exchange":"NYMEX"},
+    "515416632":{"symbol":"ES","local_symbol":"ESZ6","instrument_type":"FUT","exchange":"CME","contract_month":"202612"},
+    "649180684":{"symbol":"ES","local_symbol":"ESH7","instrument_type":"FUT","exchange":"CME","contract_month":"202703"},
+    "304037396":{"symbol":"CL","local_symbol":"CLF7","instrument_type":"FUT","exchange":"NYMEX","contract_month":"202701"},
+    "304037415":{"symbol":"CL","local_symbol":"CLG7","instrument_type":"FUT","exchange":"NYMEX","contract_month":"202702"}
+  }
+}

@@ -35,6 +35,7 @@ from app.utils.errors import (
 )
 
 DATA = json.loads((Path(__file__).parents[1] / "fixtures/ibkrweb/gateway_responses.json").read_text())
+FOPS = json.loads((Path(__file__).parents[1] / "fixtures/ibkrweb/futures_option_secdef.json").read_text())
 SEARCH = "iserver/secdef/search"
 SNAPSHOT = "iserver/marketdata/snapshot"
 HISTORY = "iserver/marketdata/history"
@@ -623,6 +624,145 @@ async def test_cold_chain_looks_up_strikes_concurrently(make_provider, monkeypat
     chain = await provider.get_option_chain("AAPL", expiry, Decimal(345), Decimal(350))
     assert {option.strike for option in chain.options} == {Decimal(345), Decimal("347.5"), Decimal(350)}
     assert peak == 3
+
+
+def futures_option_gateway(path, params):
+    if path == SEARCH:
+        return FOPS["search"][params["symbol"]]
+    if path == OPTION_INFO and params["sectype"] == "FOP":
+        root = {"11004968": "ES", "17340715": "CL"}[params["conid"]]
+        assert params["exchange"] == {"ES": "CME", "CL": "NYMEX"}[root]
+        assert "strike" not in params and params["right"] in {"C", "P"}
+        prefix = f"{root}:{params['month']}:"
+        return [
+            row for key, rows in FOPS["secdef_info"].items() if key.startswith(prefix)
+            for row in rows if row["right"] == params["right"]
+        ]
+    if path.startswith("iserver/contract/"):
+        return FOPS["contract_info"][path.split("/")[2]]
+    assert path == SNAPSHOT
+    return [
+        {"conid": int(value), "6509": "D", "7296": "70.50", "84": "1.5", "86": "1.6",
+         "7633": "25.7", "7308": "-0.35", "7638": "180"}
+        for value in params["conids"].split(",")
+    ]
+
+
+@pytest.mark.parametrize("root,expiry,strike,requested,selected,future,multiplier", [
+    ("ES", date(2026, 11, 27), "7250", None, "EW4", "ESZ6", 50),
+    ("ES", date(2026, 12, 18), "7250", None, "ES", "ESZ6", 50),
+    ("ES", date(2026, 12, 18), "7250", "ew3", "EW3", "ESH7", 50),
+    ("CL", date(2026, 12, 16), "60", None, "LO", "CLF7", 1000),
+    ("CL", date(2026, 12, 16), "60", "wl3", "WL3", "CLG7", 1000),
+    ("CL", date(2027, 1, 14), "60", None, "LO", "CLG7", 1000),
+])
+async def test_futures_option_chain_live_fixtures(
+    make_provider, monkeypatch, root, expiry, strike, requested, selected, future, multiplier,
+):
+    monkeypatch.setattr(ibkr_web_contracts, "_ttl", lambda _day: 3600)
+    provider, calls = make_provider(futures_option_gateway)
+    params = dict(sec_type="future", trading_class=requested)
+    first = await provider.get_option_chain(root, expiry, Decimal(strike), Decimal(strike), **params)
+    assert first.underlying_symbol == f"F:{root}"
+    assert (first.trading_class, first.underlying_contract, first.multiplier) == (selected, future, multiplier)
+    assert first.underlying_price == Decimal("70.50")
+    assert first.exchange == ("CME" if root == "ES" else "NYMEX")
+    assert [o.type for o in first.options] == ["call", "put"]
+    assert all(o.symbol.startswith(selected) and o.underlying_symbol == f"F:{root}" for o in first.options)
+    assert first.options[0].implied_volatility == .257
+    assert first.options[0].delta == -.35 and first.options[0].open_interest == 180
+    batch = [params for path, params in calls if path == SNAPSHOT]
+    assert len(batch) == 1 and len(batch[0]["conids"].split(",")) == 3
+    assert FOPS["contract_info"][batch[0]["conids"].split(",")[0]]["local_symbol"] == future
+
+    calls.clear()
+    assert await provider.get_option_chain(root, expiry, Decimal(strike), Decimal(strike), **params) == first
+    assert [path for path, _ in calls] == [SNAPSHOT]
+    calls.clear()
+    only_puts = await provider.get_option_chain(root, expiry, Decimal(strike), Decimal(strike), right="put", **params)
+    assert [option.type for option in only_puts.options] == ["put"]
+    assert len(calls) == 1 and len(calls[0][1]["conids"].split(",")) == 2
+
+
+async def test_futures_option_class_discovery_precedes_strike_filter(make_provider):
+    def handle(path, params):
+        data = futures_option_gateway(path, params)
+        if path == OPTION_INFO:
+            return [{**row, "strike": 7270.0} if row["tradingClass"] == "ES" else row for row in data]
+        return data
+
+    provider, calls = make_provider(handle)
+    empty = await provider.get_option_chain("ES", date(2026, 12, 18), Decimal(7250), Decimal(7250), sec_type="future")
+    assert empty.trading_class == "ES" and empty.options == []
+    assert not any(path == SNAPSHOT or path.startswith("iserver/contract/") for path, _ in calls)
+    for expiry, requested in ((date(2026, 12, 18), "UNKNOWN"), (date(2026, 12, 5), None)):
+        calls.clear()
+        empty = await provider.get_option_chain("ES", expiry, sec_type="future", trading_class=requested)
+        assert (empty.trading_class, empty.options, empty.provider) == (None, [], "ibkrweb")
+        assert calls == []  # Absences are represented by the cached month listing.
+
+
+async def test_ambiguous_futures_option_date_lists_classes(make_provider):
+    def handle(path, params):
+        data = futures_option_gateway(path, params)
+        if path == OPTION_INFO:
+            return [{**row, "tradingClass": "E3A"} if row["tradingClass"] == "ES" else row for row in data]
+        return data
+
+    provider, calls = make_provider(handle)
+    with pytest.raises(DataValidationError) as exc:
+        await provider.get_option_chain("ES", date(2026, 12, 18), sec_type="future")
+    assert exc.value.details["trading_classes"] == ["E3A", "EW3"]
+    assert not any(path == SNAPSHOT for path, _ in calls)
+
+
+async def test_futures_option_entitlement_contains_future_type(make_provider):
+    def handle(path, params):
+        data = futures_option_gateway(path, params)
+        return [{"conid": row["conid"], "6509": "N"} for row in data] if path == SNAPSHOT else data
+
+    provider, _ = make_provider(handle)
+    with pytest.raises(ProviderNotEntitledError) as exc:
+        await provider.get_option_chain("ES", date(2026, 11, 27), Decimal(7250), Decimal(7250), sec_type="future")
+    assert exc.value.details["sec_type"] == "future"
+    assert exc.value.details["symbol"] == "F:ES"
+
+
+async def test_stock_and_future_cl_conid_caches_do_not_collide(make_provider, monkeypatch):
+    monkeypatch.setattr(ibkr_web_contracts, "_ttl", lambda _day: 3600)
+
+    def handle(path, params):
+        if path == "iserver/secdef/strikes" or (path == OPTION_INFO and params["sectype"] == "OPT"):
+            assert params["conid"] == "5749"
+            if path.endswith("strikes"):
+                return {"call": [60], "put": [60]}
+            return [{**row, "tradingClass": "CL", "maturityDate": "20261216", "strike": 60}
+                    for row in DATA["option_info"]]
+        return futures_option_gateway(path, params)
+
+    provider, calls = make_provider(handle)
+    expiry = date(2026, 12, 16)
+    limits = ("CL", expiry, Decimal(60), Decimal(60))
+    future = await provider.get_option_chain(*limits, sec_type="future", right="call")
+    stock = await provider.get_option_chain(*limits, right="call")
+    assert [option.symbol for option in future.options] == ["LOF7 C6000"]
+    assert [option.symbol for option in stock.options] == ["CL    261216C00060000"]
+    keys = set(provider.contracts._cache._local)
+    assert "mdh:ibkrweb:fopconid:CL:LO:20261216:C:60" in keys
+    assert "mdh:ibkrweb:optconid:CL:20261216:C:60" in keys
+    calls.clear()
+    await provider.get_option_chain(*limits, sec_type="future", right="call")
+    await provider.get_option_chain(*limits, right="call")
+    assert [path for path, _ in calls] == [SNAPSHOT, SNAPSHOT]
+
+
+async def test_other_futures_option_roots_are_fenced_before_gateway(make_provider):
+    provider, calls = make_provider(futures_option_gateway)
+    with pytest.raises(CapabilityNotSupportedError) as exc:
+        await provider.get_option_chain("NQ", date(2026, 12, 18), sec_type="future")
+    assert exc.value.details["supported"] == ["CL", "ES"]
+    assert exc.value.details["root"] == "NQ"
+    assert calls == []
 
 
 async def test_ibkrweb_admin_routes_require_auth(api_registry, monkeypatch):

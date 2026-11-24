@@ -136,7 +136,7 @@ def entitlement_error(
         PROVIDER,
         symbol=canonical_symbol(root, sec_type),
         instrument=instrument,
-        details={"availability": value, "hint": hint},
+        details={"availability": value, "hint": hint, "sec_type": sec_type},
     )
 
 
@@ -165,6 +165,7 @@ class SnapshotEngine:
         complete: Callable[[_Row], bool],
         required_fraction: float = 1,
         terminal: Callable[[_Row], bool] | None = None,
+        required_conid: int | None = None,
     ) -> dict[int, _Row]:
         size = min(settings.IBKRWEB_SNAPSHOT_BATCH_SIZE, self._max_streams)
         unique = list(dict.fromkeys(conids))
@@ -176,7 +177,13 @@ class SnapshotEngine:
             try:
                 result.update(
                     await self._poll(
-                        batch, fields, timeout, complete, required_fraction, terminal
+                        batch,
+                        fields,
+                        timeout,
+                        complete,
+                        required_fraction,
+                        terminal,
+                        required_conid if required_conid in batch else None,
                     )
                 )
             finally:
@@ -222,6 +229,7 @@ class SnapshotEngine:
         complete: Callable[[_Row], bool],
         required_fraction: float,
         terminal: Callable[[_Row], bool] | None,
+        required_conid: int | None,
     ) -> dict[int, _Row]:
         params = {"conids": ",".join(map(str, batch)), "fields": fields}
         latest: dict[int, _Row] = {}
@@ -238,8 +246,23 @@ class SnapshotEngine:
                         conid = row.get("conid")
                         if type(conid) is int and conid in included:
                             latest.setdefault(conid, {}).update(row)
-                    filled = sum(complete(row) for row in latest.values())
-                    if filled >= len(batch) * required_fraction or (
+                    filled = sum(
+                        complete(row)
+                        for conid, row in latest.items()
+                        if conid != required_conid
+                    )
+                    required = (
+                        latest.get(required_conid, {})
+                        if required_conid is not None
+                        else {}
+                    )
+                    required_ready = (
+                        required_conid is None
+                        or complete(required)
+                        or (terminal is not None and terminal(required))
+                    )
+                    target = len(batch) - (required_conid is not None)
+                    if (required_ready and filled >= target * required_fraction) or (
                         terminal is not None
                         and len(latest) == len(batch)
                         and all(

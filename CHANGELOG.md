@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-24
+
+### Added
+
+- Futures option chains for ES and CL via `ibkrweb` and `ibkr`, including an optional `trading_class` selector in REST and MCP. The chain reports the actual underlying futures contract and price, multiplier, class, and listing exchange. Futures CSV repeats these fields per option. Futures option quotes remain unsupported. Verified live: `F:ES` and `F:CL` chains from `ibkr` (TWS) and `ibkrweb` match in strikes, symbols, class, multiplier, exchange and underlying contract.
+
+### Notes
+
+- The first `ibkr` futures chain request can take 10–20 s (contract details for all strikes of an expiry), which can exceed the default 10 s provider timeout; later requests take a few seconds.
+
 ## [1.8.1] - 2026-11-22
 
 ### Fixed

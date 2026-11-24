@@ -70,6 +70,7 @@ class IbkrWebProvider(
     volatility_sec_types = price_sec_types
     volatility_history_sec_types: frozenset[str] = frozenset()
     volatility_tenors = frozenset({30})
+    option_underlying_sec_types = frozenset({"stock", "etf", "future"})
 
     def __init__(self, *, session: IbkrWebSession | None = None) -> None:
         self._runtime_config: Any = None
@@ -304,24 +305,38 @@ class IbkrWebProvider(
         return price(row, ("31", "7296", "84", "86")) is not None
 
     async def _option_snapshots(
-        self, conids: list[int], *, fraction: float
+        self, conids: list[int], *, fraction: float, underlying_conid: int | None = None
     ) -> dict[int, _Payload]:
+        def complete(row: _Payload) -> bool:
+            if not availability(row.get("6509")):
+                return False
+            if underlying_conid is not None and row.get("conid") == underlying_conid:
+                return price(row, ("31", "7296")) is not None
+            return self._has_option_price(row)
+
         return await self.snapshots.get(
             conids,
             OPTION_FIELDS,
             timeout=settings.IBKRWEB_OPTION_SNAPSHOT_TIMEOUT_SECONDS,
             required_fraction=fraction,
-            complete=lambda row: (
-                bool(availability(row.get("6509"))) and self._has_option_price(row)
-            ),
+            complete=complete,
             terminal=lambda row: availability(row.get("6509")) in {"N", "O"},
+            required_conid=underlying_conid,
         )
 
     @staticmethod
     def _option_model(
-        root: str, expiry: date, strike: Decimal, right: str, row: _Payload
+        root: str,
+        expiry: date,
+        strike: Decimal,
+        right: str,
+        row: _Payload,
+        *,
+        local_symbol: str | None = None,
     ) -> OptionQuote:
-        identifier = format_occ_symbol(stock_root(root), expiry, right, strike)
+        identifier = local_symbol or format_occ_symbol(
+            stock_root(root), expiry, right, strike
+        )
         return OptionQuote(
             symbol=identifier,
             underlying_symbol=root,
@@ -349,25 +364,63 @@ class IbkrWebProvider(
         max_strike: Decimal | None = None,
         right: Literal["call", "put"] | None = None,
         market_data_type: int | None = None,
+        *,
+        sec_type: str = "stock",
+        trading_class: str | None = None,
     ) -> OptionChain:
         effective = self._market_data_type(market_data_type)
         root = symbol.upper()
         rights = ("C", "P") if right is None else ("C" if right == "call" else "P",)
-        ids = await self.contracts.option_chain(
-            root, expiry, min_strike, max_strike, rights
+        canonical = canonical_symbol(root, sec_type)
+        terms = None
+        underlying_conid = None
+        underlying_symbol = None
+        if sec_type == "future":
+            terms, contracts = await self.contracts.futures_option_chain(
+                root, expiry, min_strike, max_strike, rights, trading_class
+            )
+            rows: list[tuple[Decimal, str, int, str | None]] = [
+                (listing.strike, listing.right, identity.conid, identity.local_symbol)
+                for listing, identity in contracts
+            ]
+            underlying_ids = {
+                identity.underlying_conid
+                for _, identity in contracts
+                if identity.underlying_conid is not None
+            }
+            if len(underlying_ids) > 1:
+                raise ProviderError(
+                    "Inconsistent IBKR Web API futures option underlyings"
+                )
+            underlying_conid = next(iter(underlying_ids), None)
+            if underlying_conid is not None:
+                info = await self.contracts.info(underlying_conid)
+                underlying_symbol = info.get("local_symbol") or None
+        else:
+            ids = await self.contracts.option_chain(
+                root, expiry, min_strike, max_strike, rights
+            )
+            rows = [
+                (strike, side, conid, None) for (strike, side), conid in ids.items()
+            ]
+
+        conids = [conid for _, _, conid, _ in rows]
+        if underlying_conid is not None:
+            conids.insert(0, underlying_conid)
+        snapshots = await self._option_snapshots(
+            conids, fraction=0.5, underlying_conid=underlying_conid
         )
-        snapshots = await self._option_snapshots(list(ids.values()), fraction=0.5)
         options = []
         usable = 0
         denial = None
-        for (strike, side), conid in ids.items():
+        for strike, side, conid, local_symbol in rows:
             row = snapshots.get(conid, {})
             code = availability(row.get("6509"))
             denied = entitlement_error(
                 row.get("6509"),
                 root,
-                "stock",
-                str(conid),
+                sec_type,
+                local_symbol or str(conid),
                 market_data_type=effective
                 if code or self._has_option_price(row)
                 else None,
@@ -379,11 +432,42 @@ class IbkrWebProvider(
                 row = {}
             elif self._has_option_price(row):
                 usable += 1
-            options.append(self._option_model(root, expiry, strike, side, row))
+            options.append(
+                self._option_model(
+                    canonical, expiry, strike, side, row, local_symbol=local_symbol
+                )
+            )
         if denial is not None and not usable:
             raise denial
+        if terms is not None:
+            underlying_row = (
+                snapshots.get(underlying_conid, {})
+                if underlying_conid is not None
+                else {}
+            )
+            code = availability(underlying_row.get("6509"))
+            underlying_price = price(underlying_row, ("31", "7296"))
+            if code and entitlement_error(
+                code,
+                root,
+                sec_type,
+                underlying_symbol or root,
+                market_data_type=effective,
+            ):
+                underlying_price = None
+            return terms.chain(
+                root,
+                expiry,
+                self.name,
+                options,
+                underlying_contract=underlying_symbol,
+                underlying_price=underlying_price,
+            )
         return OptionChain(
-            underlying_symbol=root, expiry=expiry, options=options, provider=self.name
+            underlying_symbol=canonical,
+            expiry=expiry,
+            options=options,
+            provider=self.name,
         )
 
     async def get_option_quote(

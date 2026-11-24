@@ -191,6 +191,16 @@ async def test_mcp_cached_tools_hit_refresh_schema_and_keys(cache_redis, service
     assert schema["inputSchema"]["properties"]["refresh"]["type"] == "boolean"
 
 
+async def test_mcp_option_chain_trading_class_cache_partition(cache_redis, services):
+    handler = mcp.TOOL_HANDLERS["get_option_chain"]
+    args = {"symbol": "F:ES", "expiry": "2026-12-18", "provider": "test"}
+    await handler({**args, "trading_class": "ew3"})
+    await handler({**args, "trading_class": "EW3"})
+    await handler({**args, "trading_class": "ES"})
+    assert services[3].get_option_chain.await_count == 2
+    assert {key.rsplit("=", 1)[-1] for key in cache_redis.entries} == {"EW3", "ES"}
+
+
 async def test_mcp_helper_refresh_overwrites_and_isolates_http(cache_redis, client):
     loader = AsyncMock(return_value={"name": "first"})
     params = {"provider": "finnhub"}

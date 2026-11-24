@@ -45,3 +45,8 @@ class OptionChain(BaseModel):
     expiry: date
     options: list[OptionQuote]
     provider: str
+    underlying_contract: str | None = None
+    underlying_price: Decimal | None = None
+    multiplier: Decimal | None = None
+    trading_class: str | None = None
+    exchange: str | None = None

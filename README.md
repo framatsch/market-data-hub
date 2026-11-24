@@ -61,7 +61,7 @@ Every REST route, MCP tool and WebSocket subscription takes the same symbol nota
 |---|---|---|
 | `AAPL`, `SPY` | Stock or ETF (bare symbol) | `AAPL`, `SPY` |
 | `I:SPX`, `^SPX` | Index | `I:SPX` |
-| `F:ES`, `/ES` | Future (front month) | `F:ES` |
+| `F:ES`, `/ES` | Futures root | `F:ES` |
 | `O:AAPL250117C00150000` | Option contract (OCC symbol, option ids only) | – |
 
 - A bare symbol is always a stock/ETF: bare `SPX` or `NDX` is **not** an index. Use `I:SPX`, `^SPX` or `sec_type=index`.
@@ -69,9 +69,9 @@ Every REST route, MCP tool and WebSocket subscription takes the same symbol nota
 - `sec_type` (`stock|etf|index|future|option`, case-insensitive, legacy `STK`) stays valid. It must agree with a prefix (`F:ES?sec_type=stock` → 422); `ES?sec_type=future` equals `F:ES`; `sec_type=etf` only combines with bare symbols.
 - Provider-native forms (`.SPX`, `$SPX`) are rejected with 422 and a suggestion (`I:SPX`). Native identifiers stay reachable through override parameters such as `ric`.
 - Responses echo the canonical symbol (`symbol`, `underlying_symbol`). `source_instrument` on prices shows the native instrument actually queried (`ESZ6`, `ESc1`, `.SPX`, `$SPX`).
-- Futures mean the front month: last price uses the nearest contract. History uses the provider's continuous series when available (IBKR `ContFuture`, LSEG `c1`) without back-adjustment. `ibkrweb` returns bars for the current front-month contract only.
+- For prices and volatility, futures mean the front month. History uses the provider's continuous series when available (IBKR `ContFuture`, LSEG `c1`) without back-adjustment. `ibkrweb` returns bars for the current front-month contract only. For option chains, the selected option class determines the underlying contract.
 
-Supported types per endpoint: prices and volatility `stock|etf|index|future`; option chain/quote underlying `stock|etf|index`; company profile/news `stock|etf`; WebSocket `stock|etf|index|future`. Anything else → 422 before a provider is called.
+Supported types per endpoint: prices, volatility and option-chain underlyings `stock|etf|index|future`; option-quote underlyings `stock|etf|index`; company profile/news `stock|etf`; WebSocket `stock|etf|index|future`. Anything else → 422 before a provider is called.
 
 | Type | IBKR | LSEG | Schwab | Polygon | Prixe |
 |---|---|---|---|---|---|
@@ -81,6 +81,18 @@ Supported types per endpoint: prices and volatility `stock|etf|index|future`; op
 | index option underlying | – | – | `$SPX` | `I:SPX` | – |
 
 Error semantics: **501** `CAPABILITY_NOT_SUPPORTED` means the hub has no mapping for this type at that provider (decided from code, before any call). **403** `PROVIDER_NOT_ENTITLED` means the provider denied access because your subscription does not cover the instrument (decided from the provider's response at request time, never cached; `details` carry `provider`, `symbol`, `instrument`, `provider_message`). 401/credential failures stay `PROVIDER_NOT_AVAILABLE`. Admin → provider details lists the declared support sets.
+
+### Futures option chains
+
+`ibkr` (TWS/IB Gateway) and `ibkrweb` (Client Portal Gateway) support `F:ES` and `F:CL`. Use a futures **root**, not a delivery-month symbol, with the option `expiry`:
+
+```bash
+curl 'http://localhost:8000/options/F:CL/chain?provider=ibkrweb&expiry=2026-12-16&min_strike=59.5&max_strike=60.5'
+```
+
+Set `trading_class` to select a series (case-insensitive, also available in MCP). Without it, the chain chooses the standard class (`ES` or `LO`) when listed, or the sole available class. Multiple non-standard classes return 422 with `details.trading_classes`. For example, CL options expiring 2026-12-16 default to `LO` on `CLF7`; `trading_class=WL3` instead selects `CLG7`.
+
+Use the returned `underlying_contract`, `underlying_price`, and `multiplier` rather than assuming the front month or a multiplier of 100. Option identifiers are IBKR local symbols, not OCC symbols. Futures CSV repeats the chain metadata on each option row. Delayed data is available where IBKR supplies it; real-time data requires the relevant exchange entitlement. A narrower strike range reduces cold lookup and snapshot time. Other futures roots and options providers return 501; the futures option **quote** endpoint is not supported.
 
 **Breaking changes:** `symbol` in responses is canonical (`I:SPX`, `F:ES` instead of `SPX`, `ES`; stocks unchanged) · missing subscriptions answer 403 `PROVIDER_NOT_ENTITLED` instead of 503 · `.SPX`/`$SPX` input is rejected · index/future requests at providers without a mapping answer 501 instead of returning stock-like data · cache keys changed (old entries expire; optionally clear the cache).
 
